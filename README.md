@@ -95,7 +95,7 @@ MYSQL_ROOT_PASSWORD=your_root_password;MYSQL_DATABASE=readwith;MYSQL_USER=readwi
 
 ```bash
 # .env의 환경 변수를 현재 셸에 로드한 뒤 실행
-export $(grep -v '^#' .env | xargs) && SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
+set -a && source .env && set +a && SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
 
 실행 후 `application-local.yml`이 적용되어 로컬 MySQL에 접속합니다.

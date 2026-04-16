@@ -37,20 +37,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Lombok**: Available in both main and test source sets (compileOnly + annotationProcessor)
 - **Testing**: JUnit 5 via `junit-platform-launcher`; Spring test support via `spring-boot-starter-webmvc-test`
 
-## Package Structure (DDD 3-Layer)
+## Package Structure (DDD 4-Layer)
 
 ```
 com.readwith
-├── presentation
-│   └── controller
-│       └── {feature}/          # REST 컨트롤러 (기능 단위)
-├── domain
-│   └── {feature}
-│       └── service/            # 비즈니스 로직 (기능 단위)
-└── entity
-    └── {table}
-        ├── entity/             # JPA 엔티티 (테이블 단위)
-        └── repository/         # Spring Data Repository
+├── presentation/                # API 계층
+│   └── controller/{feature}/
+│       ├── {Feature}Controller.java
+│       └── dto/
+│           ├── {Action}Request.java
+│           └── {Feature}Response.java
+├── domain/                      # 비즈니스 로직
+│   └── {feature}/
+│       ├── service/
+│       │   ├── {Action}Service.java         # Command 서비스
+│       │   └── {Feature}SearchService.java  # Query 서비스
+│       ├── out/
+│       │   └── {Feature}{Action}Client.java # Port 인터페이스
+│       └── dto/
+│           ├── {Action}Command.java
+│           ├── {Action}Result.java
+│           └── {Feature}Result.java
+├── infrastructure/              # 외부 의존 구현 (Adapter)
+│   └── {feature}/{provider}/
+│       └── {Port}Impl.java
+└── model/                       # 엔티티, 리포지토리
+    └── {feature}/
+        ├── entity/
+        │   └── {Entity}.java
+        └── repository/
+            └── {Entity}Repository.java
 ```
 
 ## API Response Format
