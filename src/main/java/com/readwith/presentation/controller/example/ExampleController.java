@@ -4,10 +4,11 @@ import com.readwith.domain.example.service.ExampleCreateService;
 import com.readwith.domain.example.service.ExampleSearchService;
 import com.readwith.domain.example.dto.ExampleCreateResult;
 import com.readwith.domain.example.dto.ExampleResult;
+import com.readwith.presentation.common.ApiResponse;
 import com.readwith.presentation.controller.example.dto.ExampleCreateRequest;
+import com.readwith.presentation.controller.example.dto.ExampleListResponse;
 import com.readwith.presentation.controller.example.dto.ExampleResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,25 +28,21 @@ public class ExampleController {
     private final ExampleSearchService exampleSearchService;
 
     @PostMapping
-    public ResponseEntity<ExampleResponse> create(
+    public ResponseEntity<ApiResponse<ExampleResponse>> create(
             @RequestBody ExampleCreateRequest request) {
         ExampleCreateResult result = exampleCreateService.execute(request.toCommand());
-        return ResponseEntity
-                .status(HttpStatus.CREATED)
-                .body(ExampleResponse.from(result));
+        return ApiResponse.created(ExampleResponse.from(result));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ExampleResponse> getById(@PathVariable long id) {
+    public ResponseEntity<ApiResponse<ExampleResponse>> getById(@PathVariable long id) {
         ExampleResult result = exampleSearchService.searchById(id);
-        return ResponseEntity.ok(ExampleResponse.from(result));
+        return ApiResponse.ok(ExampleResponse.from(result));
     }
 
     @GetMapping
-    public ResponseEntity<List<ExampleResponse>> getAll() {
-        List<ExampleResponse> responses = exampleSearchService.searchAll().stream()
-                .map(ExampleResponse::from)
-                .toList();
-        return ResponseEntity.ok(responses);
+    public ResponseEntity<ApiResponse<ExampleListResponse>> getAll() {
+        List<ExampleResult> results = exampleSearchService.searchAll();
+        return ApiResponse.ok(ExampleListResponse.from(results));
     }
 }
