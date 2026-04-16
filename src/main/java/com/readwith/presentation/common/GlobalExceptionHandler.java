@@ -1,5 +1,6 @@
 package com.readwith.presentation.common;
 
+import com.readwith.domain.exception.BusinessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -7,14 +8,12 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import java.util.NoSuchElementException;
-
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(NoSuchElementException.class)
-    public ResponseEntity<ApiResponse<?>> handleNoSuchElement(NoSuchElementException ex) {
-        return ApiResponse.error(HttpStatus.NOT_FOUND, ex.getMessage());
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiResponse<?>> handleBusiness(BusinessException ex) {
+        return ApiResponse.error(ex.getErrorCode().getStatus(), ex.getErrorCode().getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
