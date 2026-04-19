@@ -5,35 +5,35 @@
 ### 개발 서버 (AWS)
 
 ```
-              Internet
-                  │
-          ┌───────▼───────┐
-          │   readum.kr   │
-          │  Let's Encrypt│
-          │    HTTPS :443 │
-          └───────┬───────┘
-                  │
-         ┌────────▼────────┐
-         │   EC2 Instance  │
-         │  t3.micro       │
-         │  Ubuntu 22.04   │
-         │  ap-northeast-2c│
-         │                 │
-         │  Nginx          │
-         │  :80 → :443     │
-         │  :443 → :8080   │
-         │                 │
-         │  Spring Boot    │
-         │  :8080          │
-         └───┬─────────┬───┘
-             │         │
-  ┌──────────▼──┐  ┌───▼──────────┐
-  │     RDS     │  │      S3      │
-  │  MySQL 8.0  │  │  readum 버킷 │
-  │  db.t3.micro│  │              │
-  │  단일 AZ    │  │              │
-  │  :3306      │  │              │
-  └─────────────┘  └──────────────┘
+                    Internet
+                        │
+          ┌─────────────┴─────────────┐
+          │                           │
+    ┌─────▼──────┐             ┌──────▼──────┐
+    │ readum.kr  │             │api.readum.kr│
+    │ 프론트엔드    │             │  백엔드 API  │
+    │ HTTPS :443 │             │  HTTPS :443 │
+    └─────┬──────┘             └──────┬──────┘
+          │                           │
+          └─────────┬─────────────────┘
+                    │
+           ┌────────▼────────┐
+           │   EC2 Instance  │
+           │  t3.micro       │
+           │  Ubuntu         │
+           │  ap-northeast-2 │
+           │                 │
+           │  Nginx          │
+           │  :80 → :443     │
+           └───┬─────────┬───┘
+               │         │
+    ┌──────────▼───┐  ┌───▼──────────────────┐
+    │     RDS      │  │          S3          │
+    │  MySQL 8.4   │  │  readum-{account-id} │
+    │  db.t4g.micro│  │  -ap-northeast-2-an  │
+    │  단일 AZ      │  │  이미지/파일 저장        │
+    │  :3306       │  │                      │
+    └──────────────┘  └──────────────────────┘
 ```
 
 ---
@@ -45,55 +45,65 @@
 | 항목 | 값 |
 |------|----|
 | 인스턴스 타입 | t3.micro |
-| OS | Ubuntu 22.04 LTS |
-| 리전 / 가용 영역 | ap-northeast-2 / ap-northeast-2c |
-| 역할 | Spring Boot 애플리케이션 실행, Nginx 리버스 프록시 |
+| OS | Ubuntu |
+| 리전 | ap-northeast-2 |
+| 역할 | Nginx 리버스 프록시 |
 
-- Docker 미사용 — Spring Boot 앱을 EC2에서 직접 실행 (프리티어 리소스 절약)
-- Nginx가 443 요청을 8080으로 프록시
 - Certbot으로 Let's Encrypt SSL 인증서 발급 및 자동 갱신
 
 ### RDS
 
 | 항목 | 값 |
 |------|----|
-| 엔진 | MySQL 8.0 |
-| 인스턴스 타입 | db.t3.micro |
-| 가용 영역 | 단일 AZ |
+| 인스턴스 ID | readum-dev |
+| 엔진 | MySQL 8.4.8 |
+| 인스턴스 타입 | db.t4g.micro |
 | 포트 | 3306 |
-| 역할 | 운영 데이터베이스 |
-
-- EC2 보안 그룹에서만 3306 인바운드 허용 (퍼블릭 접근 차단)
-- 로컬 개발 시 RDS 직접 연결 대신 docker-compose 로컬 MySQL 사용
+| DB 이름 | readum |
+| 가용 영역 | 단일 AZ |
+| 스토리지 | 20GiB (gp2, 자동 확장 최대 1000GiB) |
+| 암호화 | 활성화 |
+| SSL | 필수 |
+| 퍼블릭 액세스 | 활성화 (개발 편의용) |
 
 ### S3
 
 | 항목 | 값 |
 |------|----|
-| 버킷명 | readum |
+| 버킷명 | readum-{account-id}-ap-northeast-2-an |
 | 리전 | ap-northeast-2 |
-| 역할 | 정적 파일 및 사용자 업로드 스토리지 |
+| 역할 | 이미지 및 파일 업로드 스토리지 |
 
 ### 도메인 / HTTPS
 
 | 항목 | 값 |
 |------|----|
-| 도메인 | readum.kr |
+| DNS 관리 | 가비아 |
+| 프론트엔드 도메인 | readum.kr |
+| 백엔드 API 도메인 | api.readum.kr |
 | SSL 인증서 | Let's Encrypt (Certbot) |
-| 갱신 | Certbot 자동 갱신 (cron) |
+| 갱신 | Certbot 자동 갱신 |
 
 ---
 
-## 로컬 / 개발 서버 환경 비교
+## 보안 그룹
 
-| 항목 | 로컬 | 개발 서버 |
-|------|------|----------|
-| Spring 프로파일 | `local` | `prod` |
-| DB | Docker Compose MySQL 8.0 | RDS MySQL 8.0 |
-| DB 접속 | `localhost:${MYSQL_PORT}` | RDS 엔드포인트 |
-| HTTPS | 미적용 | readum.kr (Certbot) |
-| 앱 실행 | `./gradlew bootRun` | EC2 직접 실행 |
-| 설정 파일 | `application-local.yml` | `application-prod.yml` |
+### EC2 보안 그룹 (readwith-dev-sg)
+
+| 포트 | 프로토콜 | 소스 | 용도 |
+|------|---------|------|------|
+| 22 | TCP | 0.0.0.0/0 | SSH |
+| 80 | TCP | 0.0.0.0/0 | HTTP |
+| 443 | TCP | 0.0.0.0/0 | HTTPS |
+
+### RDS 보안 그룹 (rds-ec2-2)
+
+| 포트 | 프로토콜 | 소스 | 용도 |
+|------|---------|------|------|
+| 3306 | TCP | EC2 보안 그룹 | EC2 → RDS 연결 |
+| 3306 | TCP | 개발자 로컬 IP | 로컬 개발 접속 |
+
+> ⚠️ 로컬에서 RDS 접속 시 본인 IP를 RDS 보안 그룹 인바운드 규칙에 추가해야 합니다.
 
 ---
 
@@ -105,23 +115,39 @@
 ssh -i {키페어.pem} ubuntu@{EC2_PUBLIC_IP}
 ```
 
-### 애플리케이션 배포
+### RDS 로컬 직접 접속 (SSL)
+
+RDS CA 인증서 다운로드 (최초 1회):
 
 ```bash
-# EC2 접속 후
-git pull origin main
-./gradlew build -x test
-sudo systemctl restart readwith
+curl -o ~/global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
 ```
 
-### RDS 로컬 직접 접속 (SSH 터널링)
-
-RDS는 퍼블릭 접근이 차단되어 있어 EC2를 통한 터널링이 필요합니다.
+MySQL CLI 접속:
 
 ```bash
-# 터널 열기
-ssh -i {키페어.pem} -L 3307:{RDS_ENDPOINT}:3306 ubuntu@{EC2_PUBLIC_IP} -N
-
-# 이후 localhost:3307 로 접속
-mysql -h 127.0.0.1 -P 3307 -u {DB_USER} -p
+mysql -h {RDS_ENDPOINT} \
+      -P 3306 -u {DB_USER} -p \
+      --ssl-mode=VERIFY_IDENTITY \
+      --ssl-ca=~/global-bundle.pem
 ```
+
+### 로컬 환경 변수 설정 (IntelliJ Run Configuration)
+
+```
+SPRING_PROFILES_ACTIVE=dev
+MYSQL_HOST={RDS_ENDPOINT}
+MYSQL_PORT=3306
+MYSQL_DATABASE=readum
+MYSQL_USER={DB_USER}
+MYSQL_PASSWORD={비밀번호}
+```
+
+---
+
+## 비용 최적화
+
+- 모든 리소스 최소 스펙으로 구성 (디프만 기간 한정)
+- 운영 서버는 런칭 직전 별도 프로비저닝 예정
+- RDS 다중 AZ 미사용
+- RDS 성능 개선 도우미 비활성화
