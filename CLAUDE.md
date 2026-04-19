@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ Instructions for Claude Code
+
+- **이 파일(CLAUDE.md)을 임의로 수정하거나 내용을 삭제하지 말 것.**
+- 작업 지시에 명시된 파일만 생성/수정할 것. 범위 외 파일은 건드리지 말 것.
+- 기존 소스 파일을 "불필요하다"고 판단해 삭제하지 말 것. 삭제는 명시적으로 요청받은 경우에만 수행할 것.
+
 ## Project Overview
 
 **readwith** — a Spring Boot 4.0.5 web application using Java 25, Gradle 9.4.1, and Lombok.
@@ -126,22 +132,6 @@ graph TD
 - 경로 패턴: `/api/v1/{resource}`
 - `ResponseEntity`로 HTTP 상태 코드 명시
 
-## Naming Conventions
-
-| Category | Convention | Example |
-|----------|-----------|---------|
-| Command 서비스 | `{Action}Service` | `SignUpService` |
-| Query 서비스 | `{Domain}SearchService` | `UserSearchService` |
-| Command DTO | `{Action}Command` | `SignUpCommand` |
-| Result DTO | `{Action}Result` / `{Domain}Result` | `SignUpResult`, `ExampleResult` |
-| Request DTO | `{Action}Request` | `ExampleCreateRequest` |
-| Response DTO | `{Domain}Response` | `ExampleResponse` |
-| Port (out) | `{Domain}{Action}Client` | `ExampleSearchClient` |
-| Adapter (infra) | `{Port}Impl` | `ExampleSearchClientImpl` |
-| Controller | `{Domain}Controller` | `ExampleController` |
-| Entity | 도메인명 그대로 | `User`, `ExampleEntity` |
-| Repository | `{Entity}Repository` | `UserRepository` |
-
 ## API Response Format
 
 - 성공 응답: `status 2XX`
@@ -162,6 +152,22 @@ graph TD
     }
   }
   ```
+
+## Naming Conventions
+
+| Category | Convention | Example |
+|----------|-----------|---------|
+| Command 서비스 | `{Action}Service` | `SignUpService` |
+| Query 서비스 | `{Domain}SearchService` | `UserSearchService` |
+| Command DTO | `{Action}Command` | `SignUpCommand` |
+| Result DTO | `{Action}Result` / `{Domain}Result` | `SignUpResult`, `ExampleResult` |
+| Request DTO | `{Action}Request` | `ExampleCreateRequest` |
+| Response DTO | `{Domain}Response` | `ExampleResponse` |
+| Port (out) | `{Domain}{Action}Client` | `ExampleSearchClient` |
+| Adapter (infra) | `{Port}Impl` | `ExampleSearchClientImpl` |
+| Controller | `{Domain}Controller` | `ExampleController` |
+| Entity | 도메인명 그대로 | `User`, `ExampleEntity` |
+| Repository | `{Entity}Repository` | `UserRepository` |
 
 ## Testing Conventions
 
