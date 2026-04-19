@@ -1,0 +1,79 @@
+package com.readum.domain.auth.service;
+
+import com.readum.domain.auth.dto.LogoutCommand;
+import com.readum.domain.auth.dto.ParsedToken;
+import com.readum.domain.auth.dto.ParsedToken.TokenType;
+import com.readum.domain.auth.out.JwtTokenClient;
+import com.readum.domain.auth.out.RefreshTokenStore;
+import com.readum.domain.auth.out.TokenBlacklistStore;
+import com.readum.domain.exception.ErrorCode;
+import com.readum.domain.exception.UnauthorizedException;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.Duration;
+import java.time.Instant;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
+@ExtendWith(MockitoExtension.class)
+class LogoutServiceTest {
+
+    @Mock
+    private JwtTokenClient jwtTokenClient;
+
+    @Mock
+    private TokenBlacklistStore tokenBlacklistStore;
+
+    @Mock
+    private RefreshTokenStore refreshTokenStore;
+
+    @InjectMocks
+    private LogoutService logoutService;
+
+    @Test
+    void Access_Token을_블랙리스트에_등록하고_Refresh_Token을_전부_삭제한다() {
+        String accessToken = "access-token";
+        Long userId = 5L;
+        String jwtId = "jwt-id";
+        Instant expiresAt = Instant.now().plus(Duration.ofMinutes(15));
+
+        given(jwtTokenClient.parse(accessToken)).willReturn(
+                new ParsedToken(userId, "USER", jwtId, expiresAt, TokenType.ACCESS)
+        );
+
+        logoutService.execute(new LogoutCommand(accessToken));
+
+        ArgumentCaptor<Duration> ttlCaptor = ArgumentCaptor.forClass(Duration.class);
+        verify(tokenBlacklistStore).add(eq(jwtId), ttlCaptor.capture());
+        assertThat(ttlCaptor.getValue()).isBetween(Duration.ofMinutes(14), Duration.ofMinutes(15));
+        verify(refreshTokenStore).deleteAll(userId);
+    }
+
+    @Test
+    void Access_Token이_아니면_INVALID_TOKEN_예외가_발생하고_아무것도_삭제되지_않는다() {
+        String refreshToken = "refresh-token";
+        given(jwtTokenClient.parse(refreshToken)).willReturn(
+                new ParsedToken(1L, null, "jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
+        );
+
+        assertThatThrownBy(() -> logoutService.execute(new LogoutCommand(refreshToken)))
+                .isInstanceOf(UnauthorizedException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.INVALID_TOKEN);
+        verify(tokenBlacklistStore, never()).add(anyString(), any());
+        verify(refreshTokenStore, never()).deleteAll(anyLong());
+    }
+}
