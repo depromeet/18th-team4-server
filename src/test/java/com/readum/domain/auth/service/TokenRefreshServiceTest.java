@@ -49,16 +49,18 @@ class TokenRefreshServiceTest {
     private static final Duration AT_TTL = Duration.ofMinutes(30);
     private static final Duration GRACE_TTL = Duration.ofSeconds(3);
 
+    private static final String ROLE = "USER";
+
     private ParsedToken refreshTokenClaims() {
-        return new ParsedToken(USER_ID, null, OLD_JWT_ID, Instant.now().plus(RT_TTL), TokenType.REFRESH);
+        return new ParsedToken(USER_ID, ROLE, OLD_JWT_ID, Instant.now().plus(RT_TTL), TokenType.REFRESH);
     }
 
     @Test
     void 저장된_Refresh_Token과_일치하면_새로운_Token_Pair를_발급한다() {
         given(jwtTokenClient.parse(OLD_RT)).willReturn(refreshTokenClaims());
         given(refreshTokenStore.findCurrent(USER_ID)).willReturn(Optional.of(OLD_RT));
-        given(jwtTokenClient.generateAccessToken(eq(USER_ID), any(), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenClient.generateRefreshToken(eq(USER_ID), anyString())).willReturn(NEW_REFRESH_TOKEN);
+        given(jwtTokenClient.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
+        given(jwtTokenClient.generateRefreshToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_REFRESH_TOKEN);
         given(jwtTokenClient.accessTokenTtl()).willReturn(AT_TTL);
         given(jwtTokenClient.refreshTokenTtl()).willReturn(RT_TTL);
         given(jwtTokenClient.refreshGracePeriod()).willReturn(GRACE_TTL);
@@ -67,6 +69,8 @@ class TokenRefreshServiceTest {
 
         assertThat(pair.accessToken()).isEqualTo(NEW_ACCESS_TOKEN);
         assertThat(pair.refreshToken()).isEqualTo(NEW_REFRESH_TOKEN);
+        verify(jwtTokenClient).generateAccessToken(eq(USER_ID), eq(ROLE), anyString());
+        verify(jwtTokenClient).generateRefreshToken(eq(USER_ID), eq(ROLE), anyString());
         verify(refreshTokenStore).rotate(USER_ID, OLD_JWT_ID, NEW_REFRESH_TOKEN, RT_TTL, GRACE_TTL);
     }
 
@@ -88,7 +92,7 @@ class TokenRefreshServiceTest {
         given(refreshTokenStore.findCurrent(USER_ID)).willReturn(Optional.of("different-rt"));
         given(refreshTokenStore.existsInGrace(USER_ID, OLD_JWT_ID)).willReturn(true);
         given(jwtTokenClient.generateAccessToken(eq(USER_ID), any(), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenClient.generateRefreshToken(eq(USER_ID), anyString())).willReturn(NEW_REFRESH_TOKEN);
+        given(jwtTokenClient.generateRefreshToken(eq(USER_ID), any(), anyString())).willReturn(NEW_REFRESH_TOKEN);
         given(jwtTokenClient.accessTokenTtl()).willReturn(AT_TTL);
         given(jwtTokenClient.refreshTokenTtl()).willReturn(RT_TTL);
         given(jwtTokenClient.refreshGracePeriod()).willReturn(GRACE_TTL);

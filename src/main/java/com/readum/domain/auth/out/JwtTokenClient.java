@@ -8,7 +8,7 @@ public interface JwtTokenClient {
 
     String generateAccessToken(Long userId, String role, String jwtId);
 
-    String generateRefreshToken(Long userId, String jwtId);
+    String generateRefreshToken(Long userId, String role, String jwtId);
 
     ParsedToken parse(String token);
 

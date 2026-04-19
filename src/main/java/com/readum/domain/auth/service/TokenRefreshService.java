@@ -49,7 +49,7 @@ public class TokenRefreshService {
         String newAccessJwtId = UUID.randomUUID().toString();
         String newRefreshJwtId = UUID.randomUUID().toString();
         String newAccessToken = jwtTokenClient.generateAccessToken(userId, parsed.role(), newAccessJwtId);
-        String newRefreshToken = jwtTokenClient.generateRefreshToken(userId, newRefreshJwtId);
+        String newRefreshToken = jwtTokenClient.generateRefreshToken(userId, parsed.role(), newRefreshJwtId);
 
         refreshTokenStore.rotate(
                 userId,

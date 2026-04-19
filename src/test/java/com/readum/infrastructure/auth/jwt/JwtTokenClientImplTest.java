@@ -53,13 +53,13 @@ class JwtTokenClientImplTest {
     }
 
     @Test
-    void Refresh_Token은_role_claim_없이_REFRESH_타입으로_파싱된다() {
-        String token = client.generateRefreshToken(2L, "jwt-id-2");
+    void Refresh_Token도_role_claim을_포함하여_REFRESH_타입으로_파싱된다() {
+        String token = client.generateRefreshToken(2L, "ADMIN", "jwt-id-2");
 
         ParsedToken parsed = client.parse(token);
 
         assertThat(parsed.userId()).isEqualTo(2L);
-        assertThat(parsed.role()).isNull();
+        assertThat(parsed.role()).isEqualTo("ADMIN");
         assertThat(parsed.jwtId()).isEqualTo("jwt-id-2");
         assertThat(parsed.type()).isEqualTo(TokenType.REFRESH);
     }

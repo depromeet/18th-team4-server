@@ -23,7 +23,7 @@ public class TokenIssueService {
         String refreshJwtId = UUID.randomUUID().toString();
 
         String accessToken = jwtTokenClient.generateAccessToken(command.userId(), command.role(), accessJwtId);
-        String refreshToken = jwtTokenClient.generateRefreshToken(command.userId(), refreshJwtId);
+        String refreshToken = jwtTokenClient.generateRefreshToken(command.userId(), command.role(), refreshJwtId);
 
         refreshTokenStore.save(command.userId(), refreshToken, jwtTokenClient.refreshTokenTtl());
 

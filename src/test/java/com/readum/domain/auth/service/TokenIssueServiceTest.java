@@ -41,7 +41,7 @@ class TokenIssueServiceTest {
         Duration refreshTtl = Duration.ofDays(14);
 
         given(jwtTokenClient.generateAccessToken(eq(userId), eq(role), anyString())).willReturn("access-token");
-        given(jwtTokenClient.generateRefreshToken(eq(userId), anyString())).willReturn("refresh-token");
+        given(jwtTokenClient.generateRefreshToken(eq(userId), eq(role), anyString())).willReturn("refresh-token");
         given(jwtTokenClient.accessTokenTtl()).willReturn(accessTtl);
         given(jwtTokenClient.refreshTokenTtl()).willReturn(refreshTtl);
 
