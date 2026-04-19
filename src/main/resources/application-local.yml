@@ -17,11 +17,6 @@ spring:
       port: ${REDIS_PORT:6379}
 
 jwt:
-  secret: ${JWT_SECRET}
-  issuer: readum
-  access-token-ttl: PT30M
-  refresh-token-ttl: P14D
-  refresh-grace-period: PT3S
   refresh-cookie-secure: false
 
 logging:
