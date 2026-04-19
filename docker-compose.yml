@@ -1,7 +1,7 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: readwith-mysql
+    container_name: readum-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}

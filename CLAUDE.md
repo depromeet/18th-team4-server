@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**readwith** — a Spring Boot 4.0.5 web application using Java 25, Gradle 9.4.1, and Lombok.
+**readum** — a Spring Boot 4.0.5 web application using Java 25, Gradle 9.4.1, and Lombok.
 
 ## Build & Run Commands
 
@@ -25,10 +25,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew test
 
 # Run a single test class
-./gradlew test --tests "com.readwith.SomeTest"
+./gradlew test --tests "com.readum.SomeTest"
 
 # Run a single test method
-./gradlew test --tests "com.readwith.SomeTest.methodName"
+./gradlew test --tests "com.readum.SomeTest.methodName"
 
 # Clean build
 ./gradlew clean build
@@ -36,7 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-- **Base package**: `com.readwith` — Spring Boot auto-scans from here
+- **Base package**: `com.readum` — Spring Boot auto-scans from here
 - **Framework**: Spring Boot 4.0.5 with `spring-boot-starter-webmvc` (servlet-based web)
 - **Build**: Gradle with `io.spring.dependency-management` plugin for BOM-managed dependencies
 - **Java version**: 25
@@ -46,7 +46,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Package Structure (4-Layer)
 
 ```
-com.readwith
+com.readum
 ├── presentation/                # API 계층
 │   └── controller/{feature}/
 │       ├── {Feature}Controller.java
