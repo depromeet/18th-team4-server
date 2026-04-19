@@ -10,6 +10,7 @@ import com.readum.presentation.controller.auth.dto.TokenRefreshRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +28,9 @@ public class AuthController {
 
     private final TokenRefreshService tokenRefreshService;
     private final LogoutService logoutService;
+
+    @Value("${jwt.refresh-cookie-secure:true}")
+    private boolean refreshCookieSecure;
 
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<TokenRefreshResponse>> refresh(
@@ -55,7 +59,7 @@ public class AuthController {
     private ResponseCookie buildRefreshTokenCookie(String value, long maxAgeSeconds) {
         return ResponseCookie.from(REFRESH_TOKEN_COOKIE, value)
                 .httpOnly(true)
-                .secure(true)
+                .secure(refreshCookieSecure)
                 .sameSite("Strict")
                 .path("/")
                 .maxAge(maxAgeSeconds)

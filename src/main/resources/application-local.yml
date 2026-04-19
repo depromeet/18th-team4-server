@@ -22,6 +22,7 @@ jwt:
   access-token-ttl: PT30M
   refresh-token-ttl: P14D
   refresh-grace-period: PT3S
+  refresh-cookie-secure: false
 
 logging:
   level:
