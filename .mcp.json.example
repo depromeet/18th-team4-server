@@ -2,7 +2,7 @@
   "mcpServers": {
     "readwith-db": {
       "command": "npx",
-      "args": ["-y", "@benborla29/mcp-server-mysql"],
+      "args": ["-y", "@benborla29/mcp-server-mysql@2.0.8"],
       "env": {
         "MYSQL_HOST": "{RDS_ENDPOINT}",
         "MYSQL_PORT": "3306",
