@@ -1,0 +1,7 @@
+jwt:
+  secret: dGVzdHNlY3JldHRlc3RzZWNyZXR0ZXN0c2VjcmV0dGVzdA==
+  issuer: readum-test
+  access-token-ttl: PT30M
+  refresh-token-ttl: P14D
+  refresh-grace-period: PT3S
+  refresh-cookie-secure: false

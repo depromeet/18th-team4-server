@@ -37,7 +37,13 @@ public class JwtTokenClientImpl implements JwtTokenClient {
 
     @PostConstruct
     void init() {
-        byte[] decoded = Base64.getDecoder().decode(properties.secret());
+        String secret = properties.secret();
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "jwt.secret 이 비어있습니다. 환경변수 JWT_SECRET 또는 application-{profile}.yml 의 jwt.secret 을 설정하세요."
+            );
+        }
+        byte[] decoded = Base64.getDecoder().decode(secret);
         this.signingKey = new SecretKeySpec(decoded, "HmacSHA256");
     }
 
