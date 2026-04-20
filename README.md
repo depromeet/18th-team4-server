@@ -23,6 +23,7 @@ cp .env.example .env
 `.env` 파일을 열어 각 값을 로컬 환경에 맞게 수정합니다.
 
 ```dotenv
+MYSQL_HOST=your-dev-rds-endpoint.region.rds.amazonaws.com  # DB 호스트 (미설정 시 localhost)
 MYSQL_DATABASE=readum                  # 사용할 DB 이름
 MYSQL_USER=readum                      # 애플리케이션 DB 유저
 MYSQL_PASSWORD=your_password             # 애플리케이션 DB 비밀번호
@@ -53,7 +54,7 @@ local
 **Environment variables** — `.env`의 값을 그대로 입력합니다.
 
 ```
-MYSQL_DATABASE=readum;MYSQL_USER=readum;MYSQL_PASSWORD=your_password;MYSQL_PORT=3306;JWT_SECRET=your_base64_jwt_secret
+MYSQL_HOST=your-dev-rds-endpoint.region.rds.amazonaws.com;MYSQL_DATABASE=readum;MYSQL_USER=readum;MYSQL_PASSWORD=your_password;MYSQL_PORT=3306;JWT_SECRET=your_base64_jwt_secret
 ```
 
 > 세미콜론(`;`)으로 구분해 한 줄에 입력합니다.  
@@ -82,6 +83,7 @@ set -a && source .env && set +a && SPRING_PROFILES_ACTIVE=local ./gradlew bootRu
 
 | 변수명 | 설명 | 기본값 예시 |
 |--------|------|------------|
+| `MYSQL_HOST` | DB 호스트 (RDS 엔드포인트, 미설정 시 `localhost`) | `your-dev-rds-endpoint.region.rds.amazonaws.com` |
 | `MYSQL_DATABASE` | 사용할 데이터베이스 이름 | `readum` |
 | `MYSQL_USER` | 애플리케이션 DB 유저 | `readum` |
 | `MYSQL_PASSWORD` | 애플리케이션 DB 비밀번호 | `readum1234` |
