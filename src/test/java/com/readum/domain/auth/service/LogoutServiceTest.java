@@ -8,10 +8,12 @@ import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.auth.out.RefreshTokenStore;
 import com.readum.domain.auth.out.TokenBlacklistStore;
 import com.readum.domain.exception.ErrorCode;
+import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.UnauthorizedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -26,6 +28,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -45,7 +49,7 @@ class LogoutServiceTest {
     private LogoutService logoutService;
 
     @Test
-    void Access_Token을_블랙리스트에_등록하고_Refresh_Token을_전부_삭제한다() {
+    void Refresh_Token을_먼저_폐기한_뒤_Access_Token을_블랙리스트에_등록한다() {
         String accessToken = "access-token";
         Long userId = 5L;
         String jwtId = "jwt-id";
@@ -57,15 +61,35 @@ class LogoutServiceTest {
 
         LogoutResult result = logoutService.execute(new LogoutCommand(accessToken));
 
+        InOrder order = inOrder(refreshTokenStore, tokenBlacklistStore);
+        order.verify(refreshTokenStore).revokeAll(userId);
         ArgumentCaptor<Duration> ttlCaptor = ArgumentCaptor.forClass(Duration.class);
-        verify(tokenBlacklistStore).add(eq(jwtId), ttlCaptor.capture());
+        order.verify(tokenBlacklistStore).add(eq(jwtId), ttlCaptor.capture());
         assertThat(ttlCaptor.getValue()).isBetween(Duration.ofMinutes(14), Duration.ofMinutes(15));
-        verify(refreshTokenStore).deleteAll(userId);
         assertThat(result.userId()).isEqualTo(userId);
     }
 
     @Test
-    void Access_Token이_아니면_INVALID_TOKEN_예외가_발생하고_아무것도_삭제되지_않는다() {
+    void Refresh_Token_폐기가_실패하면_예외가_전파되고_블랙리스트는_호출되지_않는다() {
+        String accessToken = "access-token";
+        Long userId = 5L;
+        String jwtId = "jwt-id";
+        Instant expiresAt = Instant.now().plus(Duration.ofMinutes(15));
+
+        given(jwtTokenClient.parse(accessToken)).willReturn(
+                new ParsedToken(userId, "USER", jwtId, expiresAt, TokenType.ACCESS)
+        );
+        doThrow(new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE))
+                .when(refreshTokenStore).revokeAll(userId);
+
+        assertThatThrownBy(() -> logoutService.execute(new LogoutCommand(accessToken)))
+                .isInstanceOf(ServiceUnavailableException.class);
+
+        verify(tokenBlacklistStore, never()).add(anyString(), any());
+    }
+
+    @Test
+    void Access_Token이_아니면_INVALID_TOKEN_예외가_발생하고_아무것도_수행되지_않는다() {
         String refreshToken = "refresh-token";
         given(jwtTokenClient.parse(refreshToken)).willReturn(
                 new ParsedToken(1L, null, "jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
@@ -76,6 +100,6 @@ class LogoutServiceTest {
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INVALID_TOKEN);
         verify(tokenBlacklistStore, never()).add(anyString(), any());
-        verify(refreshTokenStore, never()).deleteAll(anyLong());
+        verify(refreshTokenStore, never()).revokeAll(anyLong());
     }
 }

@@ -12,6 +12,7 @@ public enum ErrorCode {
     TOKEN_REVOKED("로그아웃된 토큰입니다."),
     REFRESH_TOKEN_NOT_FOUND("리프레시 토큰이 존재하지 않습니다."),
     REFRESH_TOKEN_MISMATCH("리프레시 토큰이 일치하지 않습니다."),
+    REFRESH_TOKEN_EXPIRED("리프레시 토큰이 만료되었습니다."),
     REFRESH_TOKEN_REUSE_DETECTED("리프레시 토큰 재사용이 감지되었습니다."),
 
     // Common

@@ -31,9 +31,10 @@ public class LogoutService {
             throw new UnauthorizedException(ErrorCode.INVALID_TOKEN);
         }
 
+        refreshTokenStore.revokeAll(parsed.userId());
+
         Duration remaining = Duration.between(Instant.now(), parsed.expiresAt());
         tokenBlacklistStore.add(parsed.jwtId(), remaining);
-        refreshTokenStore.deleteAll(parsed.userId());
 
         log.info("Logout 완료 userId={} jwtId={}", parsed.userId(), parsed.jwtId());
         return new LogoutResult(parsed.userId());

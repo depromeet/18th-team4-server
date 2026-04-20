@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Slf4j
@@ -22,10 +23,15 @@ public class TokenIssueService {
         String accessJwtId = UUID.randomUUID().toString();
         String refreshJwtId = UUID.randomUUID().toString();
 
-        String accessToken = jwtTokenClient.generateAccessToken(command.userId(), command.role(), accessJwtId);
-        String refreshToken = jwtTokenClient.generateRefreshToken(command.userId(), command.role(), refreshJwtId);
+        Instant now = Instant.now();
+        Instant refreshExpiresAt = now.plus(jwtTokenClient.refreshTokenTtl());
 
-        refreshTokenStore.save(command.userId(), refreshToken, jwtTokenClient.refreshTokenTtl());
+        String accessToken = jwtTokenClient.generateAccessToken(command.userId(), command.role(), accessJwtId);
+        String refreshToken = jwtTokenClient.generateRefreshToken(
+                command.userId(), command.role(), refreshJwtId, now, refreshExpiresAt
+        );
+
+        refreshTokenStore.save(command.userId(), refreshJwtId, now, refreshExpiresAt);
 
         log.info("Token Pair 발급 완료 userId={}", command.userId());
         return new TokenPair(

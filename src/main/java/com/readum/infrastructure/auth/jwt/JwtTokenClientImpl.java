@@ -80,14 +80,19 @@ public class JwtTokenClientImpl implements JwtTokenClient {
     @Override
     public String generateRefreshToken(Long userId, String role, String jwtId) {
         Instant now = Instant.now();
+        return generateRefreshToken(userId, role, jwtId, now, now.plus(properties.refreshTokenTtl()));
+    }
+
+    @Override
+    public String generateRefreshToken(Long userId, String role, String jwtId, Instant issuedAt, Instant expiresAt) {
         return Jwts.builder()
                 .issuer(properties.issuer())
                 .subject(String.valueOf(userId))
                 .id(jwtId)
                 .claim(CLAIM_TYP, TYP_REFRESH)
                 .claim(CLAIM_ROLE, role)
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(properties.refreshTokenTtl())))
+                .issuedAt(Date.from(issuedAt))
+                .expiration(Date.from(expiresAt))
                 .signWith(signingKey, Jwts.SIG.HS256)
                 .compact();
     }

@@ -12,10 +12,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -34,14 +34,15 @@ class TokenIssueServiceTest {
     private TokenIssueService tokenIssueService;
 
     @Test
-    void 새로운_Token_Pair를_발급하고_Refresh_Token을_저장한다() {
+    void 새로운_Token_Pair를_발급하고_Refresh_Token_메타데이터를_저장한다() {
         Long userId = 10L;
         String role = "USER";
         Duration accessTtl = Duration.ofMinutes(30);
         Duration refreshTtl = Duration.ofDays(14);
 
         given(jwtTokenClient.generateAccessToken(eq(userId), eq(role), anyString())).willReturn("access-token");
-        given(jwtTokenClient.generateRefreshToken(eq(userId), eq(role), anyString())).willReturn("refresh-token");
+        given(jwtTokenClient.generateRefreshToken(eq(userId), eq(role), anyString(), any(Instant.class), any(Instant.class)))
+                .willReturn("refresh-token");
         given(jwtTokenClient.accessTokenTtl()).willReturn(accessTtl);
         given(jwtTokenClient.refreshTokenTtl()).willReturn(refreshTtl);
 
@@ -52,8 +53,13 @@ class TokenIssueServiceTest {
         assertThat(pair.accessTokenTtl()).isEqualTo(accessTtl);
         assertThat(pair.refreshTokenTtl()).isEqualTo(refreshTtl);
 
-        ArgumentCaptor<String> rtCaptor = ArgumentCaptor.forClass(String.class);
-        verify(refreshTokenStore).save(eq(userId), rtCaptor.capture(), eq(refreshTtl));
-        assertThat(rtCaptor.getValue()).isEqualTo("refresh-token");
+        ArgumentCaptor<String> jwtIdCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Instant> issuedAtCaptor = ArgumentCaptor.forClass(Instant.class);
+        ArgumentCaptor<Instant> expiresAtCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(refreshTokenStore).save(eq(userId), jwtIdCaptor.capture(), issuedAtCaptor.capture(), expiresAtCaptor.capture());
+
+        assertThat(jwtIdCaptor.getValue()).isNotBlank();
+        Duration savedTtl = Duration.between(issuedAtCaptor.getValue(), expiresAtCaptor.getValue());
+        assertThat(savedTtl).isEqualTo(refreshTtl);
     }
 }

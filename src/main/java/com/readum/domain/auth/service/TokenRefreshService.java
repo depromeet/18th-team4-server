@@ -2,6 +2,8 @@ package com.readum.domain.auth.service;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
+import com.readum.domain.auth.dto.RefreshTokenRotation;
+import com.readum.domain.auth.dto.RotateResult;
 import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.dto.TokenRefreshCommand;
 import com.readum.domain.auth.out.JwtTokenClient;
@@ -12,7 +14,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.Optional;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 
 @Slf4j
@@ -30,41 +33,77 @@ public class TokenRefreshService {
         }
 
         Long userId = parsed.userId();
-        Optional<String> stored = refreshTokenStore.findCurrent(userId);
-        if (stored.isEmpty()) {
-            log.warn("Refresh Token 저장소에 값이 없음 userId={}", userId);
-            throw new UnauthorizedException(ErrorCode.REFRESH_TOKEN_NOT_FOUND);
-        }
+        String role = parsed.role();
+        String oldJwtId = parsed.jwtId();
 
-        if (!stored.get().equals(command.refreshToken())) {
-            if (refreshTokenStore.existsInGrace(userId, parsed.jwtId())) {
-                log.info("유예 기간 내 구형 Refresh Token 수락 userId={} jwtId={}", userId, parsed.jwtId());
-            } else {
-                log.error("Refresh Token 재사용 감지 - 해당 userId 전체 토큰 폐기 userId={} jwtId={}", userId, parsed.jwtId());
-                refreshTokenStore.deleteAll(userId);
+        Instant now = Instant.now();
+        String newRefreshJwtId = UUID.randomUUID().toString();
+        Instant newRefreshExpiresAt = now.plus(jwtTokenClient.refreshTokenTtl());
+
+        RotateResult result = refreshTokenStore.rotate(new RefreshTokenRotation(
+                userId,
+                oldJwtId,
+                newRefreshJwtId,
+                now,
+                newRefreshExpiresAt,
+                jwtTokenClient.refreshGracePeriod()
+        ));
+
+        return switch (result.outcome()) {
+            case ROTATED -> buildRotatedPair(userId, role, newRefreshJwtId, now, newRefreshExpiresAt, oldJwtId);
+            case GRACE_HIT -> buildGraceHitPair(userId, role, result, oldJwtId);
+            case NOT_FOUND -> {
+                log.warn("Refresh Token 저장소에 값이 없음 userId={} jwtId={}", userId, oldJwtId);
+                throw new UnauthorizedException(ErrorCode.REFRESH_TOKEN_NOT_FOUND);
+            }
+            case EXPIRED -> {
+                log.warn("만료된 Refresh Token 사용 userId={} jwtId={}", userId, oldJwtId);
+                throw new UnauthorizedException(ErrorCode.REFRESH_TOKEN_EXPIRED);
+            }
+            case REUSE_DETECTED -> {
+                log.error("Refresh Token 재사용 감지 - 해당 userId 전체 토큰 폐기 userId={} jwtId={}", userId, oldJwtId);
                 throw new UnauthorizedException(ErrorCode.REFRESH_TOKEN_REUSE_DETECTED);
             }
-        }
+        };
+    }
 
+    private TokenPair buildRotatedPair(
+            Long userId, String role, String newRefreshJwtId,
+            Instant newIssuedAt, Instant newExpiresAt, String oldJwtId
+    ) {
         String newAccessJwtId = UUID.randomUUID().toString();
-        String newRefreshJwtId = UUID.randomUUID().toString();
-        String newAccessToken = jwtTokenClient.generateAccessToken(userId, parsed.role(), newAccessJwtId);
-        String newRefreshToken = jwtTokenClient.generateRefreshToken(userId, parsed.role(), newRefreshJwtId);
-
-        refreshTokenStore.rotate(
-                userId,
-                parsed.jwtId(),
-                newRefreshToken,
-                jwtTokenClient.refreshTokenTtl(),
-                jwtTokenClient.refreshGracePeriod()
+        String newAccessToken = jwtTokenClient.generateAccessToken(userId, role, newAccessJwtId);
+        String newRefreshToken = jwtTokenClient.generateRefreshToken(
+                userId, role, newRefreshJwtId, newIssuedAt, newExpiresAt
         );
 
-        log.info("Refresh Token 갱신 완료 userId={} oldJwtId={} newJwtId={}", userId, parsed.jwtId(), newRefreshJwtId);
+        log.info("Refresh Token 갱신 완료 userId={} oldJwtId={} newJwtId={}", userId, oldJwtId, newRefreshJwtId);
         return new TokenPair(
                 newAccessToken,
                 newRefreshToken,
                 jwtTokenClient.accessTokenTtl(),
-                jwtTokenClient.refreshTokenTtl()
+                Duration.between(Instant.now(), newExpiresAt)
+        );
+    }
+
+    private TokenPair buildGraceHitPair(Long userId, String role, RotateResult result, String oldJwtId) {
+        String successorJwtId = result.graceSuccessorJwtId();
+        Instant successorIssuedAt = result.graceSuccessorIssuedAt();
+        Instant successorExpiresAt = result.graceSuccessorExpiresAt();
+
+        String newAccessJwtId = UUID.randomUUID().toString();
+        String newAccessToken = jwtTokenClient.generateAccessToken(userId, role, newAccessJwtId);
+        String refreshToken = jwtTokenClient.generateRefreshToken(
+                userId, role, successorJwtId, successorIssuedAt, successorExpiresAt
+        );
+
+        log.info("유예 기간 내 구형 Refresh Token 수락 userId={} oldJwtId={} successorJwtId={}",
+                userId, oldJwtId, successorJwtId);
+        return new TokenPair(
+                newAccessToken,
+                refreshToken,
+                jwtTokenClient.accessTokenTtl(),
+                Duration.between(Instant.now(), successorExpiresAt)
         );
     }
 }
