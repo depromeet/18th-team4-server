@@ -6,7 +6,6 @@
 
 | 도구 | 버전 | 설치 링크 |
 |------|------|----------|
-| Docker Desktop | 최신 버전 | [다운로드](https://www.docker.com/products/docker-desktop/) |
 | Java | 25 | [다운로드](https://jdk.java.net/25/) |
 
 > Gradle Toolchain이 설정되어 있어, 프로젝트 빌드 시 Java 25가 없으면 자동으로 다운로드를 시도합니다.
@@ -24,11 +23,10 @@ cp .env.example .env
 `.env` 파일을 열어 각 값을 로컬 환경에 맞게 수정합니다.
 
 ```dotenv
-MYSQL_ROOT_PASSWORD=your_root_password   # MySQL root 계정 비밀번호
 MYSQL_DATABASE=readum                  # 사용할 DB 이름
 MYSQL_USER=readum                      # 애플리케이션 DB 유저
 MYSQL_PASSWORD=your_password             # 애플리케이션 DB 비밀번호
-MYSQL_PORT=3306                          # 호스트에 노출할 포트 (기본 3306, 충돌 시 변경)
+MYSQL_PORT=3306                          # 접속 포트 (기본 3306)
 JWT_SECRET=your_base64_jwt_secret        # Base64 인코딩된 256bit 이상 시크릿 (예: `openssl rand -base64 48`)
 ```
 
@@ -38,32 +36,7 @@ JWT_SECRET=your_base64_jwt_secret        # Base64 인코딩된 256bit 이상 시
 
 ---
 
-### 3. MySQL 컨테이너 구동
-
-```bash
-docker-compose up -d
-```
-
-- MySQL 8.0 컨테이너가 백그라운드로 실행됩니다.
-- 데이터는 Docker named volume(`mysql_data`)에 저장되어 컨테이너를 내려도 유지됩니다.
-
-**상태 확인:**
-
-```bash
-docker-compose ps        # 컨테이너 실행 상태 확인
-docker-compose logs mysql  # MySQL 로그 확인
-```
-
-**컨테이너 종료:**
-
-```bash
-docker-compose down      # 컨테이너 중지 (데이터 유지)
-docker-compose down -v   # 컨테이너 + 볼륨 삭제 (데이터 초기화)
-```
-
----
-
-### 4. IntelliJ Run Configuration 설정
+### 3. IntelliJ Run Configuration 설정
 
 IntelliJ에서 Spring Boot를 `local` 프로파일로 실행하려면 Run Configuration을 아래와 같이 설정합니다.
 
@@ -80,7 +53,7 @@ local
 **Environment variables** — `.env`의 값을 그대로 입력합니다.
 
 ```
-MYSQL_ROOT_PASSWORD=your_root_password;MYSQL_DATABASE=readum;MYSQL_USER=readum;MYSQL_PASSWORD=your_password;MYSQL_PORT=3306;JWT_SECRET=your_base64_jwt_secret
+MYSQL_DATABASE=readum;MYSQL_USER=readum;MYSQL_PASSWORD=your_password;MYSQL_PORT=3306;JWT_SECRET=your_base64_jwt_secret
 ```
 
 > 세미콜론(`;`)으로 구분해 한 줄에 입력합니다.  
@@ -90,7 +63,7 @@ MYSQL_ROOT_PASSWORD=your_root_password;MYSQL_DATABASE=readum;MYSQL_USER=readum;M
 
 ---
 
-### 5. Spring Boot 실행
+### 4. Spring Boot 실행
 
 **IntelliJ:** 4번 설정 후 `Run` 버튼 클릭
 
@@ -109,11 +82,10 @@ set -a && source .env && set +a && SPRING_PROFILES_ACTIVE=local ./gradlew bootRu
 
 | 변수명 | 설명 | 기본값 예시 |
 |--------|------|------------|
-| `MYSQL_ROOT_PASSWORD` | MySQL root 비밀번호 | `rootpassword` |
 | `MYSQL_DATABASE` | 사용할 데이터베이스 이름 | `readum` |
 | `MYSQL_USER` | 애플리케이션 DB 유저 | `readum` |
 | `MYSQL_PASSWORD` | 애플리케이션 DB 비밀번호 | `readum1234` |
-| `MYSQL_PORT` | 호스트에서 노출할 포트 | `3306` |
+| `MYSQL_PORT` | 접속 포트 | `3306` |
 | `JWT_SECRET` | JWT 서명용 Base64 시크릿 (256bit+, 누락 시 부팅 실패) | `openssl rand -base64 48` 결과값 |
 
 ---
