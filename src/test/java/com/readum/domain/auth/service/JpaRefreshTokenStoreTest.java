@@ -1,4 +1,4 @@
-package com.readum.infrastructure.auth.persistence;
+package com.readum.domain.auth.service;
 
 import com.readum.domain.auth.dto.RefreshTokenRotation;
 import com.readum.domain.auth.dto.RotateOutcome;
@@ -25,10 +25,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("local")
 @Transactional
 @EnabledIfEnvironmentVariable(named = "MYSQL_PASSWORD", matches = ".+")
-class RefreshTokenStoreImplTest {
+class JpaRefreshTokenStoreTest {
 
     @Autowired
-    private RefreshTokenStoreImpl refreshTokenStore;
+    private JpaRefreshTokenStore refreshTokenStore;
 
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;

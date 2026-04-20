@@ -1,4 +1,4 @@
-package com.readum.infrastructure.auth.persistence;
+package com.readum.domain.auth.service;
 
 import com.readum.domain.auth.dto.RefreshTokenRotation;
 import com.readum.domain.auth.dto.RotateResult;
@@ -19,7 +19,7 @@ import java.util.Optional;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class RefreshTokenStoreImpl implements RefreshTokenStore {
+public class JpaRefreshTokenStore implements RefreshTokenStore {
 
     private final RefreshTokenRepository refreshTokenRepository;
 
