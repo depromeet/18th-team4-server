@@ -7,7 +7,6 @@ import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.auth.out.RefreshTokenStore;
 import com.readum.domain.auth.out.TokenBlacklistStore;
-import com.readum.domain.exception.ErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -26,17 +26,37 @@ public class LogoutService {
     private final RefreshTokenStore refreshTokenStore;
 
     public LogoutResult execute(LogoutCommand command) {
-        ParsedToken parsed = jwtTokenClient.parse(command.accessToken());
-        if (parsed.type() != TokenType.ACCESS) {
-            throw new UnauthorizedException(ErrorCode.INVALID_TOKEN);
+        Optional<ParsedToken> refreshToken = parseIfValid(command.refreshToken(), TokenType.REFRESH);
+        if (refreshToken.isEmpty()) {
+            log.info("Logout 멱등 처리 - Refresh Token 없음 또는 유효하지 않음");
+            return LogoutResult.anonymous();
         }
 
-        refreshTokenStore.revokeAll(parsed.userId());
+        Long userId = refreshToken.get().userId();
+        refreshTokenStore.revokeAll(userId);
+        parseIfValid(command.accessToken(), TokenType.ACCESS).ifPresent(this::blacklist);
 
-        Duration remaining = Duration.between(Instant.now(), parsed.expiresAt());
-        tokenBlacklistStore.add(parsed.jwtId(), remaining);
+        log.info("Logout 완료 userId={}", userId);
+        return LogoutResult.of(userId);
+    }
 
-        log.info("Logout 완료 userId={} jwtId={}", parsed.userId(), parsed.jwtId());
-        return new LogoutResult(parsed.userId());
+    private Optional<ParsedToken> parseIfValid(String token, TokenType expected) {
+        if (token == null || token.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            ParsedToken parsed = jwtTokenClient.parse(token);
+            return parsed.type() == expected ? Optional.of(parsed) : Optional.empty();
+        } catch (UnauthorizedException ex) {
+            return Optional.empty();
+        }
+    }
+
+    private void blacklist(ParsedToken accessToken) {
+        Duration remaining = Duration.between(Instant.now(), accessToken.expiresAt());
+        if (remaining.isZero() || remaining.isNegative()) {
+            return;
+        }
+        tokenBlacklistStore.add(accessToken.jwtId(), remaining);
     }
 }

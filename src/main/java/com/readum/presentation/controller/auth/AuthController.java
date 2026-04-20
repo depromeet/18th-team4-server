@@ -50,9 +50,12 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpServletRequest httpRequest) {
+    public ResponseEntity<Void> logout(
+            @CookieValue(name = REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
+            HttpServletRequest httpRequest
+    ) {
         String accessToken = (String) httpRequest.getAttribute(JwtAuthenticationFilter.ACCESS_TOKEN_ATTRIBUTE);
-        LogoutRequest request = new LogoutRequest(accessToken);
+        LogoutRequest request = new LogoutRequest(refreshToken, accessToken);
         logoutService.execute(request.toCommand());
 
         ResponseCookie expired = buildRefreshTokenCookie("", 0);

@@ -27,7 +27,7 @@ public class JpaRefreshTokenStore implements RefreshTokenStore {
     @Transactional
     public void save(Long userId, String jwtId, Instant issuedAt, Instant expiresAt) {
         try {
-            refreshTokenRepository.save(RefreshTokenEntity.create(userId, jwtId, issuedAt, expiresAt));
+            refreshTokenRepository.saveAndFlush(RefreshTokenEntity.create(userId, jwtId, issuedAt, expiresAt));
         } catch (DataAccessException e) {
             log.error("DB 장애 - Refresh Token 저장 불가 userId={}", userId, e);
             throw new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
@@ -84,7 +84,7 @@ public class JpaRefreshTokenStore implements RefreshTokenStore {
 
         int affected = refreshTokenRepository.rotate(row.getId(), now, now.plus(rotation.gracePeriod()));
         if (affected == 1) {
-            refreshTokenRepository.save(RefreshTokenEntity.createSuccessor(
+            refreshTokenRepository.saveAndFlush(RefreshTokenEntity.createSuccessor(
                     rotation.userId(),
                     rotation.newJwtId(),
                     rotation.oldJwtId(),
