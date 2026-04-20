@@ -3,6 +3,8 @@ package com.readum.presentation.controller.auth;
 import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.service.LogoutService;
 import com.readum.domain.auth.service.TokenRefreshService;
+import com.readum.domain.exception.ErrorCode;
+import com.readum.domain.exception.UnauthorizedException;
 import com.readum.presentation.common.ApiResponse;
 import com.readum.presentation.common.security.JwtAuthenticationFilter;
 import com.readum.presentation.controller.auth.dto.LogoutRequest;
@@ -34,7 +36,10 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<TokenRefreshResponse>> refresh(
-            @CookieValue(REFRESH_TOKEN_COOKIE) String refreshToken) {
+            @CookieValue(name = REFRESH_TOKEN_COOKIE, required = false) String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new UnauthorizedException(ErrorCode.REFRESH_TOKEN_NOT_FOUND);
+        }
         TokenRefreshRequest request = new TokenRefreshRequest(refreshToken);
         TokenPair pair = tokenRefreshService.execute(request.toCommand());
 
