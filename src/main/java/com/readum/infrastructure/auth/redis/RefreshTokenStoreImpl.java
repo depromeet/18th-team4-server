@@ -6,10 +6,14 @@ import com.readum.domain.exception.ServiceUnavailableException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 @Slf4j
@@ -74,13 +78,27 @@ public class RefreshTokenStoreImpl implements RefreshTokenStore {
     public void deleteAll(Long userId) {
         try {
             redisTemplate.delete(currentKey(userId));
-            var graceKeys = redisTemplate.keys(GRACE_KEY_PREFIX + userId + ":*");
-            if (graceKeys != null && !graceKeys.isEmpty()) {
+            List<String> graceKeys = scanGraceKeys(userId);
+            if (!graceKeys.isEmpty()) {
                 redisTemplate.delete(graceKeys);
             }
         } catch (DataAccessException e) {
             log.error("Redis 연결 실패 - Refresh Token 삭제 불가, Refresh TTL 후 자연 만료 예상 userId={}", userId, e);
         }
+    }
+
+    private List<String> scanGraceKeys(Long userId) {
+        ScanOptions options = ScanOptions.scanOptions()
+                .match(GRACE_KEY_PREFIX + userId + ":*")
+                .count(100)
+                .build();
+        List<String> keys = new ArrayList<>();
+        try (Cursor<String> cursor = redisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                keys.add(cursor.next());
+            }
+        }
+        return keys;
     }
 
     private String currentKey(Long userId) {
