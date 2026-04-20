@@ -7,6 +7,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -21,8 +22,10 @@ import java.time.LocalDateTime;
 @Table(
         name = "refresh_token",
         indexes = {
-                @Index(name = "idx_refresh_token_user_revoked", columnList = "user_id, revoked_at"),
-                @Index(name = "idx_refresh_token_parent_jwt_id", columnList = "parent_jwt_id")
+                @Index(name = "idx_refresh_token_user_revoked", columnList = "user_id, revoked_at")
+        },
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_refresh_token_parent_jwt_id", columnNames = "parent_jwt_id")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
