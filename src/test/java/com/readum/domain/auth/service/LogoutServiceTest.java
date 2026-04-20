@@ -1,6 +1,7 @@
 package com.readum.domain.auth.service;
 
 import com.readum.domain.auth.dto.LogoutCommand;
+import com.readum.domain.auth.dto.LogoutResult;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.out.JwtTokenClient;
@@ -54,12 +55,13 @@ class LogoutServiceTest {
                 new ParsedToken(userId, "USER", jwtId, expiresAt, TokenType.ACCESS)
         );
 
-        logoutService.execute(new LogoutCommand(accessToken));
+        LogoutResult result = logoutService.execute(new LogoutCommand(accessToken));
 
         ArgumentCaptor<Duration> ttlCaptor = ArgumentCaptor.forClass(Duration.class);
         verify(tokenBlacklistStore).add(eq(jwtId), ttlCaptor.capture());
         assertThat(ttlCaptor.getValue()).isBetween(Duration.ofMinutes(14), Duration.ofMinutes(15));
         verify(refreshTokenStore).deleteAll(userId);
+        assertThat(result.userId()).isEqualTo(userId);
     }
 
     @Test

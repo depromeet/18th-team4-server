@@ -1,6 +1,7 @@
 package com.readum.domain.auth.service;
 
 import com.readum.domain.auth.dto.LogoutCommand;
+import com.readum.domain.auth.dto.LogoutResult;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.out.JwtTokenClient;
@@ -24,7 +25,7 @@ public class LogoutService {
     private final TokenBlacklistStore tokenBlacklistStore;
     private final RefreshTokenStore refreshTokenStore;
 
-    public void execute(LogoutCommand command) {
+    public LogoutResult execute(LogoutCommand command) {
         ParsedToken parsed = jwtTokenClient.parse(command.accessToken());
         if (parsed.type() != TokenType.ACCESS) {
             throw new UnauthorizedException(ErrorCode.INVALID_TOKEN);
@@ -35,5 +36,6 @@ public class LogoutService {
         refreshTokenStore.deleteAll(parsed.userId());
 
         log.info("Logout 완료 userId={} jwtId={}", parsed.userId(), parsed.jwtId());
+        return new LogoutResult(parsed.userId());
     }
 }
