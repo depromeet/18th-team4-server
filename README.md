@@ -29,7 +29,10 @@ MYSQL_DATABASE=readum                  # 사용할 DB 이름
 MYSQL_USER=readum                      # 애플리케이션 DB 유저
 MYSQL_PASSWORD=your_password             # 애플리케이션 DB 비밀번호
 MYSQL_PORT=3306                          # 호스트에 노출할 포트 (기본 3306, 충돌 시 변경)
+JWT_SECRET=your_base64_jwt_secret        # Base64 인코딩된 256bit 이상 시크릿 (예: `openssl rand -base64 48`)
 ```
+
+> `JWT_SECRET`이 비어 있으면 애플리케이션이 시작 단계에서 실패(fail-fast)합니다. 반드시 값을 채운 뒤 실행하세요.
 
 > `.env`는 `.gitignore`에 등록되어 있어 저장소에 커밋되지 않습니다.
 
@@ -77,7 +80,7 @@ local
 **Environment variables** — `.env`의 값을 그대로 입력합니다.
 
 ```
-MYSQL_ROOT_PASSWORD=your_root_password;MYSQL_DATABASE=readum;MYSQL_USER=readum;MYSQL_PASSWORD=your_password;MYSQL_PORT=3306
+MYSQL_ROOT_PASSWORD=your_root_password;MYSQL_DATABASE=readum;MYSQL_USER=readum;MYSQL_PASSWORD=your_password;MYSQL_PORT=3306;JWT_SECRET=your_base64_jwt_secret
 ```
 
 > 세미콜론(`;`)으로 구분해 한 줄에 입력합니다.  
@@ -111,6 +114,7 @@ set -a && source .env && set +a && SPRING_PROFILES_ACTIVE=local ./gradlew bootRu
 | `MYSQL_USER` | 애플리케이션 DB 유저 | `readum` |
 | `MYSQL_PASSWORD` | 애플리케이션 DB 비밀번호 | `readum1234` |
 | `MYSQL_PORT` | 호스트에서 노출할 포트 | `3306` |
+| `JWT_SECRET` | JWT 서명용 Base64 시크릿 (256bit+, 누락 시 부팅 실패) | `openssl rand -base64 48` 결과값 |
 
 ---
 
