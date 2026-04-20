@@ -1,13 +1,18 @@
 package com.readum.infrastructure.auth.redis;
 
 import com.readum.domain.auth.out.RefreshTokenStore;
+import com.readum.domain.exception.ErrorCode;
+import com.readum.domain.exception.ServiceUnavailableException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.Optional;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class RefreshTokenStoreImpl implements RefreshTokenStore {
@@ -19,18 +24,33 @@ public class RefreshTokenStoreImpl implements RefreshTokenStore {
 
     @Override
     public void save(Long userId, String refreshToken, Duration ttl) {
-        redisTemplate.opsForValue().set(currentKey(userId), refreshToken, ttl);
+        try {
+            redisTemplate.opsForValue().set(currentKey(userId), refreshToken, ttl);
+        } catch (DataAccessException e) {
+            log.error("Redis 연결 실패 - Refresh Token 저장 불가 userId={}", userId, e);
+            throw new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
+        }
     }
 
     @Override
     public Optional<String> findCurrent(Long userId) {
-        return Optional.ofNullable(redisTemplate.opsForValue().get(currentKey(userId)));
+        try {
+            return Optional.ofNullable(redisTemplate.opsForValue().get(currentKey(userId)));
+        } catch (DataAccessException e) {
+            log.error("Redis 연결 실패 - Refresh Token 조회 불가 userId={}", userId, e);
+            throw new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
+        }
     }
 
     @Override
     public boolean existsInGrace(Long userId, String refreshTokenJwtId) {
-        Boolean exists = redisTemplate.hasKey(graceKey(userId, refreshTokenJwtId));
-        return Boolean.TRUE.equals(exists);
+        try {
+            Boolean exists = redisTemplate.hasKey(graceKey(userId, refreshTokenJwtId));
+            return Boolean.TRUE.equals(exists);
+        } catch (DataAccessException e) {
+            log.error("Redis 연결 실패 - Grace Refresh Token 조회 불가 userId={} jwtId={}", userId, refreshTokenJwtId, e);
+            throw new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
+        }
     }
 
     @Override
@@ -41,16 +61,25 @@ public class RefreshTokenStoreImpl implements RefreshTokenStore {
             Duration newRefreshTokenTtl,
             Duration graceTtl
     ) {
-        redisTemplate.opsForValue().set(graceKey(userId, oldRefreshTokenJwtId), "1", graceTtl);
-        redisTemplate.opsForValue().set(currentKey(userId), newRefreshToken, newRefreshTokenTtl);
+        try {
+            redisTemplate.opsForValue().set(graceKey(userId, oldRefreshTokenJwtId), "1", graceTtl);
+            redisTemplate.opsForValue().set(currentKey(userId), newRefreshToken, newRefreshTokenTtl);
+        } catch (DataAccessException e) {
+            log.error("Redis 연결 실패 - Refresh Token rotation 불가 userId={} oldJwtId={}", userId, oldRefreshTokenJwtId, e);
+            throw new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
+        }
     }
 
     @Override
     public void deleteAll(Long userId) {
-        redisTemplate.delete(currentKey(userId));
-        var graceKeys = redisTemplate.keys(GRACE_KEY_PREFIX + userId + ":*");
-        if (graceKeys != null && !graceKeys.isEmpty()) {
-            redisTemplate.delete(graceKeys);
+        try {
+            redisTemplate.delete(currentKey(userId));
+            var graceKeys = redisTemplate.keys(GRACE_KEY_PREFIX + userId + ":*");
+            if (graceKeys != null && !graceKeys.isEmpty()) {
+                redisTemplate.delete(graceKeys);
+            }
+        } catch (DataAccessException e) {
+            log.error("Redis 연결 실패 - Refresh Token 삭제 불가, Refresh TTL 후 자연 만료 예상 userId={}", userId, e);
         }
     }
 

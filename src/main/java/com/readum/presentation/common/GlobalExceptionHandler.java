@@ -5,6 +5,7 @@ import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.ForbiddenException;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -52,6 +53,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleConflict(ConflictException ex) {
         log.warn("Conflict: {}", ex.getErrorCode().getMessage());
         return ApiResponse.error(HttpStatus.CONFLICT, ex.getErrorCode().getMessage());
+    }
+
+    // 도메인 비즈니스 예외 - 의존 서비스(인프라) 일시 장애
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<?>> handleServiceUnavailable(ServiceUnavailableException ex) {
+        log.error("Service unavailable: {}", ex.getErrorCode().getMessage(), ex);
+        return ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, ex.getErrorCode().getMessage());
     }
 
     // 도메인 비즈니스 예외 - 미분류 (fallback)
