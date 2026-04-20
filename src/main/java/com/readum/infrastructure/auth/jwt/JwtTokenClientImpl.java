@@ -27,6 +27,7 @@ public class JwtTokenClientImpl implements JwtTokenClient {
     private static final String CLAIM_TYP = "typ";
     private static final String TYP_ACCESS = "access";
     private static final String TYP_REFRESH = "refresh";
+    private static final int HS256_MIN_KEY_BYTES = 32;
 
     private final JwtProperties properties;
     private SecretKey signingKey;
@@ -43,7 +44,21 @@ public class JwtTokenClientImpl implements JwtTokenClient {
                     "jwt.secret 이 비어있습니다. 환경변수 JWT_SECRET 또는 application-{profile}.yml 의 jwt.secret 을 설정하세요."
             );
         }
-        byte[] decoded = Base64.getDecoder().decode(secret);
+        byte[] decoded;
+        try {
+            decoded = Base64.getDecoder().decode(secret);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "jwt.secret 이 유효한 Base64 문자열이 아닙니다. Base64 로 인코딩된 시크릿을 설정하세요.",
+                    e
+            );
+        }
+        if (decoded.length < HS256_MIN_KEY_BYTES) {
+            throw new IllegalStateException(
+                    "jwt.secret 의 디코딩된 키 길이가 " + decoded.length + " 바이트로 너무 짧습니다. HS256 은 최소 "
+                            + HS256_MIN_KEY_BYTES + " 바이트(256 비트) 키를 요구합니다."
+            );
+        }
         this.signingKey = new SecretKeySpec(decoded, "HmacSHA256");
     }
 
