@@ -33,7 +33,8 @@ class JwtTokenClientImplTest {
                 ISSUER,
                 accessTtl,
                 refreshTtl,
-                Duration.ofSeconds(3)
+                Duration.ofSeconds(3),
+                false
         );
         JwtTokenClientImpl c = new JwtTokenClientImpl(properties);
         c.init();
@@ -78,7 +79,8 @@ class JwtTokenClientImplTest {
     @Test
     void 서명이_변조된_토큰을_파싱하면_INVALID_TOKEN_예외가_발생한다() {
         String token = client.generateAccessToken(1L, "USER", "jwt-id");
-        String tampered = token.substring(0, token.length() - 2) + "xx";
+        char last = token.charAt(token.length() - 1);
+        String tampered = token.substring(0, token.length() - 1) + (last == 'A' ? 'B' : 'A');
 
         assertThatThrownBy(() -> client.parse(tampered))
                 .isInstanceOf(UnauthorizedException.class)

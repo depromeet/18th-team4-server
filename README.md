@@ -32,7 +32,7 @@ JWT_SECRET=your_base64_jwt_secret        # Base64 인코딩된 256bit 이상 시
 ```
 
 > `JWT_SECRET`이 비어 있으면 애플리케이션이 시작 단계에서 실패(fail-fast)합니다. 반드시 값을 채운 뒤 실행하세요.
-
+>
 > `.env`는 `.gitignore`에 등록되어 있어 저장소에 커밋되지 않습니다.
 
 ---

@@ -28,9 +28,10 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
     public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException ex)
             throws IOException {
 
-        UnauthorizedException authException =
-                (UnauthorizedException) request.getAttribute(JwtAuthenticationFilter.AUTH_EXCEPTION_ATTRIBUTE);
-        ErrorCode errorCode = authException != null ? authException.getErrorCode() : ErrorCode.UNAUTHORIZED;
+        Object raw = request.getAttribute(JwtAuthenticationFilter.AUTH_EXCEPTION_ATTRIBUTE);
+        ErrorCode errorCode = raw instanceof UnauthorizedException authException
+                ? authException.getErrorCode()
+                : ErrorCode.UNAUTHORIZED;
 
         log.warn("인증 실패 uri={} errorCode={}", request.getRequestURI(), errorCode.name());
 

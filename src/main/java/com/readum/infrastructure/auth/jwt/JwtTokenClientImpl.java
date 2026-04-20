@@ -65,16 +65,7 @@ public class JwtTokenClientImpl implements JwtTokenClient {
     @Override
     public String generateAccessToken(Long userId, String role, String jwtId) {
         Instant now = Instant.now();
-        return Jwts.builder()
-                .issuer(properties.issuer())
-                .subject(String.valueOf(userId))
-                .id(jwtId)
-                .claim(CLAIM_TYP, TYP_ACCESS)
-                .claim(CLAIM_ROLE, role)
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(properties.accessTokenTtl())))
-                .signWith(signingKey, Jwts.SIG.HS256)
-                .compact();
+        return buildToken(userId, role, jwtId, TYP_ACCESS, now, now.plus(properties.accessTokenTtl()));
     }
 
     @Override
@@ -85,11 +76,15 @@ public class JwtTokenClientImpl implements JwtTokenClient {
 
     @Override
     public String generateRefreshToken(Long userId, String role, String jwtId, Instant issuedAt, Instant expiresAt) {
+        return buildToken(userId, role, jwtId, TYP_REFRESH, issuedAt, expiresAt);
+    }
+
+    private String buildToken(Long userId, String role, String jwtId, String typ, Instant issuedAt, Instant expiresAt) {
         return Jwts.builder()
                 .issuer(properties.issuer())
                 .subject(String.valueOf(userId))
                 .id(jwtId)
-                .claim(CLAIM_TYP, TYP_REFRESH)
+                .claim(CLAIM_TYP, typ)
                 .claim(CLAIM_ROLE, role)
                 .issuedAt(Date.from(issuedAt))
                 .expiration(Date.from(expiresAt))
