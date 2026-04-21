@@ -13,7 +13,6 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 
@@ -111,10 +110,5 @@ public class RefreshTokenEntity {
                 && revokedAt == null
                 && graceExpiresAt != null
                 && now.isBefore(graceExpiresAt);
-    }
-
-    public void markRotated(Instant now, Duration gracePeriod) {
-        this.rotatedAt = now;
-        this.graceExpiresAt = now.plus(gracePeriod);
     }
 }
