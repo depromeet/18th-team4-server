@@ -160,6 +160,26 @@ graph TD
   }
   ```
 
+## Exception Convention
+
+- **예외 루트**: `BusinessException` (`domain/exception/`) — `ErrorCode` 를 필드로 보관
+- **HTTP 상태별 서브클래스** (`domain/exception/`, 공용):
+
+| Exception | HTTP Status | 용도 |
+|-----------|:-----------:|------|
+| `BadRequestException` | 400 | 검증 실패, 비즈니스 규칙 위반 |
+| `UnauthorizedException` | 401 | 인증 실패 (토큰 무효/만료) |
+| `ForbiddenException` | 403 | 인증됐지만 권한 없음 |
+| `NotFoundException` | 404 | 리소스 미존재 |
+| `ConflictException` | 409 | 상태 충돌 (중복, 동시성) |
+
+- **도메인 ErrorCode**: `domain/{feature}/exception/{Feature}ErrorCode.java` 에 enum 으로 배치, `implements ErrorCode`, 메시지는 한글 (API 응답에 그대로 노출)
+- **예외 던지기**: 서브클래스 타입(HTTP 상태) + ErrorCode(세부 분기) 조합 사용. raw `RuntimeException` / `IllegalArgumentException` 금지. `IllegalStateException` 은 프로그램 버그에만 fail-fast 용으로 사용
+- **핸들러 일원화**: `presentation/common/GlobalExceptionHandler` 한 곳에만 매핑. 컨트롤러 개별 `@ExceptionHandler` 금지
+- **예외 검증 테스트**: `extracting("errorCode")` 같은 리플렉션 문자열 키 금지. `asInstanceOf(InstanceOfAssertFactories.type(...))` + 메서드 레퍼런스로 타입 안전하게 검증
+
+> 상세 예시(ErrorCode enum 템플릿, 테스트 assertion 패턴, 신규 상태 추가 절차)는 [`docs/exception-convention.md`](docs/exception-convention.md) 참조.
+
 ## Naming Conventions
 
 | Category | Convention | Example |
@@ -175,6 +195,8 @@ graph TD
 | Controller | `{Domain}Controller` | `ExampleController` |
 | Entity | 도메인명 그대로 | `User`, `ExampleEntity` |
 | Repository | `{Entity}Repository` | `UserRepository` |
+| ErrorCode | `{Domain}ErrorCode` | `AuthErrorCode` |
+| Exception (공용) | `{HttpStatus}Exception` | `UnauthorizedException`, `NotFoundException` |
 
 ## Testing Conventions
 
