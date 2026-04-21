@@ -145,6 +145,48 @@ class LogoutServiceTest {
     }
 
     @Test
+    void Access_Token의_userId가_Refresh_Token과_다르면_블랙리스트_등록을_건너뛴다() {
+        String refreshToken = "refresh-token";
+        String accessToken = "access-token";
+        Long refreshUserId = 5L;
+        Long otherUserId = 9L;
+
+        given(jwtTokenClient.parse(refreshToken)).willReturn(
+                new ParsedToken(refreshUserId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
+        );
+        given(jwtTokenClient.parse(accessToken)).willReturn(
+                new ParsedToken(otherUserId, "USER", "access-jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
+        );
+
+        LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, accessToken));
+
+        verify(refreshTokenStore).revokeAll(refreshUserId);
+        verify(tokenBlacklistStore, never()).add(anyString(), any());
+        assertThat(result.userId()).isEqualTo(refreshUserId);
+    }
+
+    @Test
+    void 블랙리스트_등록이_실패해도_Logout_은_성공으로_처리된다() {
+        String refreshToken = "refresh-token";
+        String accessToken = "access-token";
+        Long userId = 5L;
+
+        given(jwtTokenClient.parse(refreshToken)).willReturn(
+                new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
+        );
+        given(jwtTokenClient.parse(accessToken)).willReturn(
+                new ParsedToken(userId, "USER", "access-jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
+        );
+        doThrow(new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE))
+                .when(tokenBlacklistStore).add(anyString(), any());
+
+        LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, accessToken));
+
+        verify(refreshTokenStore).revokeAll(userId);
+        assertThat(result.userId()).isEqualTo(userId);
+    }
+
+    @Test
     void Refresh_Token_폐기가_실패하면_예외가_전파되고_블랙리스트는_호출되지_않는다() {
         String refreshToken = "refresh-token";
         String accessToken = "access-token";

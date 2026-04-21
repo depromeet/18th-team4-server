@@ -33,8 +33,7 @@ class JwtTokenClientImplTest {
                 ISSUER,
                 accessTtl,
                 refreshTtl,
-                Duration.ofSeconds(3),
-                false
+                Duration.ofSeconds(3)
         );
         JwtTokenClientImpl c = new JwtTokenClientImpl(properties);
         c.init();

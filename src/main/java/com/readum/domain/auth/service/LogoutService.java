@@ -34,7 +34,9 @@ public class LogoutService {
 
         Long userId = refreshToken.get().userId();
         refreshTokenStore.revokeAll(userId);
-        parseIfValid(command.accessToken(), TokenType.ACCESS).ifPresent(this::blacklist);
+        parseIfValid(command.accessToken(), TokenType.ACCESS)
+                .filter(accessToken -> userId.equals(accessToken.userId()))
+                .ifPresent(this::blacklist);
 
         log.info("Logout 완료 userId={}", userId);
         return LogoutResult.of(userId);
@@ -57,6 +59,10 @@ public class LogoutService {
         if (remaining.isZero() || remaining.isNegative()) {
             return;
         }
-        tokenBlacklistStore.add(accessToken.jwtId(), remaining);
+        try {
+            tokenBlacklistStore.add(accessToken.jwtId(), remaining);
+        } catch (RuntimeException ex) {
+            log.warn("Access Token 블랙리스트 등록 실패 - best-effort 로 무시 jwtId={}", accessToken.jwtId(), ex);
+        }
     }
 }
