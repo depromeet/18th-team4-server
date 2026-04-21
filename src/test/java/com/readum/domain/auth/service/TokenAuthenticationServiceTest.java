@@ -7,6 +7,7 @@ import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.auth.out.TokenBlacklistStore;
 import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -55,8 +56,8 @@ class TokenAuthenticationServiceTest {
         );
 
         assertThatThrownBy(() -> tokenAuthenticationService.authenticate(token))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.INVALID_TOKEN);
     }
 
@@ -70,8 +71,8 @@ class TokenAuthenticationServiceTest {
         given(tokenBlacklistStore.contains(jwtId)).willReturn(true);
 
         assertThatThrownBy(() -> tokenAuthenticationService.authenticate(token))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.TOKEN_REVOKED);
     }
 }

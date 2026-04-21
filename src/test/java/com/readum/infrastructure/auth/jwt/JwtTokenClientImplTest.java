@@ -6,6 +6,7 @@ import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.infrastructure.auth.config.JwtProperties;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -76,8 +77,8 @@ class JwtTokenClientImplTest {
         String token = expiredClient.generateAccessToken(1L, "USER", "jwt-id");
 
         assertThatThrownBy(() -> expiredClient.parse(token))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.TOKEN_EXPIRED);
     }
 
@@ -88,16 +89,16 @@ class JwtTokenClientImplTest {
         String tampered = token.substring(0, token.length() - 1) + (last == 'A' ? 'B' : 'A');
 
         assertThatThrownBy(() -> client.parse(tampered))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.INVALID_TOKEN);
     }
 
     @Test
     void 파싱_불가능한_문자열을_넘기면_INVALID_TOKEN_예외가_발생한다() {
         assertThatThrownBy(() -> client.parse("not-a-jwt"))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.INVALID_TOKEN);
     }
 }

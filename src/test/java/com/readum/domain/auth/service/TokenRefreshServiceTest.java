@@ -13,6 +13,7 @@ import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -47,6 +48,7 @@ class TokenRefreshServiceTest {
     private static final String OLD_JWT_ID = "old-jwt-id";
     private static final String NEW_ACCESS_TOKEN = "new-access";
     private static final String NEW_REFRESH_TOKEN = "new-refresh";
+    private static final String GRACE_REFRESH_TOKEN = "grace-rt";
     private static final Duration RT_TTL = Duration.ofDays(14);
     private static final Duration AT_TTL = Duration.ofMinutes(30);
     private static final Duration GRACE_TTL = Duration.ofSeconds(3);
@@ -98,12 +100,12 @@ class TokenRefreshServiceTest {
                 USER_ID, ROLE, successorJwtId, successorIssuedAt, successorExpiresAt
         );
         given(jwtTokenClient.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenClient.generateRefreshToken(expectedPayload)).willReturn("grace-rt");
+        given(jwtTokenClient.generateRefreshToken(expectedPayload)).willReturn(GRACE_REFRESH_TOKEN);
 
         TokenPair pair = tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT));
 
         assertThat(pair.accessToken()).isEqualTo(NEW_ACCESS_TOKEN);
-        assertThat(pair.refreshToken()).isEqualTo("grace-rt");
+        assertThat(pair.refreshToken()).isEqualTo(GRACE_REFRESH_TOKEN);
         verify(jwtTokenClient).generateRefreshToken(expectedPayload);
     }
 
@@ -115,8 +117,8 @@ class TokenRefreshServiceTest {
         given(refreshTokenStore.rotate(any(RefreshTokenRotation.class))).willReturn(RotateResult.notFound());
 
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_NOT_FOUND);
     }
 
@@ -128,8 +130,8 @@ class TokenRefreshServiceTest {
         given(refreshTokenStore.rotate(any(RefreshTokenRotation.class))).willReturn(RotateResult.expired());
 
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
     }
 
@@ -141,8 +143,8 @@ class TokenRefreshServiceTest {
         given(refreshTokenStore.rotate(any(RefreshTokenRotation.class))).willReturn(RotateResult.reuseDetected());
 
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REUSE_DETECTED);
     }
 
@@ -153,8 +155,8 @@ class TokenRefreshServiceTest {
         );
 
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
-                .isInstanceOf(UnauthorizedException.class)
-                .extracting("errorCode")
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.INVALID_TOKEN);
         verify(refreshTokenStore, never()).rotate(any(RefreshTokenRotation.class));
     }
