@@ -124,7 +124,10 @@ public class JpaRefreshTokenStore implements RefreshTokenStore {
                         successor.getIssuedAt(),
                         successor.getExpiresAt()
                 ))
-                .orElseGet(RotateResult::notFound);
+                .orElseThrow(() -> {
+                    log.error("데이터 정합성 오류 - Grace 상태의 Refresh Token 에 대응하는 successor 가 존재하지 않음 oldJwtId={}", oldJwtId);
+                    return new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
+                });
     }
 
     private RotateResult revokeAndReport(Long userId, Instant now) {
