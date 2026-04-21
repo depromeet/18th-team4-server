@@ -2,6 +2,7 @@ package com.readum.infrastructure.auth.jwt;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
+import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.infrastructure.auth.config.JwtProperties;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,7 +56,11 @@ class JwtTokenClientImplTest {
 
     @Test
     void Refresh_Token도_role_claim을_포함하여_REFRESH_타입으로_파싱된다() {
-        String token = client.generateRefreshToken(2L, "ADMIN", "jwt-id-2");
+        Instant issuedAt = Instant.now();
+        Instant expiresAt = issuedAt.plus(Duration.ofDays(14));
+        String token = client.generateRefreshToken(new RefreshTokenPayload(
+                2L, "ADMIN", "jwt-id-2", issuedAt, expiresAt
+        ));
 
         ParsedToken parsed = client.parse(token);
 

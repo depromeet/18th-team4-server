@@ -1,5 +1,6 @@
 package com.readum.domain.auth.service;
 
+import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.dto.TokenIssueCommand;
 import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.out.JwtTokenClient;
@@ -27,9 +28,9 @@ public class TokenIssueService {
         Instant refreshExpiresAt = now.plus(jwtTokenClient.refreshTokenTtl());
 
         String accessToken = jwtTokenClient.generateAccessToken(command.userId(), command.role(), accessJwtId);
-        String refreshToken = jwtTokenClient.generateRefreshToken(
+        String refreshToken = jwtTokenClient.generateRefreshToken(new RefreshTokenPayload(
                 command.userId(), command.role(), refreshJwtId, now, refreshExpiresAt
-        );
+        ));
 
         refreshTokenStore.save(command.userId(), refreshJwtId, now, refreshExpiresAt);
 

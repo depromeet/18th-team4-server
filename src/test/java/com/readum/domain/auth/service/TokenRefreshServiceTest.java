@@ -2,6 +2,7 @@ package com.readum.domain.auth.service;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
+import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.dto.RefreshTokenRotation;
 import com.readum.domain.auth.dto.RotateResult;
 import com.readum.domain.auth.dto.TokenPair;
@@ -64,8 +65,7 @@ class TokenRefreshServiceTest {
         given(jwtTokenClient.accessTokenTtl()).willReturn(AT_TTL);
         given(refreshTokenStore.rotate(any(RefreshTokenRotation.class))).willReturn(RotateResult.rotated());
         given(jwtTokenClient.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenClient.generateRefreshToken(eq(USER_ID), eq(ROLE), anyString(), any(Instant.class), any(Instant.class)))
-                .willReturn(NEW_REFRESH_TOKEN);
+        given(jwtTokenClient.generateRefreshToken(any(RefreshTokenPayload.class))).willReturn(NEW_REFRESH_TOKEN);
 
         TokenPair pair = tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT));
 
@@ -94,15 +94,17 @@ class TokenRefreshServiceTest {
         given(jwtTokenClient.accessTokenTtl()).willReturn(AT_TTL);
         given(refreshTokenStore.rotate(any(RefreshTokenRotation.class)))
                 .willReturn(RotateResult.graceHit(successorJwtId, successorIssuedAt, successorExpiresAt));
+        RefreshTokenPayload expectedPayload = new RefreshTokenPayload(
+                USER_ID, ROLE, successorJwtId, successorIssuedAt, successorExpiresAt
+        );
         given(jwtTokenClient.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenClient.generateRefreshToken(USER_ID, ROLE, successorJwtId, successorIssuedAt, successorExpiresAt))
-                .willReturn("grace-rt");
+        given(jwtTokenClient.generateRefreshToken(expectedPayload)).willReturn("grace-rt");
 
         TokenPair pair = tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT));
 
         assertThat(pair.accessToken()).isEqualTo(NEW_ACCESS_TOKEN);
         assertThat(pair.refreshToken()).isEqualTo("grace-rt");
-        verify(jwtTokenClient).generateRefreshToken(USER_ID, ROLE, successorJwtId, successorIssuedAt, successorExpiresAt);
+        verify(jwtTokenClient).generateRefreshToken(expectedPayload);
     }
 
     @Test

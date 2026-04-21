@@ -2,6 +2,7 @@ package com.readum.domain.auth.service;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
+import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.dto.RefreshTokenRotation;
 import com.readum.domain.auth.dto.RotateResult;
 import com.readum.domain.auth.dto.TokenPair;
@@ -73,9 +74,9 @@ public class TokenRefreshService {
     ) {
         String newAccessJwtId = UUID.randomUUID().toString();
         String newAccessToken = jwtTokenClient.generateAccessToken(userId, role, newAccessJwtId);
-        String newRefreshToken = jwtTokenClient.generateRefreshToken(
+        String newRefreshToken = jwtTokenClient.generateRefreshToken(new RefreshTokenPayload(
                 userId, role, newRefreshJwtId, newIssuedAt, newExpiresAt
-        );
+        ));
 
         log.info("Refresh Token 갱신 완료 userId={} oldJwtId={} newJwtId={}", userId, oldJwtId, newRefreshJwtId);
         return new TokenPair(
@@ -93,9 +94,9 @@ public class TokenRefreshService {
 
         String newAccessJwtId = UUID.randomUUID().toString();
         String newAccessToken = jwtTokenClient.generateAccessToken(userId, role, newAccessJwtId);
-        String refreshToken = jwtTokenClient.generateRefreshToken(
+        String refreshToken = jwtTokenClient.generateRefreshToken(new RefreshTokenPayload(
                 userId, role, successorJwtId, successorIssuedAt, successorExpiresAt
-        );
+        ));
 
         log.info("유예 기간 내 구형 Refresh Token 수락 userId={} oldJwtId={} successorJwtId={}",
                 userId, oldJwtId, successorJwtId);

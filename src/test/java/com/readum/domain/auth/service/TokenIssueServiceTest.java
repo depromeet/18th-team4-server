@@ -1,5 +1,6 @@
 package com.readum.domain.auth.service;
 
+import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.dto.TokenIssueCommand;
 import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.out.JwtTokenClient;
@@ -41,8 +42,7 @@ class TokenIssueServiceTest {
         Duration refreshTtl = Duration.ofDays(14);
 
         given(jwtTokenClient.generateAccessToken(eq(userId), eq(role), anyString())).willReturn("access-token");
-        given(jwtTokenClient.generateRefreshToken(eq(userId), eq(role), anyString(), any(Instant.class), any(Instant.class)))
-                .willReturn("refresh-token");
+        given(jwtTokenClient.generateRefreshToken(any(RefreshTokenPayload.class))).willReturn("refresh-token");
         given(jwtTokenClient.accessTokenTtl()).willReturn(accessTtl);
         given(jwtTokenClient.refreshTokenTtl()).willReturn(refreshTtl);
 

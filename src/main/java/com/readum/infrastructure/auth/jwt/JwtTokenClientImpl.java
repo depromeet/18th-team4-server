@@ -2,6 +2,7 @@ package com.readum.infrastructure.auth.jwt;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
+import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.exception.UnauthorizedException;
@@ -69,14 +70,15 @@ public class JwtTokenClientImpl implements JwtTokenClient {
     }
 
     @Override
-    public String generateRefreshToken(Long userId, String role, String jwtId) {
-        Instant now = Instant.now();
-        return generateRefreshToken(userId, role, jwtId, now, now.plus(properties.refreshTokenTtl()));
-    }
-
-    @Override
-    public String generateRefreshToken(Long userId, String role, String jwtId, Instant issuedAt, Instant expiresAt) {
-        return buildToken(userId, role, jwtId, TYP_REFRESH, issuedAt, expiresAt);
+    public String generateRefreshToken(RefreshTokenPayload payload) {
+        return buildToken(
+                payload.userId(),
+                payload.role(),
+                payload.jwtId(),
+                TYP_REFRESH,
+                payload.issuedAt(),
+                payload.expiresAt()
+        );
     }
 
     private String buildToken(Long userId, String role, String jwtId, String typ, Instant issuedAt, Instant expiresAt) {
