@@ -1,10 +1,6 @@
-package com.readum.infrastructure.auth.config;
+package com.readum.presentation.common.security;
 
 import com.readum.domain.auth.service.TokenAuthenticationService;
-import com.readum.presentation.common.security.JwtAccessDeniedHandler;
-import com.readum.presentation.common.security.JwtAuthenticationEntryPoint;
-import com.readum.presentation.common.security.JwtAuthenticationFilter;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -16,7 +12,6 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 @Configuration
 @EnableWebSecurity
-@EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
 
     @Bean
