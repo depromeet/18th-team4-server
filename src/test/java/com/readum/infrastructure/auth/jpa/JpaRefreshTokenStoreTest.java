@@ -1,4 +1,4 @@
-package com.readum.domain.auth.service;
+package com.readum.infrastructure.auth.jpa;
 
 import com.readum.domain.auth.dto.RefreshTokenRotation;
 import com.readum.domain.auth.dto.RotateOutcome;

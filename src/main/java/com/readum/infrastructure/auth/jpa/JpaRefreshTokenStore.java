@@ -1,4 +1,4 @@
-package com.readum.domain.auth.service;
+package com.readum.infrastructure.auth.jpa;
 
 import com.readum.domain.auth.dto.RefreshTokenRotation;
 import com.readum.domain.auth.dto.RotateResult;
@@ -51,7 +51,8 @@ public class JpaRefreshTokenStore implements RefreshTokenStore {
         RefreshTokenEntity row = found.get();
 
         if (row.isRevoked()) {
-            return revokeAndReport(rotation.userId(), now);
+            log.info("이미 폐기된 Refresh Token 으로 refresh 시도 userId={} jwtId={}", rotation.userId(), rotation.oldJwtId());
+            return RotateResult.reuseDetected();
         }
         if (row.isExpired(now)) {
             return RotateResult.expired();

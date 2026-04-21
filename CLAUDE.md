@@ -79,7 +79,14 @@ com.readum
 
 ### Dependency Rules
 
-모든 의존관계는 아래 방향만 허용한다. 역방향과 스킵 레이어 참조는 금지.
+요청 처리의 방향에 따라 의존 흐름을 **Inbound / Outbound** 로 구분한다.
+
+- **Inbound** (외부 요청이 들어오는 방향): `presentation → domain`.
+  presentation 은 오직 domain 만 호출하며, model 을 직접 참조할 수 없다.
+- **Outbound** (도메인이 외부 리소스로 나가는 방향): `domain → infrastructure → model`.
+  domain 의 지시를 받은 infrastructure 가 Adapter 로서 Entity/Repository 에 직접 접근한다.
+
+역방향과 스킵 레이어 참조는 금지한다.
 
 ```mermaid
 graph TD
@@ -93,9 +100,9 @@ graph TD
 | presentation | domain | O | Controller -> Service |
 | infrastructure | domain | O | Port(out) 구현 |
 | domain | model | O | Service -> Repository |
-| presentation | model | **X** | Entity 직접 참조 금지 |
+| presentation | model | **X** | Inbound: Entity 직접 참조 금지, domain 경유 필수 |
 | presentation | infrastructure | **X** | |
-| infrastructure | model | **X** | domain을 통해서만 접근 |
+| infrastructure | model | O | Outbound: JPA Adapter 가 Entity/Repository 를 직접 다루기 위해 허용 |
 | domain | presentation | **X** | 역방향 금지 |
 | domain | infrastructure | **X** | Port 인터페이스만 알고 있음 |
 
