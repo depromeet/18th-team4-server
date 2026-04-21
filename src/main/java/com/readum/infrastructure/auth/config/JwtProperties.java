@@ -10,6 +10,7 @@ public record JwtProperties(
         String issuer,
         Duration accessTokenTtl,
         Duration refreshTokenTtl,
-        Duration refreshGracePeriod
+        Duration refreshGracePeriod,
+        long blacklistMaxSize
 ) {
 }

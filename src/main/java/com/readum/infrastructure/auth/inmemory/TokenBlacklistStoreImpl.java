@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Expiry;
 import com.readum.domain.auth.out.TokenBlacklistStore;
+import com.readum.infrastructure.auth.config.JwtProperties;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -11,13 +12,11 @@ import java.time.Duration;
 @Component
 public class TokenBlacklistStoreImpl implements TokenBlacklistStore {
 
-    private static final long MAXIMUM_SIZE = 10_000L;
-
     private final Cache<String, Long> cache;
 
-    public TokenBlacklistStoreImpl() {
+    public TokenBlacklistStoreImpl(JwtProperties jwtProperties) {
         this.cache = Caffeine.newBuilder()
-                .maximumSize(MAXIMUM_SIZE)
+                .maximumSize(jwtProperties.blacklistMaxSize())
                 .expireAfter(new PerEntryTtlExpiry())
                 .build();
     }
