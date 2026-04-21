@@ -5,12 +5,13 @@ import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.ForbiddenException;
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -19,6 +20,13 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    // Spring Security 인증 실패 (EntryPoint에서 HandlerExceptionResolver 로 위임됨)
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiResponse<?>> handleAuthentication(AuthenticationException ex) {
+        log.warn("인증 실패: {}", ex.getMessage());
+        return ApiResponse.error(HttpStatus.UNAUTHORIZED, ErrorMessages.AUTHENTICATION_REQUIRED);
+    }
 
     // 도메인 비즈니스 예외 - 잘못된 요청
     @ExceptionHandler(BadRequestException.class)
@@ -55,11 +63,11 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(HttpStatus.CONFLICT, ex.getErrorCode().getMessage());
     }
 
-    // 도메인 비즈니스 예외 - 의존 서비스(인프라) 일시 장애
-    @ExceptionHandler(ServiceUnavailableException.class)
-    public ResponseEntity<ApiResponse<?>> handleServiceUnavailable(ServiceUnavailableException ex) {
-        log.error("Service unavailable: {}", ex.getErrorCode().getMessage(), ex);
-        return ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, ex.getErrorCode().getMessage());
+    // DB 접근 실패 - 커넥션 끊김, 타임아웃, 제약 위반 등
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<ApiResponse<?>> handleDataAccess(DataAccessException ex) {
+        log.error("DB 장애", ex);
+        return ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, ErrorMessages.SERVICE_UNAVAILABLE);
     }
 
     // 도메인 비즈니스 예외 - 미분류 (fallback)

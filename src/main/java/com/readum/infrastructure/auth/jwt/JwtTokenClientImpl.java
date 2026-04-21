@@ -2,8 +2,8 @@ package com.readum.infrastructure.auth.jwt;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
+import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.auth.out.JwtTokenClient;
-import com.readum.domain.exception.ErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.infrastructure.auth.config.JwtProperties;
 import io.jsonwebtoken.Claims;
@@ -103,23 +103,23 @@ public class JwtTokenClientImpl implements JwtTokenClient {
                     .parseSignedClaims(token)
                     .getPayload();
         } catch (ExpiredJwtException e) {
-            throw new UnauthorizedException(ErrorCode.TOKEN_EXPIRED);
+            throw new UnauthorizedException(AuthErrorCode.TOKEN_EXPIRED);
         } catch (JwtException | IllegalArgumentException e) {
-            throw new UnauthorizedException(ErrorCode.INVALID_TOKEN);
+            throw new UnauthorizedException(AuthErrorCode.INVALID_TOKEN);
         }
 
         String typ = claims.get(CLAIM_TYP, String.class);
         TokenType type = switch (typ) {
             case TYP_ACCESS -> TokenType.ACCESS;
             case TYP_REFRESH -> TokenType.REFRESH;
-            case null, default -> throw new UnauthorizedException(ErrorCode.INVALID_TOKEN);
+            case null, default -> throw new UnauthorizedException(AuthErrorCode.INVALID_TOKEN);
         };
 
         Long userId;
         try {
             userId = Long.valueOf(claims.getSubject());
         } catch (NumberFormatException e) {
-            throw new UnauthorizedException(ErrorCode.INVALID_TOKEN);
+            throw new UnauthorizedException(AuthErrorCode.INVALID_TOKEN);
         }
 
         return new ParsedToken(

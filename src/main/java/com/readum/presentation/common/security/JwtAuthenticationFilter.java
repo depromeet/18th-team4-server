@@ -8,6 +8,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -18,10 +19,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.List;
 
+@Slf4j
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    public static final String AUTH_EXCEPTION_ATTRIBUTE = "authException";
     public static final String ACCESS_TOKEN_ATTRIBUTE = "accessToken";
 
     private static final String BEARER_PREFIX = "Bearer ";
@@ -49,8 +50,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             SecurityContextHolder.getContext().setAuthentication(authentication);
             request.setAttribute(ACCESS_TOKEN_ATTRIBUTE, accessToken);
         } catch (UnauthorizedException ex) {
+            log.warn("Access Token 검증 실패 uri={} errorCode={}",
+                    request.getRequestURI(), ex.getErrorCode().name());
             SecurityContextHolder.clearContext();
-            request.setAttribute(AUTH_EXCEPTION_ATTRIBUTE, ex);
         }
 
         chain.doFilter(request, response);

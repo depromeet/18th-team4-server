@@ -6,7 +6,7 @@ import com.readum.domain.auth.dto.LogoutResult;
 import com.readum.domain.auth.service.LogoutService;
 import com.readum.domain.auth.service.TokenAuthenticationService;
 import com.readum.domain.auth.service.TokenRefreshService;
-import com.readum.domain.exception.ErrorCode;
+import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.presentation.common.GlobalExceptionHandler;
 import com.readum.presentation.common.security.JwtAuthenticationFilter;
@@ -113,7 +113,7 @@ class AuthControllerLogoutTest {
     void AT_헤더가_무효하면_필터가_attribute를_비워두고_LogoutService에는_null_AT가_전달된다() throws Exception {
         String invalidAccessToken = "invalid-access-token";
         given(tokenAuthenticationService.authenticate(invalidAccessToken))
-                .willThrow(new UnauthorizedException(ErrorCode.INVALID_TOKEN));
+                .willThrow(new UnauthorizedException(AuthErrorCode.INVALID_TOKEN));
         given(logoutService.execute(any())).willReturn(LogoutResult.of(5L));
 
         MvcResult result = mockMvc.perform(post(LOGOUT_URI)

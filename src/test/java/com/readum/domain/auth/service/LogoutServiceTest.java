@@ -7,8 +7,7 @@ import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.auth.out.RefreshTokenStore;
 import com.readum.domain.auth.out.TokenBlacklistStore;
-import com.readum.domain.exception.ErrorCode;
-import com.readum.domain.exception.ServiceUnavailableException;
+import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +16,8 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -102,7 +103,7 @@ class LogoutServiceTest {
     void Refresh_Token이_유효하지_않으면_멱등하게_anonymous_결과를_반환한다() {
         String refreshToken = "invalid-refresh-token";
         given(jwtTokenClient.parse(refreshToken))
-                .willThrow(new UnauthorizedException(ErrorCode.INVALID_TOKEN));
+                .willThrow(new UnauthorizedException(AuthErrorCode.INVALID_TOKEN));
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, null));
 
@@ -135,7 +136,7 @@ class LogoutServiceTest {
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
         given(jwtTokenClient.parse(invalidAccessToken))
-                .willThrow(new UnauthorizedException(ErrorCode.INVALID_TOKEN));
+                .willThrow(new UnauthorizedException(AuthErrorCode.INVALID_TOKEN));
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, invalidAccessToken));
 
@@ -177,7 +178,7 @@ class LogoutServiceTest {
         given(jwtTokenClient.parse(accessToken)).willReturn(
                 new ParsedToken(userId, "USER", "access-jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
         );
-        doThrow(new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE))
+        doThrow(new DataAccessResourceFailureException("simulated blacklist failure"))
                 .when(tokenBlacklistStore).add(anyString(), any());
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, accessToken));
@@ -195,11 +196,11 @@ class LogoutServiceTest {
         given(jwtTokenClient.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        doThrow(new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE))
+        doThrow(new DataAccessResourceFailureException("simulated RT store failure"))
                 .when(refreshTokenStore).revokeAll(userId);
 
         assertThatThrownBy(() -> logoutService.execute(new LogoutCommand(refreshToken, accessToken)))
-                .isInstanceOf(ServiceUnavailableException.class);
+                .isInstanceOf(DataAccessException.class);
 
         verify(tokenBlacklistStore, never()).add(anyString(), any());
     }

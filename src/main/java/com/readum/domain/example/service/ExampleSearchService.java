@@ -1,8 +1,8 @@
 package com.readum.domain.example.service;
 
 import com.readum.domain.example.dto.ExampleResult;
+import com.readum.domain.example.exception.ExampleErrorCode;
 import com.readum.domain.example.out.ExampleSearchClient;
-import com.readum.domain.exception.ErrorCode;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.model.example.repository.ExampleRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,7 +20,7 @@ public class ExampleSearchService {
     public ExampleResult searchById(long id) {
         return exampleRepository.findById(id)
                 .map(ExampleResult::from)
-                .orElseThrow(() -> new NotFoundException(ErrorCode.EXAMPLE_NOT_FOUND));
+                .orElseThrow(() -> new NotFoundException(ExampleErrorCode.EXAMPLE_NOT_FOUND));
     }
 
     public List<ExampleResult> searchAll() {

@@ -3,13 +3,10 @@ package com.readum.domain.auth.service;
 import com.readum.domain.auth.dto.RefreshTokenRotation;
 import com.readum.domain.auth.dto.RotateResult;
 import com.readum.domain.auth.out.RefreshTokenStore;
-import com.readum.domain.exception.ErrorCode;
-import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.model.auth.entity.RefreshTokenEntity;
 import com.readum.model.auth.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,36 +23,20 @@ public class JpaRefreshTokenStore implements RefreshTokenStore {
     @Override
     @Transactional
     public void save(Long userId, String jwtId, Instant issuedAt, Instant expiresAt) {
-        try {
-            refreshTokenRepository.saveAndFlush(RefreshTokenEntity.create(userId, jwtId, issuedAt, expiresAt));
-        } catch (DataAccessException e) {
-            log.error("DB 장애 - Refresh Token 저장 불가 userId={}", userId, e);
-            throw new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
-        }
+        refreshTokenRepository.saveAndFlush(RefreshTokenEntity.create(userId, jwtId, issuedAt, expiresAt));
     }
 
     @Override
     @Transactional
     public RotateResult rotate(RefreshTokenRotation rotation) {
-        try {
-            return doRotate(rotation);
-        } catch (DataAccessException e) {
-            log.error("DB 장애 - Refresh Token 회전 불가 userId={} oldJwtId={}",
-                    rotation.userId(), rotation.oldJwtId(), e);
-            throw new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
-        }
+        return doRotate(rotation);
     }
 
     @Override
     @Transactional
     public void revokeAll(Long userId) {
-        try {
-            int affected = refreshTokenRepository.revokeAllByUserId(userId, Instant.now());
-            log.info("Refresh Token 전체 폐기 userId={} affected={}", userId, affected);
-        } catch (DataAccessException e) {
-            log.error("DB 장애 - Refresh Token 폐기 불가 userId={}", userId, e);
-            throw new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
-        }
+        int affected = refreshTokenRepository.revokeAllByUserId(userId, Instant.now());
+        log.info("Refresh Token 전체 폐기 userId={} affected={}", userId, affected);
     }
 
     private RotateResult doRotate(RefreshTokenRotation rotation) {
@@ -126,7 +107,7 @@ public class JpaRefreshTokenStore implements RefreshTokenStore {
                 ))
                 .orElseThrow(() -> {
                     log.error("데이터 정합성 오류 - Grace 상태의 Refresh Token 에 대응하는 successor 가 존재하지 않음 oldJwtId={}", oldJwtId);
-                    return new ServiceUnavailableException(ErrorCode.SERVICE_UNAVAILABLE);
+                    return new IllegalStateException("grace state without successor: " + oldJwtId);
                 });
     }
 

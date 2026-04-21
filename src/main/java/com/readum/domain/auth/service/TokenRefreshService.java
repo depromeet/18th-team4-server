@@ -6,9 +6,9 @@ import com.readum.domain.auth.dto.RefreshTokenRotation;
 import com.readum.domain.auth.dto.RotateResult;
 import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.dto.TokenRefreshCommand;
+import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.auth.out.RefreshTokenStore;
-import com.readum.domain.exception.ErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +29,7 @@ public class TokenRefreshService {
     public TokenPair execute(TokenRefreshCommand command) {
         ParsedToken parsed = jwtTokenClient.parse(command.refreshToken());
         if (parsed.type() != TokenType.REFRESH) {
-            throw new UnauthorizedException(ErrorCode.INVALID_TOKEN);
+            throw new UnauthorizedException(AuthErrorCode.INVALID_TOKEN);
         }
 
         Long userId = parsed.userId();
@@ -54,15 +54,15 @@ public class TokenRefreshService {
             case GRACE_HIT -> buildGraceHitPair(userId, role, result, oldJwtId);
             case NOT_FOUND -> {
                 log.warn("Refresh Token 저장소에 값이 없음 userId={} jwtId={}", userId, oldJwtId);
-                throw new UnauthorizedException(ErrorCode.REFRESH_TOKEN_NOT_FOUND);
+                throw new UnauthorizedException(AuthErrorCode.REFRESH_TOKEN_NOT_FOUND);
             }
             case EXPIRED -> {
                 log.warn("만료된 Refresh Token 사용 userId={} jwtId={}", userId, oldJwtId);
-                throw new UnauthorizedException(ErrorCode.REFRESH_TOKEN_EXPIRED);
+                throw new UnauthorizedException(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
             }
             case REUSE_DETECTED -> {
                 log.error("Refresh Token 재사용 감지 - 해당 userId 전체 토큰 폐기 userId={} jwtId={}", userId, oldJwtId);
-                throw new UnauthorizedException(ErrorCode.REFRESH_TOKEN_REUSE_DETECTED);
+                throw new UnauthorizedException(AuthErrorCode.REFRESH_TOKEN_REUSE_DETECTED);
             }
         };
     }

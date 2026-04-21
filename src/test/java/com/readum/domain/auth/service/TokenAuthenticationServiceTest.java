@@ -5,7 +5,7 @@ import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.auth.out.TokenBlacklistStore;
-import com.readum.domain.exception.ErrorCode;
+import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,7 +57,7 @@ class TokenAuthenticationServiceTest {
         assertThatThrownBy(() -> tokenAuthenticationService.authenticate(token))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.INVALID_TOKEN);
+                .isEqualTo(AuthErrorCode.INVALID_TOKEN);
     }
 
     @Test
@@ -72,6 +72,6 @@ class TokenAuthenticationServiceTest {
         assertThatThrownBy(() -> tokenAuthenticationService.authenticate(token))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.TOKEN_REVOKED);
+                .isEqualTo(AuthErrorCode.TOKEN_REVOKED);
     }
 }

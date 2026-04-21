@@ -2,7 +2,7 @@ package com.readum.infrastructure.auth.jwt;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
-import com.readum.domain.exception.ErrorCode;
+import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.infrastructure.auth.config.JwtProperties;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,7 +72,7 @@ class JwtTokenClientImplTest {
         assertThatThrownBy(() -> expiredClient.parse(token))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.TOKEN_EXPIRED);
+                .isEqualTo(AuthErrorCode.TOKEN_EXPIRED);
     }
 
     @Test
@@ -84,7 +84,7 @@ class JwtTokenClientImplTest {
         assertThatThrownBy(() -> client.parse(tampered))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.INVALID_TOKEN);
+                .isEqualTo(AuthErrorCode.INVALID_TOKEN);
     }
 
     @Test
@@ -92,6 +92,6 @@ class JwtTokenClientImplTest {
         assertThatThrownBy(() -> client.parse("not-a-jwt"))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.INVALID_TOKEN);
+                .isEqualTo(AuthErrorCode.INVALID_TOKEN);
     }
 }

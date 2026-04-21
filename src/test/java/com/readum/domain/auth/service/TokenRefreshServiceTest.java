@@ -8,7 +8,7 @@ import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.dto.TokenRefreshCommand;
 import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.auth.out.RefreshTokenStore;
-import com.readum.domain.exception.ErrorCode;
+import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -115,7 +115,7 @@ class TokenRefreshServiceTest {
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.REFRESH_TOKEN_NOT_FOUND);
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_NOT_FOUND);
     }
 
     @Test
@@ -128,7 +128,7 @@ class TokenRefreshServiceTest {
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.REFRESH_TOKEN_EXPIRED);
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
     }
 
     @Test
@@ -141,7 +141,7 @@ class TokenRefreshServiceTest {
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.REFRESH_TOKEN_REUSE_DETECTED);
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REUSE_DETECTED);
     }
 
     @Test
@@ -153,7 +153,7 @@ class TokenRefreshServiceTest {
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
                 .isInstanceOf(UnauthorizedException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.INVALID_TOKEN);
+                .isEqualTo(AuthErrorCode.INVALID_TOKEN);
         verify(refreshTokenStore, never()).rotate(any(RefreshTokenRotation.class));
     }
 }
