@@ -188,6 +188,15 @@ graph TD
 | INFO | 주요 비즈니스 흐름, I/O | 사용자 가입, 주문 생성 |
 | DEBUG | 개발 디버깅 용도 | 운영 환경에서는 비활성화 |
 
+## Infrastructure
+
+개발 서버 AWS 인프라 구성. 상세 내용은 [`docs/infra.md`](docs/infra.md) 참고.
+
+- **EC2**: t3.micro, Ubuntu, ap-northeast-2
+- **RDS**: MySQL 8.4, db.t4g.micro
+- **S3**: readum 버킷 (이미지/파일 스토리지)
+- **도메인**: readum.kr / api.readum.kr (Certbot HTTPS)
+
 ## Git Conventions
 
 - **Branch naming**: `main ← dev ← feature|bugfix|hotfix/{이슈번호}-{간단한-설명}`
