@@ -1,4 +1,4 @@
-package com.readum.infrastructure.auth.config;
+package com.readum.domain.auth.jwt;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

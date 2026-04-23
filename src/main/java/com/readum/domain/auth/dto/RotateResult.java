@@ -4,17 +4,17 @@ import java.time.Instant;
 
 public record RotateResult(
         RotateOutcome outcome,
-        String graceSuccessorJwtId,
-        Instant graceSuccessorIssuedAt,
-        Instant graceSuccessorExpiresAt
+        String graceChildJwtId,
+        Instant graceChildIssuedAt,
+        Instant graceChildExpiresAt
 ) {
 
     public static RotateResult rotated() {
         return new RotateResult(RotateOutcome.ROTATED, null, null, null);
     }
 
-    public static RotateResult graceHit(String successorJwtId, Instant issuedAt, Instant expiresAt) {
-        return new RotateResult(RotateOutcome.GRACE_HIT, successorJwtId, issuedAt, expiresAt);
+    public static RotateResult graceHit(String childJwtId, Instant issuedAt, Instant expiresAt) {
+        return new RotateResult(RotateOutcome.GRACE_HIT, childJwtId, issuedAt, expiresAt);
     }
 
     public static RotateResult notFound() {

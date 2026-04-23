@@ -3,17 +3,16 @@ package com.readum.domain.auth.service;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
-import com.readum.domain.auth.dto.RefreshTokenRotation;
-import com.readum.domain.auth.dto.RotateResult;
 import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.dto.TokenRefreshCommand;
-import com.readum.domain.auth.out.JwtTokenClient;
-import com.readum.domain.auth.out.RefreshTokenStore;
 import com.readum.domain.auth.exception.AuthErrorCode;
+import com.readum.domain.auth.jwt.JwtTokenProvider;
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.model.auth.entity.RefreshToken;
+import com.readum.model.auth.repository.RefreshTokenRepository;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.assertj.core.api.InstanceOfAssertFactories;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -21,10 +20,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -35,10 +37,10 @@ import static org.mockito.Mockito.verify;
 class TokenRefreshServiceTest {
 
     @Mock
-    private JwtTokenClient jwtTokenClient;
+    private JwtTokenProvider jwtTokenProvider;
 
     @Mock
-    private RefreshTokenStore refreshTokenStore;
+    private RefreshTokenRepository refreshTokenRepository;
 
     @InjectMocks
     private TokenRefreshService tokenRefreshService;
@@ -52,22 +54,73 @@ class TokenRefreshServiceTest {
     private static final Duration RT_TTL = Duration.ofDays(14);
     private static final Duration AT_TTL = Duration.ofMinutes(30);
     private static final Duration GRACE_TTL = Duration.ofSeconds(3);
-
     private static final String ROLE = "USER";
 
     private ParsedToken refreshTokenClaims() {
         return new ParsedToken(USER_ID, ROLE, OLD_JWT_ID, Instant.now().plus(RT_TTL), TokenType.REFRESH);
     }
 
+    private RefreshToken activeRow() {
+        Instant now = Instant.now();
+        return RefreshToken.of(
+                100L, USER_ID, OLD_JWT_ID, null,
+                now.minusSeconds(60), now.plus(RT_TTL),
+                null, null, null,
+                LocalDateTime.now()
+        );
+    }
+
+    private RefreshToken revokedRow() {
+        Instant now = Instant.now();
+        return RefreshToken.of(
+                100L, USER_ID, OLD_JWT_ID, null,
+                now.minusSeconds(3600), now.plus(RT_TTL),
+                null, null, now.minusSeconds(30),
+                LocalDateTime.now()
+        );
+    }
+
+    private RefreshToken expiredRow() {
+        Instant now = Instant.now();
+        return RefreshToken.of(
+                100L, USER_ID, OLD_JWT_ID, null,
+                now.minusSeconds(3600), now.minusSeconds(10),
+                null, null, null,
+                LocalDateTime.now()
+        );
+    }
+
+    private RefreshToken inGraceRow() {
+        Instant now = Instant.now();
+        return RefreshToken.of(
+                100L, USER_ID, OLD_JWT_ID, null,
+                now.minusSeconds(120), now.plus(RT_TTL),
+                now.minusSeconds(1), now.plusSeconds(2), null,
+                LocalDateTime.now()
+        );
+    }
+
+    private RefreshToken postGraceRow() {
+        Instant now = Instant.now();
+        return RefreshToken.of(
+                100L, USER_ID, OLD_JWT_ID, null,
+                now.minusSeconds(120), now.plus(RT_TTL),
+                now.minusSeconds(60), now.minusSeconds(30), null,
+                LocalDateTime.now()
+        );
+    }
+
     @Test
-    void ROTATED_결과면_새로운_Token_Pair를_발급한다() {
-        given(jwtTokenClient.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenClient.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenClient.refreshGracePeriod()).willReturn(GRACE_TTL);
-        given(jwtTokenClient.accessTokenTtl()).willReturn(AT_TTL);
-        given(refreshTokenStore.rotate(any(RefreshTokenRotation.class))).willReturn(RotateResult.rotated());
-        given(jwtTokenClient.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenClient.generateRefreshToken(any(RefreshTokenPayload.class))).willReturn(NEW_REFRESH_TOKEN);
+    void ACTIVE_row_를_rotate_하면_새로운_Token_Pair_를_발급한다() {
+        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
+        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(jwtTokenProvider.accessTokenTtl()).willReturn(AT_TTL);
+        given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
+                .willReturn(Optional.of(activeRow()));
+        given(refreshTokenRepository.rotate(eq(100L), any(Instant.class), any(Instant.class))).willReturn(1);
+        given(jwtTokenProvider.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
+        given(jwtTokenProvider.generateRefreshToken(any(RefreshTokenPayload.class))).willReturn(NEW_REFRESH_TOKEN);
 
         TokenPair pair = tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT));
 
@@ -75,46 +128,54 @@ class TokenRefreshServiceTest {
         assertThat(pair.refreshToken()).isEqualTo(NEW_REFRESH_TOKEN);
         assertThat(pair.accessTokenTtl()).isEqualTo(AT_TTL);
 
-        ArgumentCaptor<RefreshTokenRotation> rotationCaptor = ArgumentCaptor.forClass(RefreshTokenRotation.class);
-        verify(refreshTokenStore).rotate(rotationCaptor.capture());
-        RefreshTokenRotation captured = rotationCaptor.getValue();
-        assertThat(captured.userId()).isEqualTo(USER_ID);
-        assertThat(captured.oldJwtId()).isEqualTo(OLD_JWT_ID);
-        assertThat(captured.gracePeriod()).isEqualTo(GRACE_TTL);
-        assertThat(Duration.between(captured.newIssuedAt(), captured.newExpiresAt())).isEqualTo(RT_TTL);
+        ArgumentCaptor<RefreshToken> childCaptor = ArgumentCaptor.forClass(RefreshToken.class);
+        verify(refreshTokenRepository).saveAndFlush(childCaptor.capture());
+        RefreshToken child = childCaptor.getValue();
+        assertThat(child.getUserId()).isEqualTo(USER_ID);
+        assertThat(child.getParentJwtId()).isEqualTo(OLD_JWT_ID);
+        assertThat(child.getJwtId()).isNotBlank();
     }
 
     @Test
-    void GRACE_HIT_결과면_기존_successor_jti로_Refresh_JWT를_재서명한다() {
-        String successorJwtId = "successor-jti";
-        Instant successorIssuedAt = Instant.now().minusSeconds(1);
-        Instant successorExpiresAt = successorIssuedAt.plus(RT_TTL);
-
-        given(jwtTokenClient.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenClient.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenClient.refreshGracePeriod()).willReturn(GRACE_TTL);
-        given(jwtTokenClient.accessTokenTtl()).willReturn(AT_TTL);
-        given(refreshTokenStore.rotate(any(RefreshTokenRotation.class)))
-                .willReturn(RotateResult.graceHit(successorJwtId, successorIssuedAt, successorExpiresAt));
-        RefreshTokenPayload expectedPayload = new RefreshTokenPayload(
-                USER_ID, ROLE, successorJwtId, successorIssuedAt, successorExpiresAt
+    void IN_GRACE_row_는_기존_child_jti_로_Refresh_JWT_를_재서명한다() {
+        String childJwtId = "child-jti";
+        Instant childIssuedAt = Instant.now().minusSeconds(1);
+        Instant childExpiresAt = childIssuedAt.plus(RT_TTL);
+        RefreshToken child = RefreshToken.of(
+                200L, USER_ID, childJwtId, OLD_JWT_ID,
+                childIssuedAt, childExpiresAt,
+                null, null, null,
+                LocalDateTime.now()
         );
-        given(jwtTokenClient.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenClient.generateRefreshToken(expectedPayload)).willReturn(GRACE_REFRESH_TOKEN);
+
+        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
+        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(jwtTokenProvider.accessTokenTtl()).willReturn(AT_TTL);
+        given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
+                .willReturn(Optional.of(inGraceRow()));
+        given(refreshTokenRepository.findByParentJwtId(OLD_JWT_ID)).willReturn(Optional.of(child));
+
+        RefreshTokenPayload expectedPayload = new RefreshTokenPayload(
+                USER_ID, ROLE, childJwtId, childIssuedAt, childExpiresAt
+        );
+        given(jwtTokenProvider.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
+        given(jwtTokenProvider.generateRefreshToken(expectedPayload)).willReturn(GRACE_REFRESH_TOKEN);
 
         TokenPair pair = tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT));
 
         assertThat(pair.accessToken()).isEqualTo(NEW_ACCESS_TOKEN);
         assertThat(pair.refreshToken()).isEqualTo(GRACE_REFRESH_TOKEN);
-        verify(jwtTokenClient).generateRefreshToken(expectedPayload);
+        verify(jwtTokenProvider).generateRefreshToken(expectedPayload);
+        verify(refreshTokenRepository, never()).saveAndFlush(any(RefreshToken.class));
     }
 
     @Test
-    void NOT_FOUND_결과면_REFRESH_TOKEN_NOT_FOUND_예외가_발생한다() {
-        given(jwtTokenClient.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenClient.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenClient.refreshGracePeriod()).willReturn(GRACE_TTL);
-        given(refreshTokenStore.rotate(any(RefreshTokenRotation.class))).willReturn(RotateResult.notFound());
+    void 저장소에_row_가_없으면_REFRESH_TOKEN_NOT_FOUND_예외가_발생한다() {
+        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
+        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
@@ -123,24 +184,27 @@ class TokenRefreshServiceTest {
     }
 
     @Test
-    void EXPIRED_결과면_REFRESH_TOKEN_EXPIRED_예외가_발생한다() {
-        given(jwtTokenClient.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenClient.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenClient.refreshGracePeriod()).willReturn(GRACE_TTL);
-        given(refreshTokenStore.rotate(any(RefreshTokenRotation.class))).willReturn(RotateResult.expired());
+    void EXPIRED_row_면_REFRESH_TOKEN_EXPIRED_예외가_발생한다() {
+        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
+        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
+                .willReturn(Optional.of(expiredRow()));
 
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
                 .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
+        verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong(), any(Instant.class));
     }
 
     @Test
-    void REUSE_DETECTED_결과면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한다() {
-        given(jwtTokenClient.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenClient.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenClient.refreshGracePeriod()).willReturn(GRACE_TTL);
-        given(refreshTokenStore.rotate(any(RefreshTokenRotation.class))).willReturn(RotateResult.reuseDetected());
+    void REVOKED_row_면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한다() {
+        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
+        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
+                .willReturn(Optional.of(revokedRow()));
 
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
@@ -149,8 +213,23 @@ class TokenRefreshServiceTest {
     }
 
     @Test
+    void POST_GRACE_row_면_userId_전체를_폐기하고_REUSE_DETECTED_예외가_발생한다() {
+        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
+        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
+                .willReturn(Optional.of(postGraceRow()));
+
+        assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
+                .isEqualTo(AuthErrorCode.REFRESH_TOKEN_REUSE_DETECTED);
+        verify(refreshTokenRepository).revokeAllByUserId(eq(USER_ID), any(Instant.class));
+    }
+
+    @Test
     void Refresh_Token이_아닌_Access_Token을_넘기면_INVALID_TOKEN_예외가_발생한다() {
-        given(jwtTokenClient.parse(OLD_RT)).willReturn(
+        given(jwtTokenProvider.parse(OLD_RT)).willReturn(
                 new ParsedToken(USER_ID, ROLE, OLD_JWT_ID, Instant.now().plus(AT_TTL), TokenType.ACCESS)
         );
 
@@ -158,6 +237,6 @@ class TokenRefreshServiceTest {
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
                 .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.INVALID_TOKEN);
-        verify(refreshTokenStore, never()).rotate(any(RefreshTokenRotation.class));
+        verify(refreshTokenRepository, never()).findByUserIdAndJwtId(anyLong(), anyString());
     }
 }

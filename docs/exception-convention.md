@@ -75,8 +75,8 @@ throw new IllegalArgumentException("token type mismatch");
 **프로그램 버그** (도달 불가 분기, 데이터 정합성 위반) 에만 fail-fast 용도로 사용. 사용자 요청 흐름에서 발생 가능한 에러에는 쓰지 않는다.
 
 ```java
-// O — 데이터 정합성이 깨진 경우 (grace 상태인데 successor 가 없음)
-throw new IllegalStateException("grace state without successor: " + oldJwtId);
+// O — 데이터 정합성이 깨진 경우 (grace 상태인데 child 가 없음)
+throw new IllegalStateException("grace state without child: " + oldJwtId);
 
 // X — 사용자 입력이 잘못된 경우
 throw new IllegalStateException("email format invalid");  // BadRequestException 으로

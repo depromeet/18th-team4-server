@@ -3,9 +3,9 @@ package com.readum.domain.auth.service;
 import com.readum.domain.auth.dto.AuthenticatedPrincipal;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
-import com.readum.domain.auth.out.JwtTokenClient;
-import com.readum.domain.auth.out.TokenBlacklistStore;
 import com.readum.domain.auth.exception.AuthErrorCode;
+import com.readum.domain.auth.jwt.JwtTokenProvider;
+import com.readum.domain.auth.out.TokenBlacklistStore;
 import com.readum.domain.exception.UnauthorizedException;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
@@ -25,7 +25,7 @@ import static org.mockito.BDDMockito.given;
 class TokenAuthenticationServiceTest {
 
     @Mock
-    private JwtTokenClient jwtTokenClient;
+    private JwtTokenProvider jwtTokenProvider;
 
     @Mock
     private TokenBlacklistStore tokenBlacklistStore;
@@ -37,7 +37,7 @@ class TokenAuthenticationServiceTest {
     void 유효한_Access_Token이면_AuthenticatedPrincipal을_반환한다() {
         String token = "access-token";
         String jwtId = "jwt-id";
-        given(jwtTokenClient.parse(token)).willReturn(
+        given(jwtTokenProvider.parse(token)).willReturn(
                 new ParsedToken(1L, "USER", jwtId, Instant.now().plus(Duration.ofMinutes(30)), TokenType.ACCESS)
         );
         given(tokenBlacklistStore.contains(jwtId)).willReturn(false);
@@ -51,7 +51,7 @@ class TokenAuthenticationServiceTest {
     @Test
     void Access_Token이_아니면_INVALID_TOKEN_예외가_발생한다() {
         String token = "refresh-token";
-        given(jwtTokenClient.parse(token)).willReturn(
+        given(jwtTokenProvider.parse(token)).willReturn(
                 new ParsedToken(1L, null, "jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
 
@@ -65,7 +65,7 @@ class TokenAuthenticationServiceTest {
     void 블랙리스트에_등록된_Access_Token이면_TOKEN_REVOKED_예외가_발생한다() {
         String token = "access-token";
         String jwtId = "jwt-id";
-        given(jwtTokenClient.parse(token)).willReturn(
+        given(jwtTokenProvider.parse(token)).willReturn(
                 new ParsedToken(1L, "USER", jwtId, Instant.now().plus(Duration.ofMinutes(30)), TokenType.ACCESS)
         );
         given(tokenBlacklistStore.contains(jwtId)).willReturn(true);

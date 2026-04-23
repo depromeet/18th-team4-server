@@ -1,6 +1,6 @@
 package com.readum.infrastructure.auth.inmemory;
 
-import com.readum.infrastructure.auth.config.JwtProperties;
+import com.readum.domain.auth.jwt.JwtProperties;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;

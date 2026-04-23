@@ -4,11 +4,11 @@ import com.readum.domain.auth.dto.LogoutCommand;
 import com.readum.domain.auth.dto.LogoutResult;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
-import com.readum.domain.auth.out.JwtTokenClient;
-import com.readum.domain.auth.out.RefreshTokenStore;
-import com.readum.domain.auth.out.TokenBlacklistStore;
 import com.readum.domain.auth.exception.AuthErrorCode;
+import com.readum.domain.auth.jwt.JwtTokenProvider;
+import com.readum.domain.auth.out.TokenBlacklistStore;
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.model.auth.repository.RefreshTokenRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -38,13 +38,13 @@ import static org.mockito.Mockito.verify;
 class LogoutServiceTest {
 
     @Mock
-    private JwtTokenClient jwtTokenClient;
+    private JwtTokenProvider jwtTokenProvider;
 
     @Mock
     private TokenBlacklistStore tokenBlacklistStore;
 
     @Mock
-    private RefreshTokenStore refreshTokenStore;
+    private RefreshTokenRepository refreshTokenRepository;
 
     @InjectMocks
     private LogoutService logoutService;
@@ -57,17 +57,17 @@ class LogoutServiceTest {
         String accessJwtId = "access-jwt-id";
         Instant accessExpiresAt = Instant.now().plus(Duration.ofMinutes(15));
 
-        given(jwtTokenClient.parse(refreshToken)).willReturn(
+        given(jwtTokenProvider.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        given(jwtTokenClient.parse(accessToken)).willReturn(
+        given(jwtTokenProvider.parse(accessToken)).willReturn(
                 new ParsedToken(userId, "USER", accessJwtId, accessExpiresAt, TokenType.ACCESS)
         );
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, accessToken));
 
-        InOrder order = inOrder(refreshTokenStore, tokenBlacklistStore);
-        order.verify(refreshTokenStore).revokeAll(userId);
+        InOrder order = inOrder(refreshTokenRepository, tokenBlacklistStore);
+        order.verify(refreshTokenRepository).revokeAllByUserId(eq(userId), any(Instant.class));
         ArgumentCaptor<Duration> ttlCaptor = ArgumentCaptor.forClass(Duration.class);
         order.verify(tokenBlacklistStore).add(eq(accessJwtId), ttlCaptor.capture());
         assertThat(ttlCaptor.getValue()).isBetween(Duration.ofMinutes(14), Duration.ofMinutes(15));
@@ -79,13 +79,13 @@ class LogoutServiceTest {
         String refreshToken = "refresh-token";
         Long userId = 5L;
 
-        given(jwtTokenClient.parse(refreshToken)).willReturn(
+        given(jwtTokenProvider.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, null));
 
-        verify(refreshTokenStore).revokeAll(userId);
+        verify(refreshTokenRepository).revokeAllByUserId(eq(userId), any(Instant.class));
         verify(tokenBlacklistStore, never()).add(anyString(), any());
         assertThat(result.userId()).isEqualTo(userId);
     }
@@ -94,7 +94,7 @@ class LogoutServiceTest {
     void Refresh_Token_쿠키가_없으면_멱등하게_anonymous_결과를_반환하고_아무것도_수행하지_않는다() {
         LogoutResult result = logoutService.execute(new LogoutCommand(null, null));
 
-        verify(refreshTokenStore, never()).revokeAll(anyLong());
+        verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong(), any(Instant.class));
         verify(tokenBlacklistStore, never()).add(anyString(), any());
         assertThat(result.userId()).isNull();
     }
@@ -102,12 +102,12 @@ class LogoutServiceTest {
     @Test
     void Refresh_Token이_유효하지_않으면_멱등하게_anonymous_결과를_반환한다() {
         String refreshToken = "invalid-refresh-token";
-        given(jwtTokenClient.parse(refreshToken))
+        given(jwtTokenProvider.parse(refreshToken))
                 .willThrow(new UnauthorizedException(AuthErrorCode.INVALID_TOKEN));
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, null));
 
-        verify(refreshTokenStore, never()).revokeAll(anyLong());
+        verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong(), any(Instant.class));
         verify(tokenBlacklistStore, never()).add(anyString(), any());
         assertThat(result.userId()).isNull();
     }
@@ -115,13 +115,13 @@ class LogoutServiceTest {
     @Test
     void Refresh_Token_자리에_Access_Token이_들어오면_멱등하게_anonymous_결과를_반환한다() {
         String notRefreshToken = "access-token";
-        given(jwtTokenClient.parse(notRefreshToken)).willReturn(
+        given(jwtTokenProvider.parse(notRefreshToken)).willReturn(
                 new ParsedToken(5L, "USER", "jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
         );
 
         LogoutResult result = logoutService.execute(new LogoutCommand(notRefreshToken, null));
 
-        verify(refreshTokenStore, never()).revokeAll(anyLong());
+        verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong(), any(Instant.class));
         verify(tokenBlacklistStore, never()).add(anyString(), any());
         assertThat(result.userId()).isNull();
     }
@@ -132,15 +132,15 @@ class LogoutServiceTest {
         String invalidAccessToken = "invalid-access-token";
         Long userId = 5L;
 
-        given(jwtTokenClient.parse(refreshToken)).willReturn(
+        given(jwtTokenProvider.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        given(jwtTokenClient.parse(invalidAccessToken))
+        given(jwtTokenProvider.parse(invalidAccessToken))
                 .willThrow(new UnauthorizedException(AuthErrorCode.INVALID_TOKEN));
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, invalidAccessToken));
 
-        verify(refreshTokenStore).revokeAll(userId);
+        verify(refreshTokenRepository).revokeAllByUserId(eq(userId), any(Instant.class));
         verify(tokenBlacklistStore, never()).add(anyString(), any());
         assertThat(result.userId()).isEqualTo(userId);
     }
@@ -152,16 +152,16 @@ class LogoutServiceTest {
         Long refreshUserId = 5L;
         Long otherUserId = 9L;
 
-        given(jwtTokenClient.parse(refreshToken)).willReturn(
+        given(jwtTokenProvider.parse(refreshToken)).willReturn(
                 new ParsedToken(refreshUserId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        given(jwtTokenClient.parse(accessToken)).willReturn(
+        given(jwtTokenProvider.parse(accessToken)).willReturn(
                 new ParsedToken(otherUserId, "USER", "access-jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
         );
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, accessToken));
 
-        verify(refreshTokenStore).revokeAll(refreshUserId);
+        verify(refreshTokenRepository).revokeAllByUserId(eq(refreshUserId), any(Instant.class));
         verify(tokenBlacklistStore, never()).add(anyString(), any());
         assertThat(result.userId()).isEqualTo(refreshUserId);
     }
@@ -172,10 +172,10 @@ class LogoutServiceTest {
         String accessToken = "access-token";
         Long userId = 5L;
 
-        given(jwtTokenClient.parse(refreshToken)).willReturn(
+        given(jwtTokenProvider.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        given(jwtTokenClient.parse(accessToken)).willReturn(
+        given(jwtTokenProvider.parse(accessToken)).willReturn(
                 new ParsedToken(userId, "USER", "access-jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
         );
         doThrow(new DataAccessResourceFailureException("simulated blacklist failure"))
@@ -183,7 +183,7 @@ class LogoutServiceTest {
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, accessToken));
 
-        verify(refreshTokenStore).revokeAll(userId);
+        verify(refreshTokenRepository).revokeAllByUserId(eq(userId), any(Instant.class));
         assertThat(result.userId()).isEqualTo(userId);
     }
 
@@ -193,11 +193,11 @@ class LogoutServiceTest {
         String accessToken = "access-token";
         Long userId = 5L;
 
-        given(jwtTokenClient.parse(refreshToken)).willReturn(
+        given(jwtTokenProvider.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
         doThrow(new DataAccessResourceFailureException("simulated RT store failure"))
-                .when(refreshTokenStore).revokeAll(userId);
+                .when(refreshTokenRepository).revokeAllByUserId(eq(userId), any(Instant.class));
 
         assertThatThrownBy(() -> logoutService.execute(new LogoutCommand(refreshToken, accessToken)))
                 .isInstanceOf(DataAccessException.class);

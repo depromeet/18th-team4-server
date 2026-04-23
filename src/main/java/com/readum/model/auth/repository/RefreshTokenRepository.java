@@ -1,6 +1,6 @@
 package com.readum.model.auth.repository;
 
-import com.readum.model.auth.entity.RefreshTokenEntity;
+import com.readum.model.auth.entity.RefreshToken;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -9,21 +9,21 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.Optional;
 
-public interface RefreshTokenRepository extends JpaRepository<RefreshTokenEntity, Long> {
+public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
 
-    Optional<RefreshTokenEntity> findByUserIdAndJwtId(Long userId, String jwtId);
+    Optional<RefreshToken> findByUserIdAndJwtId(Long userId, String jwtId);
 
-    Optional<RefreshTokenEntity> findByParentJwtId(String parentJwtId);
+    Optional<RefreshToken> findByParentJwtId(String parentJwtId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
-            update RefreshTokenEntity r
-               set r.rotatedAt = :now,
-                   r.graceExpiresAt = :graceUntil
-             where r.id = :id
-               and r.rotatedAt is null
-               and r.revokedAt is null
-               and r.expiresAt > :now
+            update RefreshToken refreshToken
+               set refreshToken.rotatedAt = :now
+                 , refreshToken.graceExpiresAt = :graceUntil
+             where refreshToken.id = :id
+               and refreshToken.rotatedAt is null
+               and refreshToken.revokedAt is null
+               and refreshToken.expiresAt > :now
             """)
     int rotate(
             @Param("id") Long id,
@@ -33,10 +33,10 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshTokenEntity
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
-            update RefreshTokenEntity r
-               set r.revokedAt = :now
-             where r.userId = :userId
-               and r.revokedAt is null
+            update RefreshToken refreshToken
+               set refreshToken.revokedAt = :now
+             where refreshToken.userId = :userId
+               and refreshToken.revokedAt is null
             """)
     int revokeAllByUserId(
             @Param("userId") Long userId,

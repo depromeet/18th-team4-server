@@ -1,6 +1,6 @@
 package com.readum.model.auth.repository;
 
-import com.readum.model.auth.entity.RefreshTokenEntity;
+import com.readum.model.auth.entity.RefreshToken;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -28,11 +28,11 @@ class RefreshTokenRepositoryTest {
     void save_이후_조회() {
         Long userId = nextUserId();
         Instant now = Instant.now();
-        RefreshTokenEntity saved = refreshTokenRepository.save(
-                RefreshTokenEntity.create(userId, "jti-" + userId, now, now.plusSeconds(3600))
+        RefreshToken saved = refreshTokenRepository.save(
+                RefreshToken.create(userId, "jti-" + userId, now, now.plusSeconds(3600))
         );
 
-        Optional<RefreshTokenEntity> found = refreshTokenRepository.findByUserIdAndJwtId(userId, "jti-" + userId);
+        Optional<RefreshToken> found = refreshTokenRepository.findByUserIdAndJwtId(userId, "jti-" + userId);
 
         assertThat(found).isPresent();
         assertThat(found.get().getId()).isEqualTo(saved.getId());
@@ -43,8 +43,8 @@ class RefreshTokenRepositoryTest {
     void 연속_rotate_CAS_는_한_번만_성공한다() {
         Long userId = nextUserId();
         Instant now = Instant.now();
-        RefreshTokenEntity row = refreshTokenRepository.save(
-                RefreshTokenEntity.create(userId, "jti-" + userId, now, now.plusSeconds(3600))
+        RefreshToken row = refreshTokenRepository.save(
+                RefreshToken.create(userId, "jti-" + userId, now, now.plusSeconds(3600))
         );
 
         int first = refreshTokenRepository.rotate(row.getId(), now, now.plusSeconds(3));
@@ -59,8 +59,8 @@ class RefreshTokenRepositoryTest {
     void 만료된_row_는_rotate_실패() {
         Long userId = nextUserId();
         Instant past = Instant.now().minusSeconds(10);
-        RefreshTokenEntity row = refreshTokenRepository.save(
-                RefreshTokenEntity.create(userId, "jti-" + userId, past.minusSeconds(60), past)
+        RefreshToken row = refreshTokenRepository.save(
+                RefreshToken.create(userId, "jti-" + userId, past.minusSeconds(60), past)
         );
 
         int affected = refreshTokenRepository.rotate(row.getId(), Instant.now(), Instant.now().plusSeconds(3));
@@ -74,10 +74,10 @@ class RefreshTokenRepositoryTest {
         Long userId = nextUserId();
         Instant now = Instant.now();
         refreshTokenRepository.save(
-                RefreshTokenEntity.create(userId, "jti-a-" + userId, now, now.plusSeconds(3600))
+                RefreshToken.create(userId, "jti-a-" + userId, now, now.plusSeconds(3600))
         );
         refreshTokenRepository.save(
-                RefreshTokenEntity.create(userId, "jti-b-" + userId, now, now.plusSeconds(3600))
+                RefreshToken.create(userId, "jti-b-" + userId, now, now.plusSeconds(3600))
         );
 
         int affected = refreshTokenRepository.revokeAllByUserId(userId, now);
@@ -89,24 +89,24 @@ class RefreshTokenRepositoryTest {
     }
 
     @Test
-    @DisplayName("parent_jwt_id 로 successor 를 역조회할 수 있다")
+    @DisplayName("parent_jwt_id 로 child 를 역조회할 수 있다")
     void parent_jwt_id_역조회() {
         Long userId = nextUserId();
         Instant now = Instant.now();
         String parentJti = "parent-" + userId;
-        String successorJti = "successor-" + userId;
+        String childJti = "child-" + userId;
 
         refreshTokenRepository.save(
-                RefreshTokenEntity.create(userId, parentJti, now, now.plusSeconds(3600))
+                RefreshToken.create(userId, parentJti, now, now.plusSeconds(3600))
         );
         refreshTokenRepository.save(
-                RefreshTokenEntity.createSuccessor(userId, successorJti, parentJti, now, now.plusSeconds(3600))
+                RefreshToken.createChild(userId, childJti, parentJti, now, now.plusSeconds(3600))
         );
 
-        Optional<RefreshTokenEntity> found = refreshTokenRepository.findByParentJwtId(parentJti);
+        Optional<RefreshToken> found = refreshTokenRepository.findByParentJwtId(parentJti);
 
         assertThat(found).isPresent();
-        assertThat(found.get().getJwtId()).isEqualTo(successorJti);
+        assertThat(found.get().getJwtId()).isEqualTo(childJti);
     }
 
     private static long userIdSeq = 900_000L;

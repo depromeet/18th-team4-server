@@ -36,10 +36,7 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<TokenRefreshResponse>> refresh(
-            @CookieValue(name = REFRESH_TOKEN_COOKIE, required = false) String refreshToken) {
-        if (refreshToken == null || refreshToken.isBlank()) {
-            throw new UnauthorizedException(AuthErrorCode.REFRESH_TOKEN_NOT_FOUND);
-        }
+            @CookieValue(name = REFRESH_TOKEN_COOKIE) String refreshToken) {
         TokenRefreshRequest request = new TokenRefreshRequest(refreshToken);
         TokenPair pair = tokenRefreshService.execute(request.toCommand());
 

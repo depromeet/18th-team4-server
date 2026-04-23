@@ -1,18 +1,17 @@
-package com.readum.infrastructure.auth.jwt;
+package com.readum.domain.auth.jwt;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.exception.AuthErrorCode;
-import com.readum.domain.auth.out.JwtTokenClient;
 import com.readum.domain.exception.UnauthorizedException;
-import com.readum.infrastructure.auth.config.JwtProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
+import io.micrometer.common.util.StringUtils;
 import jakarta.annotation.PostConstruct;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -21,8 +20,8 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
 
-@Component
-public class JwtTokenClientImpl implements JwtTokenClient {
+@Service
+public class JwtTokenProvider {
 
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_TYP = "typ";
@@ -33,14 +32,14 @@ public class JwtTokenClientImpl implements JwtTokenClient {
     private final JwtProperties properties;
     private SecretKey signingKey;
 
-    public JwtTokenClientImpl(JwtProperties properties) {
+    public JwtTokenProvider(JwtProperties properties) {
         this.properties = properties;
     }
 
     @PostConstruct
     void init() {
         String secret = properties.secret();
-        if (secret == null || secret.isBlank()) {
+        if (StringUtils.isBlank(secret)) {
             throw new IllegalStateException(
                     "jwt.secret 이 비어있습니다. 환경변수 JWT_SECRET 또는 application-{profile}.yml 의 jwt.secret 을 설정하세요."
             );
@@ -63,13 +62,11 @@ public class JwtTokenClientImpl implements JwtTokenClient {
         this.signingKey = new SecretKeySpec(decoded, "HmacSHA256");
     }
 
-    @Override
     public String generateAccessToken(Long userId, String role, String jwtId) {
         Instant now = Instant.now();
         return buildToken(userId, role, jwtId, TYP_ACCESS, now, now.plus(properties.accessTokenTtl()));
     }
 
-    @Override
     public String generateRefreshToken(RefreshTokenPayload payload) {
         return buildToken(
                 payload.userId(),
@@ -94,7 +91,6 @@ public class JwtTokenClientImpl implements JwtTokenClient {
                 .compact();
     }
 
-    @Override
     public ParsedToken parse(String token) {
         Claims claims;
         try {
@@ -133,17 +129,14 @@ public class JwtTokenClientImpl implements JwtTokenClient {
         );
     }
 
-    @Override
     public Duration accessTokenTtl() {
         return properties.accessTokenTtl();
     }
 
-    @Override
     public Duration refreshTokenTtl() {
         return properties.refreshTokenTtl();
     }
 
-    @Override
     public Duration refreshGracePeriod() {
         return properties.refreshGracePeriod();
     }

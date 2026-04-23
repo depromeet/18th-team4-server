@@ -4,7 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Expiry;
 import com.readum.domain.auth.out.TokenBlacklistStore;
-import com.readum.infrastructure.auth.config.JwtProperties;
+import com.readum.domain.auth.jwt.JwtProperties;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;

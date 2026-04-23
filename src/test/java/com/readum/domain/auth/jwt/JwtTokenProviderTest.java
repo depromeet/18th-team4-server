@@ -1,11 +1,10 @@
-package com.readum.infrastructure.auth.jwt;
+package com.readum.domain.auth.jwt;
 
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
-import com.readum.infrastructure.auth.config.JwtProperties;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,20 +16,20 @@ import java.util.Base64;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class JwtTokenClientImplTest {
+class JwtTokenProviderTest {
 
     private static final String SECRET = Base64.getEncoder()
             .encodeToString("01234567890123456789012345678901".getBytes());
     private static final String ISSUER = "readum-test";
 
-    private JwtTokenClientImpl client;
+    private JwtTokenProvider client;
 
     @BeforeEach
     void setUp() {
         client = newClient(Duration.ofMinutes(30), Duration.ofDays(14));
     }
 
-    private JwtTokenClientImpl newClient(Duration accessTtl, Duration refreshTtl) {
+    private JwtTokenProvider newClient(Duration accessTtl, Duration refreshTtl) {
         JwtProperties properties = new JwtProperties(
                 SECRET,
                 ISSUER,
@@ -39,7 +38,7 @@ class JwtTokenClientImplTest {
                 Duration.ofSeconds(3),
                 10_000L
         );
-        JwtTokenClientImpl c = new JwtTokenClientImpl(properties);
+        JwtTokenProvider c = new JwtTokenProvider(properties);
         c.init();
         return c;
     }
@@ -74,7 +73,7 @@ class JwtTokenClientImplTest {
 
     @Test
     void 만료된_토큰을_파싱하면_TOKEN_EXPIRED_예외가_발생한다() {
-        JwtTokenClientImpl expiredClient = newClient(Duration.ofSeconds(-1), Duration.ofDays(14));
+        JwtTokenProvider expiredClient = newClient(Duration.ofSeconds(-1), Duration.ofDays(14));
         String token = expiredClient.generateAccessToken(1L, "USER", "jwt-id");
 
         assertThatThrownBy(() -> expiredClient.parse(token))
