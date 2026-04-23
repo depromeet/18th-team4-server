@@ -13,6 +13,6 @@ spring:
 
 logging:
   level:
-    com.readwith: DEBUG
+    com.readum: DEBUG
     org.hibernate.SQL: DEBUG
     org.hibernate.orm.jdbc.bind: WARN
