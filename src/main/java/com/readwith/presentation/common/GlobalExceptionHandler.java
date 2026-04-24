@@ -88,11 +88,11 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(HttpStatus.BAD_REQUEST, "요청 본문을 읽을 수 없습니다.");
     }
 
-    // AI API 비일시적 오류 (Rate limit, 인증 오류 등) — 클라이언트 측 요청 문제
+    // AI API 인프라 오류 (Rate limit, 인증 키 오류 등) — 서버 설정/한도 문제
     @ExceptionHandler(NonTransientAiException.class)
     public ResponseEntity<ApiResponse<?>> handleNonTransientAi(NonTransientAiException ex) {
-        log.warn("Non-transient AI error: {}", ex.getMessage());
-        return ApiResponse.error(HttpStatus.BAD_REQUEST, "AI API 요청을 처리할 수 없습니다.");
+        log.error("Non-transient AI error: {}", ex.getMessage());
+        return ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
     }
 
     // AI API 일시적 오류 (타임아웃, 서버 오류 등) — 재시도로 해결 가능
