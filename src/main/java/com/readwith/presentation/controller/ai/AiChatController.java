@@ -6,11 +6,11 @@ import com.readwith.domain.ai.service.AiStreamChatService;
 import com.readwith.presentation.common.ApiResponse;
 import com.readwith.presentation.controller.ai.dto.AiChatRequest;
 import com.readwith.presentation.controller.ai.dto.AiChatResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
-import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,7 +32,18 @@ public class AiChatController {
     }
 
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> chatStream(@Valid @RequestBody AiChatRequest request) {
-        return aiStreamChatService.stream(request.toCommand());
+    public ResponseEntity<Flux<ServerSentEvent<String>>> chatStream(@Valid @RequestBody AiChatRequest request) {
+        Flux<ServerSentEvent<String>> stream = aiStreamChatService.stream(request.toCommand())
+                .map(text -> ServerSentEvent.<String>builder()
+                        .event("message")
+                        .data(text)
+                        .build())
+                .onErrorResume(e -> Flux.just(
+                        ServerSentEvent.<String>builder()
+                                .event("error")
+                                .data("통신 중 문제가 발생했습니다.")
+                                .build()
+                ));
+        return ResponseEntity.ok(stream);
     }
 }

@@ -5,6 +5,7 @@ import com.readwith.domain.exception.BusinessException;
 import com.readwith.domain.exception.ConflictException;
 import com.readwith.domain.exception.ForbiddenException;
 import com.readwith.domain.exception.NotFoundException;
+import com.readwith.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
@@ -25,6 +26,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleBadRequest(BadRequestException ex) {
         log.warn("Bad request: {}", ex.getErrorCode().getMessage());
         return ApiResponse.error(HttpStatus.BAD_REQUEST, ex.getErrorCode().getMessage());
+    }
+
+    // 도메인 비즈니스 예외 - 인증 실패
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ApiResponse<?>> handleUnauthorized(UnauthorizedException ex) {
+        log.warn("Unauthorized: {}", ex.getErrorCode().getMessage());
+        return ApiResponse.error(HttpStatus.UNAUTHORIZED, ex.getErrorCode().getMessage());
     }
 
     // 도메인 비즈니스 예외 - 접근 권한 없음
@@ -91,7 +99,7 @@ public class GlobalExceptionHandler {
     // AI API 인프라 오류 (Rate limit, 인증 키 오류 등) — 서버 설정/한도 문제
     @ExceptionHandler(NonTransientAiException.class)
     public ResponseEntity<ApiResponse<?>> handleNonTransientAi(NonTransientAiException ex) {
-        log.error("Non-transient AI error: {}", ex.getMessage());
+        log.error("Non-transient AI error: {}", ex.getMessage(), ex);
         return ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
     }
 

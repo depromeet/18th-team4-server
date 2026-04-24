@@ -7,7 +7,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.codec.ServerSentEvent;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
@@ -24,42 +23,32 @@ class AiStreamChatServiceTest {
     private AiStreamChatService aiStreamChatService;
 
     @Test
-    void 스트리밍_응답_청크가_message_이벤트로_순서대로_반환된다() {
+    void 스트리밍_응답_청크가_순서대로_반환된다() {
         AiChatCommand command = new AiChatCommand("책의 줄거리를 요약해줘");
         given(aiChatClient.stream(command))
                 .willReturn(Flux.just("이 책은", " 모험에", " 관한 이야기입니다."));
 
-        Flux<ServerSentEvent<String>> result = aiStreamChatService.stream(command);
+        Flux<String> result = aiStreamChatService.stream(command);
 
         StepVerifier.create(result)
-                .assertNext(sse -> {
-                    assertThat(sse.event()).isEqualTo("message");
-                    assertThat(sse.data()).isEqualTo("이 책은");
-                })
-                .assertNext(sse -> {
-                    assertThat(sse.event()).isEqualTo("message");
-                    assertThat(sse.data()).isEqualTo(" 모험에");
-                })
-                .assertNext(sse -> {
-                    assertThat(sse.event()).isEqualTo("message");
-                    assertThat(sse.data()).isEqualTo(" 관한 이야기입니다.");
-                })
+                .assertNext(text -> assertThat(text).isEqualTo("이 책은"))
+                .assertNext(text -> assertThat(text).isEqualTo(" 모험에"))
+                .assertNext(text -> assertThat(text).isEqualTo(" 관한 이야기입니다."))
                 .verifyComplete();
     }
 
     @Test
-    void 스트림_도중_에러가_발생하면_error_이벤트를_방출하고_정상_완료된다() {
+    void 스트림_도중_에러가_발생하면_에러가_전파된다() {
         AiChatCommand command = new AiChatCommand("에러 발생 케이스");
+        RuntimeException expectedException = new RuntimeException("OpenAI API 연결 실패");
         given(aiChatClient.stream(command))
-                .willReturn(Flux.error(new RuntimeException("OpenAI API 연결 실패")));
+                .willReturn(Flux.error(expectedException));
 
-        Flux<ServerSentEvent<String>> result = aiStreamChatService.stream(command);
+        Flux<String> result = aiStreamChatService.stream(command);
 
         StepVerifier.create(result)
-                .assertNext(sse -> {
-                    assertThat(sse.event()).isEqualTo("error");
-                    assertThat(sse.data()).isEqualTo("통신 중 문제가 발생했습니다.");
-                })
-                .verifyComplete();
+                .expectErrorMatches(e -> e instanceof RuntimeException
+                        && e.getMessage().equals("OpenAI API 연결 실패"))
+                .verify();
     }
 }
