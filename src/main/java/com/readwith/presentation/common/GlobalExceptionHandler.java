@@ -6,6 +6,8 @@ import com.readwith.domain.exception.ConflictException;
 import com.readwith.domain.exception.ForbiddenException;
 import com.readwith.domain.exception.NotFoundException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.retry.NonTransientAiException;
+import org.springframework.ai.retry.TransientAiException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -84,6 +86,20 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleUnreadableMessage(HttpMessageNotReadableException ex) {
         log.debug("Unreadable message: {}", ex.getMessage());
         return ApiResponse.error(HttpStatus.BAD_REQUEST, "요청 본문을 읽을 수 없습니다.");
+    }
+
+    // AI API 비일시적 오류 (Rate limit, 인증 오류 등) — 클라이언트 측 요청 문제
+    @ExceptionHandler(NonTransientAiException.class)
+    public ResponseEntity<ApiResponse<?>> handleNonTransientAi(NonTransientAiException ex) {
+        log.warn("Non-transient AI error: {}", ex.getMessage());
+        return ApiResponse.error(HttpStatus.BAD_REQUEST, "AI API 요청을 처리할 수 없습니다.");
+    }
+
+    // AI API 일시적 오류 (타임아웃, 서버 오류 등) — 재시도로 해결 가능
+    @ExceptionHandler(TransientAiException.class)
+    public ResponseEntity<ApiResponse<?>> handleTransientAi(TransientAiException ex) {
+        log.error("Transient AI error (retryable): {}", ex.getMessage());
+        return ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
     }
 
     // 위에서 처리되지 않은 모든 예외 (예기치 않은 서버 오류)

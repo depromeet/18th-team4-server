@@ -9,6 +9,8 @@ import com.readwith.presentation.controller.ai.dto.AiChatResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.ServerSentEvent;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,13 +26,13 @@ public class AiChatController {
     private final AiStreamChatService aiStreamChatService;
 
     @PostMapping("/chat")
-    public ResponseEntity<ApiResponse<AiChatResponse>> chat(@RequestBody AiChatRequest request) {
+    public ResponseEntity<ApiResponse<AiChatResponse>> chat(@Valid @RequestBody AiChatRequest request) {
         AiChatResult result = aiChatService.execute(request.toCommand());
         return ApiResponse.ok(AiChatResponse.from(result));
     }
 
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> chatStream(@RequestBody AiChatRequest request) {
+    public Flux<ServerSentEvent<String>> chatStream(@Valid @RequestBody AiChatRequest request) {
         return aiStreamChatService.stream(request.toCommand());
     }
 }
