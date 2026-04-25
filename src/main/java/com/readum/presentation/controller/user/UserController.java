@@ -1,12 +1,15 @@
 package com.readum.presentation.controller.user;
 
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.dto.CompleteOnboardingResult;
 import com.readum.domain.user.dto.CreateUserSessionResult;
 import com.readum.domain.user.dto.UserSessionInfoResult;
 import com.readum.domain.user.exception.UserErrorCode;
+import com.readum.domain.user.service.CompleteOnboardingService;
 import com.readum.domain.user.service.CreateUserSessionService;
 import com.readum.domain.user.service.UserSearchService;
 import com.readum.presentation.common.ApiResponse;
+import com.readum.presentation.controller.user.dto.CompleteOnboardingResponse;
 import com.readum.presentation.controller.user.dto.CreateUserSessionResponse;
 import com.readum.presentation.controller.user.dto.UserSessionInfoResponse;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +36,7 @@ public class UserController {
 
     private final CreateUserSessionService createUserSessionService;
     private final UserSearchService userSearchService;
+    private final CompleteOnboardingService completeOnboardingService;
 
     @Value("${user.session-cookie-secure:true}")
     private boolean sessionCookieSecure;
@@ -53,6 +57,14 @@ public class UserController {
         String resolvedSessionId = requireSessionId(sessionId);
         UserSessionInfoResult result = userSearchService.findSessionInfo(resolvedSessionId);
         return ApiResponse.ok(UserSessionInfoResponse.from(result));
+    }
+
+    @PostMapping("/me/onboarding")
+    public ResponseEntity<ApiResponse<CompleteOnboardingResponse>> completeOnboarding(
+            @CookieValue(name = USER_SESSION_COOKIE, required = false) String sessionId) {
+        String resolvedSessionId = requireSessionId(sessionId);
+        CompleteOnboardingResult result = completeOnboardingService.execute(resolvedSessionId);
+        return ApiResponse.ok(CompleteOnboardingResponse.from(result));
     }
 
     private String requireSessionId(String sessionId) {
