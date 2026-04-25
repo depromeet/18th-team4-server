@@ -1,4 +1,4 @@
-# readwith
+# readum
 
 ## 로컬 개발 환경 세팅
 
