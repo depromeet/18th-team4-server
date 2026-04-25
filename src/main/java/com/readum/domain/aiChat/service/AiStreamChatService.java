@@ -1,7 +1,7 @@
-package com.readum.domain.ai.service;
+package com.readum.domain.aiChat.service;
 
-import com.readum.domain.ai.dto.AiChatCommand;
-import com.readum.domain.ai.out.AiChatClient;
+import com.readum.domain.aiChat.dto.AiChatCommand;
+import com.readum.domain.aiChat.out.AiChatClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;

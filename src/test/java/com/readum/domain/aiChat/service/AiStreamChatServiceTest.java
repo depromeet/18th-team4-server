@@ -1,7 +1,7 @@
-package com.readum.domain.ai.service;
+package com.readum.domain.aiChat.service;
 
-import com.readum.domain.ai.dto.AiChatCommand;
-import com.readum.domain.ai.out.AiChatClient;
+import com.readum.domain.aiChat.dto.AiChatCommand;
+import com.readum.domain.aiChat.out.AiChatClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;

@@ -1,7 +1,7 @@
-package com.readum.presentation.controller.ai;
+package com.readum.presentation.controller.aiChat;
 
-import com.readum.domain.ai.service.AiStreamChatService;
-import com.readum.presentation.controller.ai.dto.AiChatRequest;
+import com.readum.domain.aiChat.service.AiStreamChatService;
+import com.readum.presentation.controller.aiChat.dto.AiChatRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -14,13 +14,13 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 @RestController
-@RequestMapping("/api/v1/ai")
+@RequestMapping("/api/v1/ai-chat")
 @RequiredArgsConstructor
 public class AiChatController {
 
     private final AiStreamChatService aiStreamChatService;
 
-    @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<Flux<ServerSentEvent<String>>> chatStream(@Valid @RequestBody AiChatRequest request) {
         Flux<ServerSentEvent<String>> stream = aiStreamChatService.stream(request.toCommand())
                 .map(text -> ServerSentEvent.<String>builder()

@@ -1,6 +1,6 @@
-package com.readum.domain.ai.out;
+package com.readum.domain.aiChat.out;
 
-import com.readum.domain.ai.dto.AiChatCommand;
+import com.readum.domain.aiChat.dto.AiChatCommand;
 import reactor.core.publisher.Flux;
 
 public interface AiChatClient {

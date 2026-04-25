@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
                 @Index(name = "idx_summary_user_book", columnList = "user_book_id")
         },
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_summary_chat_session", columnNames = "chat_session_id")
+                @UniqueConstraint(name = "uk_summary_ai_chat_session", columnNames = "ai_chat_session_id")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -37,8 +37,8 @@ public class Summary {
     @Column(name = "user_book_id", nullable = false)
     private Long userBookId;
 
-    @Column(name = "chat_session_id", nullable = false)
-    private Long chatSessionId;
+    @Column(name = "ai_chat_session_id", nullable = false)
+    private Long aiChatSessionId;
 
     @Column(name = "quote", columnDefinition = "TEXT")
     private String quote;
@@ -57,25 +57,25 @@ public class Summary {
 
     public static Summary create(
             Long userBookId,
-            Long chatSessionId,
+            Long aiChatSessionId,
             String quote,
             String title,
             String body
     ) {
         LocalDateTime now = LocalDateTime.now();
-        return new Summary(null, userBookId, chatSessionId, quote, title, body, now, now);
+        return new Summary(null, userBookId, aiChatSessionId, quote, title, body, now, now);
     }
 
     public static Summary of(
             Long id,
             Long userBookId,
-            Long chatSessionId,
+            Long aiChatSessionId,
             String quote,
             String title,
             String body,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {
-        return new Summary(id, userBookId, chatSessionId, quote, title, body, createdAt, updatedAt);
+        return new Summary(id, userBookId, aiChatSessionId, quote, title, body, createdAt, updatedAt);
     }
 }
