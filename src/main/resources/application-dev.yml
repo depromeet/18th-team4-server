@@ -24,6 +24,16 @@ logging:
     org.hibernate.SQL: DEBUG
     org.hibernate.orm.jdbc.bind: WARN
 
+aladin:
+  ttb-key: ${ALADIN_TTB_KEY:}
+  base-url: http://www.aladin.co.kr/ttb/api
+  search-target: Book
+  output: JS
+  version: 20131101
+  cover: Big
+  request-timeout: PT1S
+  search-result-limit: 200
+
 springdoc:
   api-docs:
     enabled: true

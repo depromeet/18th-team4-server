@@ -1,14 +1,18 @@
 package com.readum.presentation.common;
 
+import com.readum.domain.exception.BadGatewayException;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.ConflictException;
+import com.readum.domain.exception.ExternalApiException;
 import com.readum.domain.exception.ForbiddenException;
+import com.readum.domain.exception.GatewayTimeoutException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -54,6 +58,34 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleConflict(ConflictException ex) {
         log.warn("Conflict: {}", ex.getErrorCode().getMessage());
         return ApiResponse.error(HttpStatus.CONFLICT, ex.getErrorCode().getMessage());
+    }
+
+    // 외부 시스템 응답 오류 (업스트림 5xx) → 502
+    @ExceptionHandler(BadGatewayException.class)
+    public ResponseEntity<ApiResponse<?>> handleBadGateway(BadGatewayException ex) {
+        log.error("외부 시스템 오류 응답 - {}", ex.getErrorCode().name(), ex);
+        return ApiResponse.error(HttpStatus.BAD_GATEWAY, ex.getErrorCode().getMessage());
+    }
+
+    // 외부 시스템 응답 시간 초과 / IO 실패 → 504
+    @ExceptionHandler(GatewayTimeoutException.class)
+    public ResponseEntity<ApiResponse<?>> handleGatewayTimeout(GatewayTimeoutException ex) {
+        log.error("외부 시스템 응답 지연 - {}", ex.getErrorCode().name(), ex);
+        return ApiResponse.error(HttpStatus.GATEWAY_TIMEOUT, ex.getErrorCode().getMessage());
+    }
+
+    // 외부 시스템 호출 미분류 실패 → 500
+    @ExceptionHandler(ExternalApiException.class)
+    public ResponseEntity<ApiResponse<?>> handleExternalApi(ExternalApiException ex) {
+        log.error("외부 시스템 호출 실패 - {}", ex.getErrorCode().name(), ex);
+        return ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, ex.getErrorCode().getMessage());
+    }
+
+    // DB 접근 실패 - 커넥션 끊김, 타임아웃, 제약 위반 등
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<ApiResponse<?>> handleDataAccess(DataAccessException ex) {
+        log.error("DB 장애", ex);
+        return ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, ErrorMessages.SERVICE_UNAVAILABLE);
     }
 
     // 도메인 비즈니스 예외 - 미분류 (fallback)

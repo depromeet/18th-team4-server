@@ -1,3 +1,22 @@
+spring:
+  ai:
+    openai:
+      api-key: test-openai-key
+      chat:
+        options:
+          model: gpt-4o-mini
+  datasource:
+    url: jdbc:h2:mem:readum;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        format_sql: true
+
 jwt:
   secret: dGVzdHNlY3JldHRlc3RzZWNyZXR0ZXN0c2VjcmV0dGVzdA==
   issuer: readum-test
@@ -6,3 +25,13 @@ jwt:
   refresh-grace-period: PT3S
   refresh-cookie-secure: false
   blacklist-max-size: 10000
+
+aladin:
+  ttb-key: test-ttb-key
+  base-url: http://test.aladin.local/ttb/api
+  search-target: Book
+  output: JS
+  version: 20131101
+  cover: Big
+  request-timeout: PT1S
+  search-result-limit: 200
