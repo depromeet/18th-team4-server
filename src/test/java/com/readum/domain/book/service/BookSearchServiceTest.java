@@ -38,7 +38,8 @@ class BookSearchServiceTest {
                 )),
                 1,
                 1,
-                10
+                10,
+                false
         );
         given(bookSearchClient.execute(command)).willReturn(expected);
 

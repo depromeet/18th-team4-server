@@ -6,6 +6,7 @@ public record BookSearchResult(
         List<BookResult> books,
         int totalResultCount,
         int page,
-        int size
+        int size,
+        boolean hasNext
 ) {
 }

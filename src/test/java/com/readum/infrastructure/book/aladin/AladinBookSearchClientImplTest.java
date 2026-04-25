@@ -78,6 +78,7 @@ class AladinBookSearchClientImplTest {
         assertThat(result.totalResultCount()).isEqualTo(100);
         assertThat(result.page()).isEqualTo(1);
         assertThat(result.size()).isEqualTo(10);
+        assertThat(result.hasNext()).isTrue();
         assertThat(result.books()).hasSize(1);
         BookResult book = result.books().get(0);
         assertThat(book.title()).isEqualTo("리액트를 다루는 기술");
@@ -112,6 +113,7 @@ class AladinBookSearchClientImplTest {
 
         assertThat(result.books()).isEmpty();
         assertThat(result.totalResultCount()).isZero();
+        assertThat(result.hasNext()).isFalse();
     }
 
     @Test
@@ -158,6 +160,7 @@ class AladinBookSearchClientImplTest {
         assertThat(result.totalResultCount()).isZero();
         assertThat(result.page()).isEqualTo(11);
         assertThat(result.size()).isEqualTo(20);
+        assertThat(result.hasNext()).isFalse();
         mockServer.verify();
     }
 
@@ -171,5 +174,19 @@ class AladinBookSearchClientImplTest {
         BookSearchResult result = client.execute(new BookSearchCommand("react", 1, 20));
 
         assertThat(result.totalResultCount()).isEqualTo(200);
+        assertThat(result.hasNext()).isTrue();
+    }
+
+    @Test
+    void 마지막_페이지에서는_hasNext가_false다() {
+        // page=10, size=20, total=200 → 10*20 == 200 이므로 다음 페이지 없음
+        mockServer.expect(queryParam("Query", "react"))
+                .andRespond(withSuccess("""
+                        {"totalResults":200,"startIndex":181,"itemsPerPage":20,"item":[]}
+                        """, MediaType.APPLICATION_JSON));
+
+        BookSearchResult result = client.execute(new BookSearchCommand("react", 10, 20));
+
+        assertThat(result.hasNext()).isFalse();
     }
 }

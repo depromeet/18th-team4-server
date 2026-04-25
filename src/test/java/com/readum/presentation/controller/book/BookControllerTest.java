@@ -48,7 +48,7 @@ class BookControllerTest {
                         2024,
                         "9788966262281"
                 )),
-                1, 1, 30
+                1, 1, 30, false
         );
         given(bookSearchService.search(any())).willReturn(result);
 

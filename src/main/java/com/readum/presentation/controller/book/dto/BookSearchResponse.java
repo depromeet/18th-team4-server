@@ -8,7 +8,8 @@ public record BookSearchResponse(
         List<BookResponse> books,
         int totalResultCount,
         int page,
-        int size
+        int size,
+        boolean hasNext
 ) {
 
     public static BookSearchResponse from(BookSearchResult result) {
@@ -16,7 +17,8 @@ public record BookSearchResponse(
                 result.books().stream().map(BookResponse::from).toList(),
                 result.totalResultCount(),
                 result.page(),
-                result.size()
+                result.size(),
+                result.hasNext()
         );
     }
 }
