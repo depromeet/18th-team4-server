@@ -57,6 +57,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiResponse<?>> handleConflict(ConflictException ex) {
         log.warn("Conflict: {}", ex.getErrorCode().getMessage());
+        if (ex.getPayload() != null) {
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(new ApiResponse<>(ex.getPayload(), null));
+        }
         return ApiResponse.error(HttpStatus.CONFLICT, ex.getErrorCode().getMessage());
     }
 
