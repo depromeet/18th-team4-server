@@ -8,4 +8,6 @@ import java.util.Optional;
 public interface UserBookRepository extends JpaRepository<UserBook, Long> {
 
     Optional<UserBook> findByIdAndUserId(Long id, Long userId);
+
+    boolean existsByUserIdAndBookId(Long userId, Long bookId);
 }
