@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**readwith** — a Spring Boot 4.0.5 web application using Java 25, Gradle 9.4.1, and Lombok.
+**readum** — a Spring Boot 4.0.5 web application using Java 25, Gradle 9.4.1, and Lombok.
 
 ## Build & Run Commands
 
@@ -25,10 +25,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew test
 
 # Run a single test class
-./gradlew test --tests "com.readwith.SomeTest"
+./gradlew test --tests "com.readum.SomeTest"
 
 # Run a single test method
-./gradlew test --tests "com.readwith.SomeTest.methodName"
+./gradlew test --tests "com.readum.SomeTest.methodName"
 
 # Clean build
 ./gradlew clean build
@@ -36,7 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-- **Base package**: `com.readwith` — Spring Boot auto-scans from here
+- **Base package**: `com.readum` — Spring Boot auto-scans from here
 - **Framework**: Spring Boot 4.0.5 with `spring-boot-starter-webmvc` (servlet-based web)
 - **Build**: Gradle with `io.spring.dependency-management` plugin for BOM-managed dependencies
 - **Java version**: 25
@@ -46,7 +46,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Package Structure (4-Layer)
 
 ```
-com.readwith
+com.readum
 ├── presentation/                # API 계층
 │   └── controller/{feature}/
 │       ├── {Feature}Controller.java
@@ -58,6 +58,8 @@ com.readwith
 │       ├── service/
 │       │   ├── {Action}Service.java         # Command 서비스
 │       │   └── {Feature}SearchService.java  # Query 서비스
+│       ├── {helper}/                        # 도메인 헬퍼 sub-package (예: jwt, crypto)
+│       │   └── {HelperName}.java            # Command/Query 가 아닌 도메인 빌딩 블록
 │       ├── out/
 │       │   └── {Feature}{Action}Client.java # Port 인터페이스
 │       └── dto/
@@ -79,8 +81,6 @@ com.readwith
 
 ### Dependency Rules
 
-모든 의존관계는 아래 방향만 허용한다. 역방향과 스킵 레이어 참조는 금지.
-
 ```mermaid
 graph TD
     P[presentation] --> D[domain]
@@ -93,9 +93,8 @@ graph TD
 | presentation | domain | O | Controller -> Service |
 | infrastructure | domain | O | Port(out) 구현 |
 | domain | model | O | Service -> Repository |
-| presentation | model | **X** | Entity 직접 참조 금지 |
+| presentation | model | **X** | Entity 직접 참조 금지, domain 경유 필수 |
 | presentation | infrastructure | **X** | |
-| infrastructure | model | **X** | domain을 통해서만 접근 |
 | domain | presentation | **X** | 역방향 금지 |
 | domain | infrastructure | **X** | Port 인터페이스만 알고 있음 |
 
@@ -105,6 +104,7 @@ graph TD
 - `Impl` 접미사 사용 금지 (Service에 한함)
 - **Command 서비스** (변경 작업): 단일 `execute(Command)` 메서드 -> Result 반환
 - **Query 서비스** (조회 작업): 메서드명으로 의도를 드러내며, 여러 메서드 허용
+- **도메인 헬퍼**: Command/Query 서비스 형태에 맞지 않지만 Spring bean 으로 관리해야 하는 도메인 빌딩 블록(토큰 생성·파싱, 암호화 helper 등)은 `service/` 가 아닌 `domain/{feature}/{helper}/` sub-package 로 분리한다. 예: `domain/auth/jwt/JwtTokenProvider`
 
 ## DTO Convention
 
@@ -118,13 +118,33 @@ graph TD
 
 - **Port** 인터페이스: `domain/{feature}/out/` 에 위치
 - **Adapter** 구현체: `infrastructure/{feature}/{provider}/` 에 위치, `Impl` 접미사 사용
-- 외부 API, 메시징, 파일 시스템 등 외부 의존성을 추상화
+- **적용 기준**: 구현체가 교체될 여지가 있거나 외부 시스템(API, 메시징, 캐시 백엔드 등)을 추상화해야 할 때만 도입한다. 단순 JPA Repository 접근은 `Service → Repository` 직접 호출로 충분하므로 Port 를 두지 않는다.
+  - O `TokenBlacklistStore` — 현재 in-memory (Caffeine) 구현이지만 Redis 등으로 교체 여지가 있어 Port 유지
+  - X `RefreshTokenStore` — JPA Repository 를 단순 래핑하는 수준이라 Port 없이 Service 가 `RefreshTokenRepository` 를 직접 사용
 
 ## Entity Convention
 
 - Lombok: `@Getter`, `@NoArgsConstructor(access = PROTECTED)`, `@AllArgsConstructor(access = PRIVATE)`
 - 정적 팩토리 메서드: `create()` (신규 생성), `of()` (모든 필드 지정)
 - setter 없이 불변 지향
+
+## JPQL/Query Convention
+
+- **엔티티 별칭(alias)**: 단일 문자 약어(`r`, `u`, `t`) 금지. 엔티티 이름을 camelCase 로 풀어 쓴다.
+  ```java
+  // ❌ update RefreshToken r set r.rotatedAt = :now where r.id = :id
+  // ✅ update RefreshToken refreshToken
+  //       set refreshToken.rotatedAt = :now
+  //     where refreshToken.id = :id
+  ```
+- **쉼표 위치(leading comma)**: 여러 줄 JPQL 에서 쉼표는 **다음 줄 앞단**에 둔다. 컬럼/필드 정렬이 유지되고 라인 추가 시 diff 가 깨끗함.
+  ```java
+  // ❌ set refreshToken.a = :x,
+  //        refreshToken.b = :y
+  // ✅ set refreshToken.a = :x
+  //      , refreshToken.b = :y
+  ```
+- leading comma 규칙은 `@Query` / `@NativeQuery` 텍스트 블럭 내부에 한정한다. Java 메서드 파라미터·인자 리스트·배열 리터럴 등은 기존대로 trailing comma 를 사용.
 
 ## API Convention
 
@@ -153,6 +173,26 @@ graph TD
   }
   ```
 
+## Exception Convention
+
+- **예외 루트**: `BusinessException` (`domain/exception/`) — `ErrorCode` 를 필드로 보관
+- **HTTP 상태별 서브클래스** (`domain/exception/`, 공용):
+
+| Exception | HTTP Status | 용도 |
+|-----------|:-----------:|------|
+| `BadRequestException` | 400 | 검증 실패, 비즈니스 규칙 위반 |
+| `UnauthorizedException` | 401 | 인증 실패 (토큰 무효/만료) |
+| `ForbiddenException` | 403 | 인증됐지만 권한 없음 |
+| `NotFoundException` | 404 | 리소스 미존재 |
+| `ConflictException` | 409 | 상태 충돌 (중복, 동시성) |
+
+- **도메인 ErrorCode**: `domain/{feature}/exception/{Feature}ErrorCode.java` 에 enum 으로 배치, `implements ErrorCode`, 메시지는 한글 (API 응답에 그대로 노출)
+- **예외 던지기**: 서브클래스 타입(HTTP 상태) + ErrorCode(세부 분기) 조합 사용. raw `RuntimeException` / `IllegalArgumentException` 금지. `IllegalStateException` 은 프로그램 버그에만 fail-fast 용으로 사용
+- **핸들러 일원화**: `presentation/common/GlobalExceptionHandler` 한 곳에만 매핑. 컨트롤러 개별 `@ExceptionHandler` 금지
+- **예외 검증 테스트**: `extracting("errorCode")` 같은 리플렉션 문자열 키 금지. `asInstanceOf(InstanceOfAssertFactories.type(...))` + 메서드 레퍼런스로 타입 안전하게 검증
+
+> 상세 예시(ErrorCode enum 템플릿, 테스트 assertion 패턴, 신규 상태 추가 절차)는 [`docs/exception-convention.md`](docs/exception-convention.md) 참조.
+
 ## Naming Conventions
 
 | Category | Convention | Example |
@@ -168,6 +208,8 @@ graph TD
 | Controller | `{Domain}Controller` | `ExampleController` |
 | Entity | 도메인명 그대로 | `User`, `ExampleEntity` |
 | Repository | `{Entity}Repository` | `UserRepository` |
+| ErrorCode | `{Domain}ErrorCode` | `AuthErrorCode` |
+| Exception (공용) | `{HttpStatus}Exception` | `UnauthorizedException`, `NotFoundException` |
 
 ## Testing Conventions
 
