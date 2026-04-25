@@ -23,3 +23,14 @@ logging:
     com.readum: DEBUG
     org.hibernate.SQL: DEBUG
     org.hibernate.orm.jdbc.bind: WARN
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
