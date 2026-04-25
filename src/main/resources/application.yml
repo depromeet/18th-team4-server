@@ -6,3 +6,9 @@ jwt:
   refresh-grace-period: PT3S
   refresh-cookie-secure: true
   blacklist-max-size: 10000
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
