@@ -1,7 +1,6 @@
 package com.readum.infrastructure.ai.openai;
 
 import com.readum.domain.ai.dto.AiChatCommand;
-import com.readum.domain.ai.dto.AiChatResult;
 import com.readum.domain.ai.out.AiChatClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,24 +19,6 @@ public class AiChatClientImpl implements AiChatClient {
     private final ChatClient chatClient;
 
     @Override
-    public AiChatResult chat(AiChatCommand command) {
-        ChatResponse chatResponse = chatClient.prompt()
-                .user(command.message())
-                .call()
-                .chatResponse();
-
-        logUsage(chatResponse);
-
-        String answer = Optional.ofNullable(chatResponse)
-                .map(ChatResponse::getResult)
-                .map(result -> result.getOutput())
-                .map(output -> output.getText())
-                .orElse("");
-
-        return new AiChatResult(answer);
-    }
-
-    @Override
     public Flux<String> stream(AiChatCommand command) {
         return chatClient.prompt()
                 .user(command.message())
@@ -49,17 +30,6 @@ public class AiChatClientImpl implements AiChatClient {
                         .map(result -> result.getOutput())
                         .map(output -> output.getText())
                         .orElse(null));
-    }
-
-    private void logUsage(ChatResponse chatResponse) {
-        Optional.ofNullable(chatResponse)
-                .map(ChatResponse::getMetadata)
-                .map(metadata -> metadata.getUsage())
-                .filter(usage -> usage.getTotalTokens() > 0)
-                .ifPresent(usage -> log.info("[Sync Token Usage] Prompt tokens: {}, Completion tokens: {}, Total tokens: {}",
-                        usage.getPromptTokens(),
-                        usage.getCompletionTokens(),
-                        usage.getTotalTokens()));
     }
 
     private void logUsageIfPresent(ChatResponse chatResponse) {
