@@ -10,4 +10,6 @@ public interface UserBookRepository extends JpaRepository<UserBook, Long> {
     Optional<UserBook> findByIdAndUserId(Long id, Long userId);
 
     boolean existsByUserIdAndBookId(Long userId, Long bookId);
+
+    Optional<UserBook> findByUserIdAndBookId(Long userId, Long bookId);
 }
