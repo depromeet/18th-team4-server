@@ -41,7 +41,8 @@ class AladinBookSearchClientImplTest {
                 "JS",
                 "20131101",
                 "Big",
-                Duration.ofSeconds(1)
+                Duration.ofSeconds(1),
+                200
         );
         this.client = new AladinBookSearchClientImpl(restClient, properties);
     }
@@ -130,5 +131,30 @@ class AladinBookSearchClientImplTest {
                 .asInstanceOf(InstanceOfAssertFactories.type(InternalServerErrorException.class))
                 .extracting(InternalServerErrorException::getErrorCode)
                 .isEqualTo(BookErrorCode.ALADIN_SEARCH_FAILED);
+    }
+
+    @Test
+    void 검색_한도_초과_페이지_요청시_알라딘_호출없이_빈_결과를_반환한다() {
+        // start = (11-1)*20 + 1 = 201 > 200 → 알라딘 호출 안 함
+        BookSearchResult result = client.execute(new BookSearchCommand("react", 11, 20));
+
+        assertThat(result.books()).isEmpty();
+        assertThat(result.totalResultCount()).isZero();
+        assertThat(result.page()).isEqualTo(11);
+        assertThat(result.size()).isEqualTo(20);
+        // 알라딘에 어떤 호출도 없었음을 검증
+        mockServer.verify();
+    }
+
+    @Test
+    void 알라딘_totalResults가_한도_초과면_totalResultCount는_한도로_cap된다() {
+        mockServer.expect(queryParam("Query", "react"))
+                .andRespond(withSuccess("""
+                        {"totalResults":539,"startIndex":1,"itemsPerPage":20,"item":[]}
+                        """, MediaType.APPLICATION_JSON));
+
+        BookSearchResult result = client.execute(new BookSearchCommand("react", 1, 20));
+
+        assertThat(result.totalResultCount()).isEqualTo(200);
     }
 }

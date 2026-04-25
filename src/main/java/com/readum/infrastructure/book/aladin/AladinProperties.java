@@ -12,6 +12,7 @@ public record AladinProperties(
         String output,
         String version,
         String cover,
-        Duration requestTimeout
+        Duration requestTimeout,
+        int searchResultLimit
 ) {
 }

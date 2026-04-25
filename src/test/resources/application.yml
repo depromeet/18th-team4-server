@@ -28,3 +28,4 @@ aladin:
   version: 20131101
   cover: Big
   request-timeout: PT1S
+  search-result-limit: 200

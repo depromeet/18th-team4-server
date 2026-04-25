@@ -28,9 +28,14 @@ public class AladinBookSearchClientImpl implements AladinBookSearchClient {
     private final RestClient aladinRestClient;
     private final AladinProperties properties;
 
+    // 알라딘은 한도(기본 200) 초과 Start 를 1페이지로 silent fallback 하므로
+    // 우리 서버에서 사전 차단해 클라이언트의 무한 스크롤 종료 판단을 보장한다.
     @Override
     public BookSearchResult execute(BookSearchCommand command) {
         int start = (command.page() - 1) * command.size() + 1;
+        if (start > properties.searchResultLimit()) {
+            return new BookSearchResult(List.of(), 0, command.page(), command.size());
+        }
         try {
             AladinItemSearchResponse response = aladinRestClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -59,9 +64,10 @@ public class AladinBookSearchClientImpl implements AladinBookSearchClient {
         if (response == null) {
             return new BookSearchResult(List.of(), 0, command.page(), command.size());
         }
+        int cappedTotal = Math.min(response.totalResults(), properties.searchResultLimit());
         List<AladinItemSearchResponse.Item> items = response.item() == null ? List.of() : response.item();
         List<BookResult> books = items.stream().map(this::mapItemToBookResult).toList();
-        return new BookSearchResult(books, response.totalResults(), command.page(), command.size());
+        return new BookSearchResult(books, cappedTotal, command.page(), command.size());
     }
 
     private BookResult mapItemToBookResult(AladinItemSearchResponse.Item item) {
