@@ -1,4 +1,10 @@
 spring:
+  ai:
+    openai:
+      api-key: test-openai-key
+      chat:
+        options:
+          model: gpt-4o-mini
   datasource:
     url: jdbc:h2:mem:readum;MODE=MySQL;DB_CLOSE_DELAY=-1
     username: sa

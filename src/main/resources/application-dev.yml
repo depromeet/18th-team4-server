@@ -1,4 +1,11 @@
 spring:
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4o-mini
+          stream-usage: true
   datasource:
     url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?sslMode=REQUIRED&characterEncoding=UTF-8&serverTimezone=Asia/Seoul
     username: ${MYSQL_USER}

@@ -10,11 +10,12 @@ import com.readum.domain.exception.GatewayTimeoutException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.retry.NonTransientAiException;
+import org.springframework.ai.retry.TransientAiException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -24,13 +25,6 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    // Spring Security 인증 실패 (EntryPoint에서 HandlerExceptionResolver 로 위임됨)
-    @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<ApiResponse<?>> handleAuthentication(AuthenticationException ex) {
-        log.warn("인증 실패: {}", ex.getMessage());
-        return ApiResponse.error(HttpStatus.UNAUTHORIZED, ErrorMessages.AUTHENTICATION_REQUIRED);
-    }
-
     // 도메인 비즈니스 예외 - 잘못된 요청
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ApiResponse<?>> handleBadRequest(BadRequestException ex) {
@@ -38,7 +32,7 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(HttpStatus.BAD_REQUEST, ex.getErrorCode().getMessage());
     }
 
-    // 도메인 비즈니스 예외 - 인증 실패 (토큰/자격 증명)
+    // 도메인 비즈니스 예외 - 인증 실패
     @ExceptionHandler(UnauthorizedException.class)
     public ResponseEntity<ApiResponse<?>> handleUnauthorized(UnauthorizedException ex) {
         log.warn("Unauthorized: {}", ex.getErrorCode().getMessage());
@@ -132,6 +126,20 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleUnreadableMessage(HttpMessageNotReadableException ex) {
         log.debug("Unreadable message: {}", ex.getMessage());
         return ApiResponse.error(HttpStatus.BAD_REQUEST, "요청 본문을 읽을 수 없습니다.");
+    }
+
+    // AI API 인프라 오류 (Rate limit, 인증 키 오류 등) — 서버 설정/한도 문제
+    @ExceptionHandler(NonTransientAiException.class)
+    public ResponseEntity<ApiResponse<?>> handleNonTransientAi(NonTransientAiException ex) {
+        log.error("Non-transient AI error: {}", ex.getMessage(), ex);
+        return ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
+    }
+
+    // AI API 일시적 오류 (타임아웃, 서버 오류 등) — 재시도로 해결 가능
+    @ExceptionHandler(TransientAiException.class)
+    public ResponseEntity<ApiResponse<?>> handleTransientAi(TransientAiException ex) {
+        log.error("Transient AI error (retryable): {}", ex.getMessage(), ex);
+        return ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
     }
 
     // 위에서 처리되지 않은 모든 예외 (예기치 않은 서버 오류)
