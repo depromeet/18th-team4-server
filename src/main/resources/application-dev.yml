@@ -17,15 +17,6 @@ logging:
     org.hibernate.SQL: DEBUG
     org.hibernate.orm.jdbc.bind: WARN
 
-jwt:
-  secret: ${JWT_SECRET:}
-  issuer: readum
-  access-token-ttl: PT30M
-  refresh-token-ttl: P14D
-  refresh-grace-period: PT3S
-  refresh-cookie-secure: true
-  blacklist-max-size: 10000
-
 aladin:
   ttb-key: ${ALADIN_TTB_KEY:}
   base-url: http://www.aladin.co.kr/ttb/api
@@ -35,3 +26,14 @@ aladin:
   cover: Big
   request-timeout: PT1S
   search-result-limit: 200
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
