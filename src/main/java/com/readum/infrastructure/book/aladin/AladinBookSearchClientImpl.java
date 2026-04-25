@@ -36,9 +36,10 @@ public class AladinBookSearchClientImpl implements BookSearchClient {
     // 우리 서버에서 사전 차단해 클라이언트의 무한 스크롤 종료 판단을 보장한다.
     @Override
     public BookSearchResult execute(BookSearchCommand command) {
-        int start = (command.page() - 1) * command.size() + 1;
+        // page * size 가 큰 값일 때 int 오버플로로 음수가 되어 한도 체크가 우회되는 것을 방지
+        long start = (long) (command.page() - 1) * command.size() + 1;
         if (start > properties.searchResultLimit()) {
-            return new BookSearchResult(List.of(), 0, command.page(), command.size());
+            return new BookSearchResult(List.of(), 0, command.page(), command.size(), false);
         }
         try {
             AladinItemSearchResponse response = aladinRestClient.get()
@@ -77,12 +78,13 @@ public class AladinBookSearchClientImpl implements BookSearchClient {
 
     private BookSearchResult buildBookSearchResult(AladinItemSearchResponse response, BookSearchCommand command) {
         if (response == null) {
-            return new BookSearchResult(List.of(), 0, command.page(), command.size());
+            return new BookSearchResult(List.of(), 0, command.page(), command.size(), false);
         }
         int cappedTotal = Math.min(response.totalResults(), properties.searchResultLimit());
         List<AladinItemSearchResponse.Item> items = response.item() == null ? List.of() : response.item();
         List<BookResult> books = items.stream().map(this::mapItemToBookResult).toList();
-        return new BookSearchResult(books, cappedTotal, command.page(), command.size());
+        boolean hasNext = (long) command.page() * command.size() < cappedTotal;
+        return new BookSearchResult(books, cappedTotal, command.page(), command.size(), hasNext);
     }
 
     private BookResult mapItemToBookResult(AladinItemSearchResponse.Item item) {
