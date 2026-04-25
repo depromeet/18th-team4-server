@@ -1,7 +1,7 @@
 package com.readum.infrastructure.ai.openai;
 
-import com.readum.domain.ai.dto.AiChatCommand;
-import com.readum.domain.ai.out.AiChatClient;
+import com.readum.domain.aiChat.dto.AiChatCommand;
+import com.readum.domain.aiChat.out.AiChatClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;

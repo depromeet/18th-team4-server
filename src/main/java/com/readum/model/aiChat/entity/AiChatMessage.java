@@ -1,4 +1,4 @@
-package com.readum.model.chat.entity;
+package com.readum.model.aiChat.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -19,14 +19,14 @@ import java.time.LocalDateTime;
 @Getter
 @Entity
 @Table(
-        name = "chat_message",
+        name = "ai_chat_message",
         indexes = {
-                @Index(name = "idx_chat_message_session", columnList = "session_id")
+                @Index(name = "idx_ai_chat_message_session", columnList = "session_id")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class ChatMessage {
+public class AiChatMessage {
 
     public enum Role {
         USER, ASSISTANT, SYSTEM
@@ -61,7 +61,7 @@ public class ChatMessage {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    public static ChatMessage create(
+    public static AiChatMessage create(
             Long sessionId,
             Role role,
             String content,
@@ -70,10 +70,10 @@ public class ChatMessage {
             Integer outputTokens,
             Integer totalTokens
     ) {
-        return new ChatMessage(null, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, LocalDateTime.now());
+        return new AiChatMessage(null, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, LocalDateTime.now());
     }
 
-    public static ChatMessage of(
+    public static AiChatMessage of(
             Long id,
             Long sessionId,
             Role role,
@@ -84,6 +84,6 @@ public class ChatMessage {
             Integer totalTokens,
             LocalDateTime createdAt
     ) {
-        return new ChatMessage(id, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, createdAt);
+        return new AiChatMessage(id, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, createdAt);
     }
 }
