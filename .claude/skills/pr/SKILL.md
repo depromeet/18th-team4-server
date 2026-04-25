@@ -121,9 +121,39 @@ Angular convention: `<type>(<scope>): <subject>`
 - `fix(config): application-dev.yml 로거 패키지를 com.readum 으로 교정`
 - `refactor(auth): JWT/Refresh Token 레이어 단순화`
 
-### 5. 사용자 confirm
+### 5. 메타데이터 결정 (Reviewers / Assignees / Labels)
 
-작성한 title 과 body 를 마크다운 코드 블록으로 출력해 사용자에게 보여주고 다음 중 하나의 응답을 받는다:
+PR 생성 시 다음 메타데이터도 함께 지정한다.
+
+**Labels** — 자동 추출
+- 연결된 이슈(`closes #N`)의 라벨을 그대로 PR 라벨로 사용한다.
+- 추출 명령:
+  ```bash
+  gh issue view <N> --json labels --jq '[.labels[].name] | join(",")'
+  ```
+- 이슈가 없거나 라벨이 비어있으면 사용자에게 라벨을 물어보거나 라벨 없이 진행.
+
+**Assignees** — 기본값
+- PR 작성자 자기 자신 (`@me`).
+- 추가 담당자가 필요하면 사용자에게 물어 GitHub 핸들 입력받는다.
+
+**Reviewers** — 팀원 풀에서 자기 자신만 제외 (동적 결정)
+- 팀원 풀: `psychology50`, `uykm`, `Hheojiwon` (최근 머지된 PR 들의 활발한 리뷰어 기준, 봇 제외)
+- 자기 자신은 GitHub 가 reviewer 로 받지 않으므로 풀에서 자동 제외:
+  ```bash
+  ME=$(gh api user --jq .login)
+  REVIEWERS=$(echo "psychology50,uykm,Hheojiwon" | tr ',' '\n' | grep -v "^${ME}$" | paste -sd ',' -)
+  ```
+- 결과를 `--reviewer "$REVIEWERS"` 로 전달. 다른 팀원이 이 스킬을 사용해도 자기 자신만 제외되어 동작한다.
+- 풀이 변경되면(팀 합류/이탈) 본 SKILL.md 의 풀 목록을 갱신. 후보 점검 명령:
+  ```bash
+  gh pr list --state merged --limit 10 --json reviews --jq '.[].reviews[].author.login' | sort | uniq -c | sort -rn
+  # coderabbitai, claude 같은 자동 봇은 풀에서 제외
+  ```
+
+### 6. 사용자 confirm
+
+작성한 title, body, 메타데이터(reviewers / assignees / labels)를 한 번에 정리해 사용자에게 보여주고 다음 중 하나의 응답을 받는다:
 
 - **OK / 진행** → 다음 단계
 - **수정 요청** → 반영 후 다시 보여주고 confirm
@@ -131,18 +161,26 @@ Angular convention: `<type>(<scope>): <subject>`
 
 이 단계를 건너뛰지 말 것. PR 본문은 PR 머지 후에도 release notes 등에 인용되므로 사용자 의도를 정확히 반영해야 한다.
 
-### 6. push + PR 생성
+### 7. push + PR 생성
 
 ```bash
 # 1. branch tracking 없으면 push -u
 git push -u origin <current-branch>
 
-# 2. PR 생성 (HEREDOC 으로 본문 전달, base=dev 고정)
-gh pr create --base dev --title "..." --body "$(cat <<'EOF'
+# 2. PR 생성 (HEREDOC 으로 본문 전달, base=dev 고정, 메타데이터 옵션 포함)
+gh pr create \
+  --base dev \
+  --title "..." \
+  --reviewer "<핸들1>,<핸들2>" \
+  --assignee "@me" \
+  --label "<라벨1>,<라벨2>" \
+  --body "$(cat <<'EOF'
 [본문 전체]
 EOF
 )"
 ```
+
+옵션은 비어있을 수 있으면 생략한다 (예: 라벨 추출 결과가 비면 `--label` 자체를 빼서 호출).
 
 성공 시 반환되는 PR URL 을 사용자에게 알린다.
 
@@ -187,3 +225,4 @@ EOF
 - 사용자 confirm 없이 `gh pr create` 자동 호출 — 반드시 본문 보여주고 OK 받기.
 - 미커밋 변경이 남은 채로 PR 생성 — commit 부터.
 - `--base main` 또는 base 미명시 — `--base dev` 명시.
+- reviewer/assignee/label 누락 — 라벨은 연결 이슈에서 자동 추출, reviewer 는 사용자에게 묻기.
