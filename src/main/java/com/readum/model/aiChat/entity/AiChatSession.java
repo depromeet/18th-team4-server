@@ -1,4 +1,4 @@
-package com.readum.model.chat.entity;
+package com.readum.model.aiChat.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -19,14 +19,14 @@ import java.time.LocalDateTime;
 @Getter
 @Entity
 @Table(
-        name = "chat_session",
+        name = "ai_chat_session",
         indexes = {
-                @Index(name = "idx_chat_session_user_book", columnList = "user_book_id")
+                @Index(name = "idx_ai_chat_session_user_book", columnList = "user_book_id")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class ChatSession {
+public class AiChatSession {
 
     public enum Status {
         ACTIVE, CLOSED
@@ -58,12 +58,12 @@ public class ChatSession {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    public static ChatSession create(Long userBookId) {
+    public static AiChatSession create(Long userBookId) {
         LocalDateTime now = LocalDateTime.now();
-        return new ChatSession(null, userBookId, Status.ACTIVE, 0, 0, null, now, now);
+        return new AiChatSession(null, userBookId, Status.ACTIVE, 0, 0, null, now, now);
     }
 
-    public static ChatSession of(
+    public static AiChatSession of(
             Long id,
             Long userBookId,
             Status status,
@@ -73,6 +73,6 @@ public class ChatSession {
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {
-        return new ChatSession(id, userBookId, status, userMessageCount, accumulatedTokens, lastMessagePreview, createdAt, updatedAt);
+        return new AiChatSession(id, userBookId, status, userMessageCount, accumulatedTokens, lastMessagePreview, createdAt, updatedAt);
     }
 }
