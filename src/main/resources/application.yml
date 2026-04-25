@@ -1,8 +1,0 @@
-jwt:
-  secret: ${JWT_SECRET:}
-  issuer: readum
-  access-token-ttl: PT30M
-  refresh-token-ttl: P14D
-  refresh-grace-period: PT3S
-  refresh-cookie-secure: true
-  blacklist-max-size: 10000

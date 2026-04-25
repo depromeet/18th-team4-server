@@ -4,6 +4,7 @@ import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.ForbiddenException;
+import com.readum.domain.exception.InternalServerErrorException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
@@ -61,6 +62,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleConflict(ConflictException ex) {
         log.warn("Conflict: {}", ex.getErrorCode().getMessage());
         return ApiResponse.error(HttpStatus.CONFLICT, ex.getErrorCode().getMessage());
+    }
+
+    // 외부 시스템 장애 등으로 인한 내부 서버 오류
+    @ExceptionHandler(InternalServerErrorException.class)
+    public ResponseEntity<ApiResponse<?>> handleInternalServerError(InternalServerErrorException ex) {
+        log.error("내부 서버 오류 - {}", ex.getErrorCode().name(), ex);
+        return ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, ex.getErrorCode().getMessage());
     }
 
     // DB 접근 실패 - 커넥션 끊김, 타임아웃, 제약 위반 등
