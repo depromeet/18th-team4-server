@@ -112,7 +112,7 @@ public class AladinBookSearchClientImpl implements BookSearchClient {
                 // 폴백 실패 - 아래에서 로그 처리
             }
         }
-        log.error("알라딘 pubDate 파싱 실패 - 예상치 못한 형식: pubDate={}", pubDate);
+        log.warn("알라딘 pubDate 파싱 폴백 실패 - 예상치 못한 형식: pubDate={}", pubDate);
         return null;
     }
 }
