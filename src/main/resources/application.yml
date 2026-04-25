@@ -7,6 +7,9 @@ jwt:
   refresh-cookie-secure: true
   blacklist-max-size: 10000
 
+user:
+  session-cookie-secure: true
+
 springdoc:
   api-docs:
     enabled: false
