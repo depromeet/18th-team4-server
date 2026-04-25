@@ -1,11 +1,7 @@
 package com.readum.presentation.controller.ai;
 
-import com.readum.domain.ai.dto.AiChatResult;
-import com.readum.domain.ai.service.AiChatService;
 import com.readum.domain.ai.service.AiStreamChatService;
-import com.readum.presentation.common.ApiResponse;
 import com.readum.presentation.controller.ai.dto.AiChatRequest;
-import com.readum.presentation.controller.ai.dto.AiChatResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -22,14 +18,7 @@ import reactor.core.publisher.Flux;
 @RequiredArgsConstructor
 public class AiChatController {
 
-    private final AiChatService aiChatService;
     private final AiStreamChatService aiStreamChatService;
-
-    @PostMapping("/chat")
-    public ResponseEntity<ApiResponse<AiChatResponse>> chat(@Valid @RequestBody AiChatRequest request) {
-        AiChatResult result = aiChatService.execute(request.toCommand());
-        return ApiResponse.ok(AiChatResponse.from(result));
-    }
 
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<Flux<ServerSentEvent<String>>> chatStream(@Valid @RequestBody AiChatRequest request) {

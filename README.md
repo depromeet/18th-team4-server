@@ -30,7 +30,7 @@
 
 IntelliJ Run Configuration에서 환경 변수를 설정합니다.
 
-```
+```dotenv
 OPENAI_API_KEY=...;MYSQL_HOST=...;MYSQL_PORT=3306;MYSQL_DATABASE=...;MYSQL_USER=...;MYSQL_PASSWORD=...
 ```
 

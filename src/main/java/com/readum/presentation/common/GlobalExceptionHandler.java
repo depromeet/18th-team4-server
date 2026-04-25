@@ -106,7 +106,7 @@ public class GlobalExceptionHandler {
     // AI API 일시적 오류 (타임아웃, 서버 오류 등) — 재시도로 해결 가능
     @ExceptionHandler(TransientAiException.class)
     public ResponseEntity<ApiResponse<?>> handleTransientAi(TransientAiException ex) {
-        log.error("Transient AI error (retryable): {}", ex.getMessage());
+        log.error("Transient AI error (retryable): {}", ex.getMessage(), ex);
         return ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
     }
 
