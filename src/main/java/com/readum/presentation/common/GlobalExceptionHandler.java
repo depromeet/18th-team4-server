@@ -1,10 +1,12 @@
 package com.readum.presentation.common;
 
+import com.readum.domain.exception.BadGatewayException;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.ConflictException;
+import com.readum.domain.exception.ExternalApiException;
 import com.readum.domain.exception.ForbiddenException;
-import com.readum.domain.exception.InternalServerErrorException;
+import com.readum.domain.exception.GatewayTimeoutException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
@@ -64,10 +66,24 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(HttpStatus.CONFLICT, ex.getErrorCode().getMessage());
     }
 
-    // 외부 시스템 장애 등으로 인한 내부 서버 오류
-    @ExceptionHandler(InternalServerErrorException.class)
-    public ResponseEntity<ApiResponse<?>> handleInternalServerError(InternalServerErrorException ex) {
-        log.error("내부 서버 오류 - {}", ex.getErrorCode().name(), ex);
+    // 외부 시스템 응답 오류 (업스트림 5xx) → 502
+    @ExceptionHandler(BadGatewayException.class)
+    public ResponseEntity<ApiResponse<?>> handleBadGateway(BadGatewayException ex) {
+        log.error("외부 시스템 오류 응답 - {}", ex.getErrorCode().name(), ex);
+        return ApiResponse.error(HttpStatus.BAD_GATEWAY, ex.getErrorCode().getMessage());
+    }
+
+    // 외부 시스템 응답 시간 초과 / IO 실패 → 504
+    @ExceptionHandler(GatewayTimeoutException.class)
+    public ResponseEntity<ApiResponse<?>> handleGatewayTimeout(GatewayTimeoutException ex) {
+        log.error("외부 시스템 응답 지연 - {}", ex.getErrorCode().name(), ex);
+        return ApiResponse.error(HttpStatus.GATEWAY_TIMEOUT, ex.getErrorCode().getMessage());
+    }
+
+    // 외부 시스템 호출 미분류 실패 → 500
+    @ExceptionHandler(ExternalApiException.class)
+    public ResponseEntity<ApiResponse<?>> handleExternalApi(ExternalApiException ex) {
+        log.error("외부 시스템 호출 실패 - {}", ex.getErrorCode().name(), ex);
         return ApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, ex.getErrorCode().getMessage());
     }
 

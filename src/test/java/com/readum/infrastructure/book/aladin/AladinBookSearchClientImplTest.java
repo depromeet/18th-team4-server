@@ -4,7 +4,9 @@ import com.readum.domain.book.dto.BookResult;
 import com.readum.domain.book.dto.BookSearchCommand;
 import com.readum.domain.book.dto.BookSearchResult;
 import com.readum.domain.book.exception.BookErrorCode;
-import com.readum.domain.exception.InternalServerErrorException;
+import com.readum.domain.exception.BadGatewayException;
+import com.readum.domain.exception.ExternalApiException;
+import com.readum.domain.exception.GatewayTimeoutException;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.io.IOException;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -112,42 +115,54 @@ class AladinBookSearchClientImplTest {
     }
 
     @Test
-    void 알라딘_5xx_응답시_InternalServerErrorException을_던진다() {
+    void 외부_5xx_응답시_BadGatewayException을_던진다() {
         mockServer.expect(queryParam("Query", "react"))
                 .andRespond(withServerError());
 
         assertThatThrownBy(() -> client.execute(new BookSearchCommand("react", 1, 10)))
-                .asInstanceOf(InstanceOfAssertFactories.type(InternalServerErrorException.class))
-                .extracting(InternalServerErrorException::getErrorCode)
-                .isEqualTo(BookErrorCode.ALADIN_SEARCH_FAILED);
+                .asInstanceOf(InstanceOfAssertFactories.type(BadGatewayException.class))
+                .extracting(BadGatewayException::getErrorCode)
+                .isEqualTo(BookErrorCode.SEARCH_GATEWAY_ERROR);
     }
 
     @Test
-    void 알라딘_4xx_응답시_InternalServerErrorException을_던진다() {
+    void 외부_IO_또는_timeout_시_GatewayTimeoutException을_던진다() {
+        mockServer.expect(queryParam("Query", "react"))
+                .andRespond(request -> {
+                    throw new IOException("simulated read timeout");
+                });
+
+        assertThatThrownBy(() -> client.execute(new BookSearchCommand("react", 1, 10)))
+                .asInstanceOf(InstanceOfAssertFactories.type(GatewayTimeoutException.class))
+                .extracting(GatewayTimeoutException::getErrorCode)
+                .isEqualTo(BookErrorCode.SEARCH_TIMEOUT);
+    }
+
+    @Test
+    void 외부_4xx_응답시_ExternalApiException을_던진다() {
         mockServer.expect(queryParam("Query", "react"))
                 .andRespond(withBadRequest());
 
         assertThatThrownBy(() -> client.execute(new BookSearchCommand("react", 1, 10)))
-                .asInstanceOf(InstanceOfAssertFactories.type(InternalServerErrorException.class))
-                .extracting(InternalServerErrorException::getErrorCode)
-                .isEqualTo(BookErrorCode.ALADIN_SEARCH_FAILED);
+                .asInstanceOf(InstanceOfAssertFactories.type(ExternalApiException.class))
+                .extracting(ExternalApiException::getErrorCode)
+                .isEqualTo(BookErrorCode.SEARCH_FAILED);
     }
 
     @Test
-    void 검색_한도_초과_페이지_요청시_알라딘_호출없이_빈_결과를_반환한다() {
-        // start = (11-1)*20 + 1 = 201 > 200 → 알라딘 호출 안 함
+    void 검색_한도_초과_페이지_요청시_외부_호출없이_빈_결과를_반환한다() {
+        // start = (11-1)*20 + 1 = 201 > 200 → 외부 호출 안 함
         BookSearchResult result = client.execute(new BookSearchCommand("react", 11, 20));
 
         assertThat(result.books()).isEmpty();
         assertThat(result.totalResultCount()).isZero();
         assertThat(result.page()).isEqualTo(11);
         assertThat(result.size()).isEqualTo(20);
-        // 알라딘에 어떤 호출도 없었음을 검증
         mockServer.verify();
     }
 
     @Test
-    void 알라딘_totalResults가_한도_초과면_totalResultCount는_한도로_cap된다() {
+    void 외부_totalResults가_한도_초과면_totalResultCount는_한도로_cap된다() {
         mockServer.expect(queryParam("Query", "react"))
                 .andRespond(withSuccess("""
                         {"totalResults":539,"startIndex":1,"itemsPerPage":20,"item":[]}

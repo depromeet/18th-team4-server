@@ -5,11 +5,15 @@ import com.readum.domain.book.dto.BookSearchCommand;
 import com.readum.domain.book.dto.BookSearchResult;
 import com.readum.domain.book.exception.BookErrorCode;
 import com.readum.domain.book.out.BookSearchClient;
-import com.readum.domain.exception.InternalServerErrorException;
+import com.readum.domain.exception.BadGatewayException;
+import com.readum.domain.exception.ExternalApiException;
+import com.readum.domain.exception.GatewayTimeoutException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -53,10 +57,21 @@ public class AladinBookSearchClientImpl implements BookSearchClient {
                     .retrieve()
                     .body(AladinItemSearchResponse.class);
             return buildBookSearchResult(response, command);
-        } catch (RestClientException ex) {
-            log.error("알라딘 도서 검색 호출 실패 keyword={}, page={}, size={}",
+        } catch (HttpServerErrorException ex) {
+            // 외부 검색 서비스 5xx 응답 → 502 로 사용자에게 전달
+            log.error("도서 검색 외부 응답 5xx keyword={}, page={}, size={}, status={}",
+                    command.keyword(), command.page(), command.size(), ex.getStatusCode(), ex);
+            throw new BadGatewayException(BookErrorCode.SEARCH_GATEWAY_ERROR);
+        } catch (ResourceAccessException ex) {
+            // connect/read timeout, IO 실패 → 504
+            log.error("도서 검색 외부 응답 시간 초과 또는 IO 실패 keyword={}, page={}, size={}",
                     command.keyword(), command.page(), command.size(), ex);
-            throw new InternalServerErrorException(BookErrorCode.ALADIN_SEARCH_FAILED);
+            throw new GatewayTimeoutException(BookErrorCode.SEARCH_TIMEOUT);
+        } catch (RestClientException ex) {
+            // 4xx 등 기타 (우리 측 설정/요청 문제 가능성 포함) → 500
+            log.error("도서 검색 외부 호출 실패 keyword={}, page={}, size={}",
+                    command.keyword(), command.page(), command.size(), ex);
+            throw new ExternalApiException(BookErrorCode.SEARCH_FAILED);
         }
     }
 
