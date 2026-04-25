@@ -3,7 +3,7 @@ package com.readum.domain.book.service;
 import com.readum.domain.book.dto.BookResult;
 import com.readum.domain.book.dto.BookSearchCommand;
 import com.readum.domain.book.dto.BookSearchResult;
-import com.readum.domain.book.out.AladinBookSearchClient;
+import com.readum.domain.book.out.BookSearchClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -19,13 +19,13 @@ import static org.mockito.BDDMockito.given;
 class BookSearchServiceTest {
 
     @Mock
-    private AladinBookSearchClient aladinBookSearchClient;
+    private BookSearchClient bookSearchClient;
 
     @InjectMocks
     private BookSearchService bookSearchService;
 
     @Test
-    void 알라딘_검색_결과를_그대로_반환한다() {
+    void 도서_검색_결과를_그대로_반환한다() {
         BookSearchCommand command = new BookSearchCommand("리액트", 1, 10);
         BookSearchResult expected = new BookSearchResult(
                 List.of(new BookResult(
@@ -40,7 +40,7 @@ class BookSearchServiceTest {
                 1,
                 10
         );
-        given(aladinBookSearchClient.execute(command)).willReturn(expected);
+        given(bookSearchClient.execute(command)).willReturn(expected);
 
         BookSearchResult actual = bookSearchService.search(command);
 

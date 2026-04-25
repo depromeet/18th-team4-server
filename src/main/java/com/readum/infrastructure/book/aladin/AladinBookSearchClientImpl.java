@@ -4,7 +4,7 @@ import com.readum.domain.book.dto.BookResult;
 import com.readum.domain.book.dto.BookSearchCommand;
 import com.readum.domain.book.dto.BookSearchResult;
 import com.readum.domain.book.exception.BookErrorCode;
-import com.readum.domain.book.out.AladinBookSearchClient;
+import com.readum.domain.book.out.BookSearchClient;
 import com.readum.domain.exception.InternalServerErrorException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,7 +20,7 @@ import java.util.List;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class AladinBookSearchClientImpl implements AladinBookSearchClient {
+public class AladinBookSearchClientImpl implements BookSearchClient {
 
     private static final String SEARCH_PATH = "/ItemSearch.aspx";
     private static final String QUERY_TYPE_KEYWORD = "Keyword";
