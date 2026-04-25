@@ -1,10 +1,8 @@
 package com.readum.presentation.controller.user;
 
-import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.dto.CompleteOnboardingResult;
 import com.readum.domain.user.dto.CreateUserSessionResult;
 import com.readum.domain.user.dto.UserSessionInfoResult;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.user.service.CompleteOnboardingService;
 import com.readum.domain.user.service.CreateUserSessionService;
 import com.readum.domain.user.service.UserSearchService;
@@ -53,25 +51,16 @@ public class UserController {
 
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<UserSessionInfoResponse>> getSessionInfo(
-            @CookieValue(name = USER_SESSION_COOKIE, required = false) String sessionId) {
-        String resolvedSessionId = requireSessionId(sessionId);
-        UserSessionInfoResult result = userSearchService.findSessionInfo(resolvedSessionId);
+            @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
+        UserSessionInfoResult result = userSearchService.findSessionInfo(sessionId);
         return ApiResponse.ok(UserSessionInfoResponse.from(result));
     }
 
     @PostMapping("/me/onboarding")
     public ResponseEntity<ApiResponse<CompleteOnboardingResponse>> completeOnboarding(
-            @CookieValue(name = USER_SESSION_COOKIE, required = false) String sessionId) {
-        String resolvedSessionId = requireSessionId(sessionId);
-        CompleteOnboardingResult result = completeOnboardingService.execute(resolvedSessionId);
+            @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
+        CompleteOnboardingResult result = completeOnboardingService.execute(sessionId);
         return ApiResponse.ok(CompleteOnboardingResponse.from(result));
-    }
-
-    private String requireSessionId(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new UnauthorizedException(UserErrorCode.INVALID_SESSION);
-        }
-        return sessionId;
     }
 
     private ResponseCookie buildSessionCookie(String value, long maxAgeSeconds) {
