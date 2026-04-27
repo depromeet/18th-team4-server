@@ -5,8 +5,7 @@ public class ConflictException extends BusinessException {
     private final Object payload;
 
     public ConflictException(ErrorCode errorCode) {
-        super(errorCode);
-        this.payload = null;
+        this(errorCode, null);
     }
 
     public ConflictException(ErrorCode errorCode, Object payload) {

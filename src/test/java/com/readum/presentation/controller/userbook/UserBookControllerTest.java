@@ -1,10 +1,13 @@
 package com.readum.presentation.controller.userbook;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.readum.domain.exception.ConflictException;
 import com.readum.domain.userbook.dto.UserBookCreateResult;
+import com.readum.domain.userbook.exception.UserBookErrorCode;
 import com.readum.domain.userbook.service.UserBookCreateService;
 import com.readum.presentation.common.GlobalExceptionHandler;
 import com.readum.presentation.controller.userbook.dto.UserBookCreateRequest;
+import com.readum.presentation.controller.userbook.dto.UserBookResponse;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -112,5 +115,34 @@ class UserBookControllerTest {
                         .content(bodyWithoutExternalId))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message").exists());
+    }
+
+    @Test
+    void userId가_null이면_401을_반환한다() throws Exception {
+        mockMvc.perform(post("/api/v1/user-books")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.message").exists());
+    }
+
+    @Test
+    void 이미_등록된_도서면_409와_error_payload를_GlobalExceptionHandler가_직렬화하여_반환한다() throws Exception {
+        UserBookCreateResult existingResult = new UserBookCreateResult(
+                100L, 1L, "9788965700807", "테스트 책", "테스트 저자",
+                "테스트 출판사", 2024, "http://example.com/cover.jpg",
+                LocalDateTime.of(2024, 6, 1, 12, 0)
+        );
+        given(userBookCreateService.execute(any()))
+                .willThrow(new ConflictException(UserBookErrorCode.ALREADY_EXISTS, UserBookResponse.from(existingResult)));
+
+        mockMvc.perform(post("/api/v1/user-books")
+                        .with(authenticatedAs(1L))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.message").value("이미 책장에 등록된 도서입니다."))
+                .andExpect(jsonPath("$.data.id").value(100))
+                .andExpect(jsonPath("$.data.bookExternalId").value("9788965700807"));
     }
 }
