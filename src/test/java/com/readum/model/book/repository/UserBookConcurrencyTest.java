@@ -9,7 +9,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.UnexpectedRollbackException;
 
@@ -87,23 +86,33 @@ class UserBookConcurrencyTest {
                 .count();
         assertThat(bookCount).as("Book 마스터는 1건만 존재해야 한다").isEqualTo(1L);
 
+        // 검증 1-2: USER_BOOK 테이블에 해당 (userId, bookId) 조합의 레코드가 정확히 1건
+        Long bookId = bookRepository.findByExternalId(EXTERNAL_ID)
+                .orElseThrow()
+                .getId();
+        Long userBookCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_book WHERE user_id = ? AND book_id = ?",
+                Long.class, USER_ID, bookId);
+        assertThat(userBookCount).as("UserBook은 1건만 존재해야 한다").isEqualTo(1L);
+
         // 검증 2: UnexpectedRollbackException 발생 없음
         long unexpectedRollbackCount = results.stream()
                 .filter(r -> r instanceof UnexpectedRollbackException)
                 .count();
         assertThat(unexpectedRollbackCount).as("UnexpectedRollbackException이 발생하면 안 된다").isZero();
 
-        // 검증 3: 성공은 정확히 1건, 나머지 9건은 ConflictException 또는 DataIntegrityViolationException
+        // 검증 3: 성공은 정확히 1건, 나머지 9건은 모두 ConflictException
+        // DataIntegrityViolationException은 서비스 내에서 재조회 후 ConflictException으로 전환되므로 외부에 노출되지 않는다
         long successCount = results.stream()
                 .filter(r -> r instanceof UserBookCreateResult)
                 .count();
         assertThat(successCount).as("정확히 1건만 성공해야 한다").isEqualTo(1L);
 
-        long conflictOrConstraintCount = results.stream()
-                .filter(r -> r instanceof ConflictException || r instanceof DataIntegrityViolationException)
+        long conflictCount = results.stream()
+                .filter(r -> r instanceof ConflictException)
                 .count();
-        assertThat(conflictOrConstraintCount)
-                .as("나머지 9건은 ConflictException 또는 DataIntegrityViolationException이어야 한다")
+        assertThat(conflictCount)
+                .as("나머지 9건은 모두 ConflictException이어야 한다")
                 .isEqualTo(9L);
     }
 }

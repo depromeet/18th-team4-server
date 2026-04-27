@@ -19,7 +19,8 @@ public interface BookRepository extends JpaRepository<Book, Long> {
      * - 행이 없으면: INSERT 수행
      * - 행이 이미 있으면: ON DUPLICATE KEY UPDATE 절이 no-op(external_id = external_id)으로 처리되어
      *   기존 행을 그대로 유지하고 예외를 발생시키지 않는다.
-     * - AUTO_INCREMENT가 소진되지 않도록 실제 업데이트가 발생하지 않는 no-op 컬럼을 사용한다.
+     * - 중복 키 발생 시 불필요한 데이터 수정을 피하기 위해 no-op 업데이트(external_id = external_id)를
+     *   사용한다 — AUTO_INCREMENT 갭을 방지하지는 않는다.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @NativeQuery(value = """

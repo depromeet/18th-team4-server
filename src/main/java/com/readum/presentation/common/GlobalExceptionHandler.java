@@ -60,7 +60,7 @@ public class GlobalExceptionHandler {
         if (ex.getPayload() != null) {
             return ResponseEntity
                     .status(HttpStatus.CONFLICT)
-                    .body(new ApiResponse<>(ex.getPayload(), null));
+                    .body(new ApiResponse<>(ex.getPayload(), new ApiResponse.ErrorBody(ex.getErrorCode().getMessage())));
         }
         return ApiResponse.error(HttpStatus.CONFLICT, ex.getErrorCode().getMessage());
     }

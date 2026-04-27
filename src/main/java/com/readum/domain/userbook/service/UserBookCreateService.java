@@ -9,6 +9,7 @@ import com.readum.model.book.entity.UserBook;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.book.repository.UserBookRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,8 +47,16 @@ public class UserBookCreateService {
         }
 
         // 4. 신규 UserBook 등록
-        UserBook saved = userBookRepository.save(UserBook.create(command.userId(), book.getId()));
-        return toResult(saved, book);
+        // check-then-save 사이에 다른 트랜잭션이 동일 (userId, bookId)를 삽입한 경우
+        // DataIntegrityViolationException이 발생한다. 재조회로 기존 행을 확보해 409로 전환한다.
+        try {
+            UserBook saved = userBookRepository.save(UserBook.create(command.userId(), book.getId()));
+            return toResult(saved, book);
+        } catch (DataIntegrityViolationException ex) {
+            UserBook raced = userBookRepository.findByUserIdAndBookId(command.userId(), book.getId())
+                    .orElseThrow(() -> ex);
+            throw new ConflictException(UserBookErrorCode.ALREADY_EXISTS, toResult(raced, book));
+        }
     }
 
     private UserBookCreateResult toResult(UserBook userBook, Book book) {
