@@ -45,6 +45,7 @@ class UserBookRepositoryTest {
     private static long userIdSeq = 800_000L;
     private static long bookIdSeq = 800_000L;
 
+    @Test
     @DisplayName("동일한 userId 로 조회하면 present")
     void findByIdAndUserId_매칭시_present() {
         Long userId = nextUserId();
@@ -71,8 +72,6 @@ class UserBookRepositoryTest {
 
         assertThat(found).isEmpty();
     }
-
-    private static long userIdSeq = 800_000L;
 
     private static synchronized Long nextUserId() {
         userIdSeq += 1;

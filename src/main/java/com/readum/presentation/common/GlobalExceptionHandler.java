@@ -17,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestCookieException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -100,6 +101,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("Illegal argument: {}", ex.getMessage());
         return ApiResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    // @CookieValue(required = true) 로 선언된 쿠키가 요청에 없을 때
+    @ExceptionHandler(MissingRequestCookieException.class)
+    public ResponseEntity<ApiResponse<?>> handleMissingCookie(MissingRequestCookieException ex) {
+        log.debug("Missing cookie: {}", ex.getCookieName());
+        return ApiResponse.error(HttpStatus.BAD_REQUEST, "필수 쿠키가 없습니다: " + ex.getCookieName());
     }
 
     // @Valid 어노테이션 검증 실패 (필드 제약 조건 위반)
