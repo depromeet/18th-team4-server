@@ -1,5 +1,7 @@
 package com.readum.domain.userbook.service;
 
+import com.readum.domain.book.dto.BookResult;
+import com.readum.domain.book.out.BookLookupClient;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.userbook.dto.UserBookCreateCommand;
 import com.readum.domain.userbook.dto.UserBookCreateResult;
@@ -19,34 +21,38 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class UserBookCreateService {
 
+    private final BookLookupClient bookLookupClient;
     private final BookRepository bookRepository;
     private final UserBookRepository userBookRepository;
 
     @Transactional
     public UserBookCreateResult execute(UserBookCreateCommand command) {
-        // 1. Book 마스터 UPSERT (동일 external_id 존재 시 기존 행 재사용, 없으면 신규 생성)
+        // 1. 알라딘에서 도서 정보 조회 (신뢰할 수 있는 원천 데이터 확보)
+        BookResult bookInfo = bookLookupClient.execute(command.bookExternalId());
+
+        // 2. Book 마스터 UPSERT (동일 external_id 존재 시 기존 행 재사용, 없으면 신규 생성)
         bookRepository.upsert(
                 command.bookExternalId(),
-                command.title(),
-                command.authors(),
-                command.publisher(),
-                command.publishedYear(),
-                command.coverUrl()
+                bookInfo.title(),
+                bookInfo.author(),
+                bookInfo.publisher(),
+                bookInfo.publishedYear(),
+                bookInfo.coverUrl()
         );
 
-        // 2. Book 엔티티 확보
+        // 3. Book 엔티티 확보
         Book book = bookRepository.findByExternalId(command.bookExternalId())
                 .orElseThrow(() -> new IllegalStateException(
                         "upsert 후 book을 찾을 수 없음: " + command.bookExternalId()));
 
-        // 3. (userId, bookId) 중복 체크
+        // 4. (userId, bookId) 중복 체크
         Optional<UserBook> existing = userBookRepository.findByUserIdAndBookId(command.userId(), book.getId());
         if (existing.isPresent()) {
             UserBookCreateResult conflictResult = toResult(existing.get(), book);
             throw new ConflictException(UserBookErrorCode.ALREADY_EXISTS, conflictResult);
         }
 
-        // 4. 신규 UserBook 등록
+        // 5. 신규 UserBook 등록
         // check-then-save 사이에 다른 트랜잭션이 동일 (userId, bookId)를 삽입한 경우
         // DataIntegrityViolationException이 발생한다. 재조회로 기존 행을 확보해 409로 전환한다.
         try {
