@@ -1,5 +1,7 @@
 package com.readum.model.book.repository;
 
+import com.readum.domain.book.dto.BookResult;
+import com.readum.domain.book.out.BookLookupClient;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.userbook.dto.UserBookCreateCommand;
 import com.readum.domain.userbook.dto.UserBookCreateResult;
@@ -10,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.UnexpectedRollbackException;
 
 import java.util.List;
@@ -20,6 +23,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.BDDMockito.given;
 
 @SpringBootTest
 class UserBookConcurrencyTest {
@@ -33,8 +37,18 @@ class UserBookConcurrencyTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @MockitoBean
+    private BookLookupClient bookLookupClient;
+
     private static final Long USER_ID = 999_999L;
     private static final String EXTERNAL_ID = "concurrent-race-condition-test-isbn";
+
+    @BeforeEach
+    void setUp() {
+        given(bookLookupClient.execute(EXTERNAL_ID)).willReturn(
+                new BookResult("http://example.com/cover.jpg", "동시성 테스트 책", "저자", "출판사", 2024, EXTERNAL_ID)
+        );
+    }
 
     @BeforeEach
     @AfterEach
@@ -52,10 +66,7 @@ class UserBookConcurrencyTest {
 
         List<Object> results = new CopyOnWriteArrayList<>();
 
-        UserBookCreateCommand command = new UserBookCreateCommand(
-                USER_ID, EXTERNAL_ID, "동시성 테스트 책", "저자", "출판사", 2024,
-                "http://example.com/cover.jpg"
-        );
+        UserBookCreateCommand command = new UserBookCreateCommand(USER_ID, EXTERNAL_ID);
 
         for (int i = 0; i < threadCount; i++) {
             executor.submit(() -> {

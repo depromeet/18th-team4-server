@@ -7,7 +7,6 @@ import com.readum.domain.userbook.exception.UserBookErrorCode;
 import com.readum.domain.userbook.service.UserBookCreateService;
 import com.readum.presentation.common.GlobalExceptionHandler;
 import com.readum.presentation.controller.userbook.dto.UserBookCreateRequest;
-import com.readum.presentation.controller.userbook.dto.UserBookResponse;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -75,10 +74,7 @@ class UserBookControllerTest {
     }
 
     private String validRequestBody() throws Exception {
-        return objectMapper.writeValueAsString(new UserBookCreateRequest(
-                "9788965700807", "테스트 책", "테스트 저자", "테스트 출판사", 2024,
-                "http://example.com/cover.jpg"
-        ));
+        return objectMapper.writeValueAsString(new UserBookCreateRequest("9788965700807"));
     }
 
     @Test
@@ -95,7 +91,7 @@ class UserBookControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequestBody()))
                 .andExpect(status().isCreated())
-                .andExpect(header().string(HttpHeaders.LOCATION, "/api/v1/user-books/100"))
+                .andExpect(header().string(HttpHeaders.LOCATION, "http://localhost/api/v1/user-books/100"))
                 .andExpect(jsonPath("$.data.id").value(100))
                 .andExpect(jsonPath("$.data.bookExternalId").value("9788965700807"))
                 .andExpect(jsonPath("$.data.title").value("테스트 책"))
@@ -105,9 +101,7 @@ class UserBookControllerTest {
 
     @Test
     void bookExternalId가_없으면_400을_반환한다() throws Exception {
-        String bodyWithoutExternalId = objectMapper.writeValueAsString(new UserBookCreateRequest(
-                null, "테스트 책", "테스트 저자", "테스트 출판사", 2024, "http://example.com/cover.jpg"
-        ));
+        String bodyWithoutExternalId = objectMapper.writeValueAsString(new UserBookCreateRequest(null));
 
         mockMvc.perform(post("/api/v1/user-books")
                         .with(authenticatedAs(1L))
@@ -134,7 +128,7 @@ class UserBookControllerTest {
                 LocalDateTime.of(2024, 6, 1, 12, 0)
         );
         given(userBookCreateService.execute(any()))
-                .willThrow(new ConflictException(UserBookErrorCode.ALREADY_EXISTS, UserBookResponse.from(existingResult)));
+                .willThrow(new ConflictException(UserBookErrorCode.ALREADY_EXISTS, existingResult));
 
         mockMvc.perform(post("/api/v1/user-books")
                         .with(authenticatedAs(1L))
