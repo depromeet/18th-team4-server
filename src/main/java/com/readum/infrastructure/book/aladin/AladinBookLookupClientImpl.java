@@ -57,8 +57,12 @@ public class AladinBookLookupClientImpl implements BookLookupClient {
             log.error("도서 조회 외부 응답 5xx isbn={}, status={}", isbn13, ex.getStatusCode(), ex);
             throw new BadGatewayException(BookErrorCode.LOOKUP_GATEWAY_ERROR);
         } catch (ResourceAccessException ex) {
-            log.error("도서 조회 외부 응답 시간 초과 또는 IO 실패 isbn={}", isbn13, ex);
-            throw new GatewayTimeoutException(BookErrorCode.LOOKUP_TIMEOUT);
+            if (hasCause(ex, java.net.SocketTimeoutException.class)) {
+                log.error("도서 조회 응답 시간 초과 isbn={}, type={}", isbn13, ex.getClass().getSimpleName(), ex);
+                throw new GatewayTimeoutException(BookErrorCode.LOOKUP_TIMEOUT);
+            }
+            log.error("도서 조회 네트워크 오류 isbn={}, type={}", isbn13, ex.getClass().getSimpleName(), ex);
+            throw new BadGatewayException(BookErrorCode.LOOKUP_IO_FAILURE);
         } catch (RestClientException ex) {
             log.error("도서 조회 외부 호출 실패 isbn={}", isbn13, ex);
             throw new ExternalApiException(BookErrorCode.LOOKUP_FAILED);
@@ -74,6 +78,14 @@ public class AladinBookLookupClientImpl implements BookLookupClient {
                 extractPublishedYear(item.pubDate()),
                 item.isbn13()
         );
+    }
+
+    private boolean hasCause(Throwable t, Class<? extends Throwable> target) {
+        while (t != null) {
+            if (target.isInstance(t)) return true;
+            t = t.getCause();
+        }
+        return false;
     }
 
     private Integer extractPublishedYear(String pubDate) {
