@@ -72,6 +72,7 @@ class UserBookConcurrencyTest {
             executor.submit(() -> {
                 try {
                     startLatch.await();
+                    if (Thread.currentThread().isInterrupted()) return;
                     UserBookCreateResult result = userBookCreateService.execute(command);
                     results.add(result);
                 } catch (InterruptedException e) {
@@ -125,7 +126,8 @@ class UserBookConcurrencyTest {
                     .as("나머지 9건은 모두 ConflictException이어야 한다")
                     .isEqualTo(9L);
         } finally {
-            executor.shutdown();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
         }
     }
 }
