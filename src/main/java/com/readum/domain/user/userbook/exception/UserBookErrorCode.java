@@ -1,4 +1,4 @@
-package com.readum.domain.userbook.exception;
+package com.readum.domain.user.userbook.exception;
 
 import com.readum.domain.exception.ErrorCode;
 

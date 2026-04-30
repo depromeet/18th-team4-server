@@ -1,4 +1,4 @@
-package com.readum.domain.userbook.dto;
+package com.readum.domain.user.userbook.dto;
 
 public record UserBookCreateCommand(
         Long userId,

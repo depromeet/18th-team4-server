@@ -1,15 +1,15 @@
-package com.readum.domain.userbook.service;
+package com.readum.domain.user.userbook.service;
 
 import com.readum.domain.book.dto.BookResult;
 import com.readum.domain.book.out.BookLookupClient;
 import com.readum.domain.exception.ConflictException;
-import com.readum.domain.userbook.dto.UserBookCreateCommand;
-import com.readum.domain.userbook.dto.UserBookCreateResult;
-import com.readum.domain.userbook.exception.UserBookErrorCode;
+import com.readum.domain.user.userbook.dto.UserBookCreateCommand;
+import com.readum.domain.user.userbook.dto.UserBookCreateResult;
+import com.readum.domain.user.userbook.exception.UserBookErrorCode;
 import com.readum.model.book.entity.Book;
-import com.readum.model.book.entity.UserBook;
+import com.readum.model.user.entity.UserBook;
 import com.readum.model.book.repository.BookRepository;
-import com.readum.model.book.repository.UserBookRepository;
+import com.readum.model.user.repository.UserBookRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +17,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
+
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -37,6 +39,9 @@ class UserBookCreateServiceTest {
 
     @Mock
     private UserBookRepository userBookRepository;
+
+    @Mock
+    private UserBookConflictReader userBookConflictReader;
 
     @InjectMocks
     private UserBookCreateService userBookCreateService;
@@ -70,24 +75,18 @@ class UserBookCreateServiceTest {
 
         given(bookLookupClient.execute(EXTERNAL_ID)).willReturn(stubBookResult());
         given(bookRepository.findByExternalId(EXTERNAL_ID)).willReturn(Optional.of(book));
-        given(userBookRepository.findByUserIdAndBookId(USER_ID, BOOK_ID)).willReturn(Optional.empty());
         given(userBookRepository.save(any(UserBook.class))).willReturn(savedUserBook);
 
         UserBookCreateResult result = userBookCreateService.execute(command());
 
-        // 알라딘 조회 검증
         verify(bookLookupClient).execute(EXTERNAL_ID);
-
-        // upsert 호출 검증 (알라딘 데이터 기반)
         verify(bookRepository).upsert(EXTERNAL_ID, TITLE, AUTHORS, PUBLISHER, PUBLISHED_YEAR, COVER_URL);
 
-        // 저장된 UserBook의 필드 검증
         ArgumentCaptor<UserBook> userBookCaptor = ArgumentCaptor.forClass(UserBook.class);
         verify(userBookRepository).save(userBookCaptor.capture());
         assertThat(userBookCaptor.getValue().getUserId()).isEqualTo(USER_ID);
         assertThat(userBookCaptor.getValue().getBookId()).isEqualTo(BOOK_ID);
 
-        // 반환 결과 검증
         assertThat(result.id()).isEqualTo(100L);
         assertThat(result.userId()).isEqualTo(USER_ID);
         assertThat(result.bookExternalId()).isEqualTo(EXTERNAL_ID);
@@ -104,7 +103,8 @@ class UserBookCreateServiceTest {
 
         given(bookLookupClient.execute(EXTERNAL_ID)).willReturn(stubBookResult());
         given(bookRepository.findByExternalId(EXTERNAL_ID)).willReturn(Optional.of(book));
-        given(userBookRepository.findByUserIdAndBookId(USER_ID, BOOK_ID)).willReturn(Optional.of(existingUserBook));
+        given(userBookRepository.save(any(UserBook.class))).willThrow(new DataIntegrityViolationException("duplicate"));
+        given(userBookConflictReader.find(USER_ID, BOOK_ID)).willReturn(Optional.of(existingUserBook));
 
         assertThatThrownBy(() -> userBookCreateService.execute(command()))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))

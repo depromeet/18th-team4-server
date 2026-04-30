@@ -1,4 +1,4 @@
-package com.readum.model.book.entity;
+package com.readum.model.user.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

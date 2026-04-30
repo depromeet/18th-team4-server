@@ -1,21 +1,20 @@
-package com.readum.domain.userbook.service;
+package com.readum.domain.user.userbook.service;
 
 import com.readum.domain.book.dto.BookResult;
 import com.readum.domain.book.out.BookLookupClient;
 import com.readum.domain.exception.ConflictException;
-import com.readum.domain.userbook.dto.UserBookCreateCommand;
-import com.readum.domain.userbook.dto.UserBookCreateResult;
-import com.readum.domain.userbook.exception.UserBookErrorCode;
+import com.readum.domain.user.userbook.dto.UserBookCreateCommand;
+import com.readum.domain.user.userbook.dto.UserBookCreateResult;
+import com.readum.domain.user.userbook.exception.UserBookErrorCode;
 import com.readum.model.book.entity.Book;
-import com.readum.model.book.entity.UserBook;
+import com.readum.model.user.entity.UserBook;
 import com.readum.model.book.repository.BookRepository;
-import com.readum.model.book.repository.UserBookRepository;
+import com.readum.model.user.repository.UserBookRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +23,7 @@ public class UserBookCreateService {
     private final BookLookupClient bookLookupClient;
     private final BookRepository bookRepository;
     private final UserBookRepository userBookRepository;
+    private final UserBookConflictReader userBookConflictReader;
 
     @Transactional
     public UserBookCreateResult execute(UserBookCreateCommand command) {
@@ -45,21 +45,14 @@ public class UserBookCreateService {
                 .orElseThrow(() -> new IllegalStateException(
                         "upsert 후 book을 찾을 수 없음: " + command.bookExternalId()));
 
-        // 4. (userId, bookId) 중복 체크
-        Optional<UserBook> existing = userBookRepository.findByUserIdAndBookId(command.userId(), book.getId());
-        if (existing.isPresent()) {
-            UserBookCreateResult conflictResult = toResult(existing.get(), book);
-            throw new ConflictException(UserBookErrorCode.ALREADY_EXISTS, conflictResult);
-        }
-
-        // 5. 신규 UserBook 등록
-        // check-then-save 사이에 다른 트랜잭션이 동일 (userId, bookId)를 삽입한 경우
-        // DataIntegrityViolationException이 발생한다. 재조회로 기존 행을 확보해 409로 전환한다.
+        // 4. 신규 UserBook 등록
+        // 중복(일반 재등록 또는 race condition) 발생 시 DataIntegrityViolationException을 잡아
+        // 새 트랜잭션으로 재조회 후 409로 전환한다.
         try {
             UserBook saved = userBookRepository.save(UserBook.create(command.userId(), book.getId()));
             return toResult(saved, book);
         } catch (DataIntegrityViolationException ex) {
-            UserBook raced = userBookRepository.findByUserIdAndBookId(command.userId(), book.getId())
+            UserBook raced = userBookConflictReader.find(command.userId(), book.getId())
                     .orElseThrow(() -> ex);
             throw new ConflictException(UserBookErrorCode.ALREADY_EXISTS, toResult(raced, book));
         }

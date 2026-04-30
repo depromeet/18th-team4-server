@@ -1,12 +1,12 @@
-package com.readum.presentation.controller.userbook;
+package com.readum.presentation.controller.user;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.readum.domain.exception.ConflictException;
-import com.readum.domain.userbook.dto.UserBookCreateResult;
-import com.readum.domain.userbook.exception.UserBookErrorCode;
-import com.readum.domain.userbook.service.UserBookCreateService;
+import com.readum.domain.user.userbook.dto.UserBookCreateResult;
+import com.readum.domain.user.userbook.exception.UserBookErrorCode;
+import com.readum.domain.user.userbook.service.UserBookCreateService;
 import com.readum.presentation.common.GlobalExceptionHandler;
-import com.readum.presentation.controller.userbook.dto.UserBookCreateRequest;
+import com.readum.presentation.controller.user.dto.UserBookCreateRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -1,12 +1,12 @@
-package com.readum.presentation.controller.userbook;
+package com.readum.presentation.controller.user;
 
 import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.userbook.dto.UserBookCreateResult;
-import com.readum.domain.userbook.service.UserBookCreateService;
+import com.readum.domain.user.userbook.dto.UserBookCreateResult;
+import com.readum.domain.user.userbook.service.UserBookCreateService;
 import com.readum.presentation.common.ApiResponse;
-import com.readum.presentation.controller.userbook.dto.UserBookCreateRequest;
-import com.readum.presentation.controller.userbook.dto.UserBookResponse;
+import com.readum.presentation.controller.user.dto.UserBookCreateRequest;
+import com.readum.presentation.controller.user.dto.UserBookResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;

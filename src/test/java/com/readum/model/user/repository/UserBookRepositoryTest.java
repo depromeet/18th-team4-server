@@ -1,6 +1,6 @@
-package com.readum.model.book.repository;
+package com.readum.model.user.repository;
 
-import com.readum.model.book.entity.UserBook;
+import com.readum.model.user.entity.UserBook;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

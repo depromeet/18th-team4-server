@@ -69,6 +69,14 @@ public class AladinBookLookupClientImpl implements BookLookupClient {
         }
     }
 
+    private boolean hasCause(Throwable t, Class<? extends Throwable> target) {
+        while (t != null) {
+            if (target.isInstance(t)) return true;
+            t = t.getCause();
+        }
+        return false;
+    }
+
     private BookResult mapToBookResult(AladinItemSearchResponse.Item item) {
         return new BookResult(
                 StringUtils.hasText(item.cover()) ? item.cover() : null,
@@ -80,14 +88,6 @@ public class AladinBookLookupClientImpl implements BookLookupClient {
         );
     }
 
-    private boolean hasCause(Throwable t, Class<? extends Throwable> target) {
-        while (t != null) {
-            if (target.isInstance(t)) return true;
-            t = t.getCause();
-        }
-        return false;
-    }
-
     private Integer extractPublishedYear(String pubDate) {
         if (!StringUtils.hasText(pubDate)) {
             return null;
@@ -95,13 +95,11 @@ public class AladinBookLookupClientImpl implements BookLookupClient {
         try {
             return LocalDate.parse(pubDate).getYear();
         } catch (DateTimeParseException ignore) {
-            // ISO 포맷이 아닐 때 앞 4자리 추출 폴백
         }
         if (pubDate.length() >= 4) {
             try {
                 return Integer.parseInt(pubDate.substring(0, 4));
             } catch (NumberFormatException ignore) {
-                // 폴백 실패 - 아래에서 로그 처리
             }
         }
         log.warn("알라딘 pubDate 파싱 폴백 실패 - 예상치 못한 형식: pubDate={}", pubDate);

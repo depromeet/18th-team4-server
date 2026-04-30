@@ -1,11 +1,12 @@
-package com.readum.model.book.repository;
+package com.readum.model.user.repository;
 
 import com.readum.domain.book.dto.BookResult;
 import com.readum.domain.book.out.BookLookupClient;
 import com.readum.domain.exception.ConflictException;
-import com.readum.domain.userbook.dto.UserBookCreateCommand;
-import com.readum.domain.userbook.dto.UserBookCreateResult;
-import com.readum.domain.userbook.service.UserBookCreateService;
+import com.readum.domain.user.userbook.dto.UserBookCreateCommand;
+import com.readum.domain.user.userbook.dto.UserBookCreateResult;
+import com.readum.domain.user.userbook.service.UserBookCreateService;
+import com.readum.model.book.repository.BookRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,19 +86,17 @@ class UserBookConcurrencyTest {
             });
         }
 
-        startLatch.countDown(); // 모든 스레드 동시 출발
+        startLatch.countDown();
         boolean finished = doneLatch.await(10, TimeUnit.SECONDS);
 
         try {
             assertThat(finished).as("10초 내 모든 스레드가 완료되어야 한다").isTrue();
             assertThat(results).hasSize(threadCount);
 
-            // 검증 1: BOOK 테이블에 해당 externalId를 가진 레코드가 정확히 1건
             Long bookCount = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM book WHERE external_id = ?", Long.class, EXTERNAL_ID);
             assertThat(bookCount).as("Book 마스터는 1건만 존재해야 한다").isEqualTo(1L);
 
-            // 검증 1-2: USER_BOOK 테이블에 해당 (userId, bookId) 조합의 레코드가 정확히 1건
             Long bookId = bookRepository.findByExternalId(EXTERNAL_ID)
                     .orElseThrow()
                     .getId();
@@ -106,14 +105,11 @@ class UserBookConcurrencyTest {
                     Long.class, USER_ID, bookId);
             assertThat(userBookCount).as("UserBook은 1건만 존재해야 한다").isEqualTo(1L);
 
-            // 검증 2: UnexpectedRollbackException 발생 없음
             long unexpectedRollbackCount = results.stream()
                     .filter(r -> r instanceof UnexpectedRollbackException)
                     .count();
             assertThat(unexpectedRollbackCount).as("UnexpectedRollbackException이 발생하면 안 된다").isZero();
 
-            // 검증 3: 성공은 정확히 1건, 나머지 9건은 모두 ConflictException
-            // DataIntegrityViolationException은 서비스 내에서 재조회 후 ConflictException으로 전환되므로 외부에 노출되지 않는다
             long successCount = results.stream()
                     .filter(r -> r instanceof UserBookCreateResult)
                     .count();
