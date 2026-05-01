@@ -9,6 +9,7 @@ import com.readum.domain.exception.ForbiddenException;
 import com.readum.domain.exception.GatewayTimeoutException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.exception.UnprocessableEntityException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
@@ -52,6 +53,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleNotFound(NotFoundException ex) {
         log.warn("Not found: {}", ex.getErrorCode().getMessage());
         return ApiResponse.error(HttpStatus.NOT_FOUND, ex.getErrorCode().getMessage());
+    }
+
+    // 도메인 비즈니스 예외 - 처리 불가 엔티티 (422)
+    @ExceptionHandler(UnprocessableEntityException.class)
+    public ResponseEntity<ApiResponse<?>> handleUnprocessableEntity(UnprocessableEntityException ex) {
+        log.warn("Unprocessable entity: {}", ex.getErrorCode().getMessage());
+        return ApiResponse.error(HttpStatus.UNPROCESSABLE_ENTITY, ex.getErrorCode().getMessage());
     }
 
     // 도메인 비즈니스 예외 - 상태 충돌
