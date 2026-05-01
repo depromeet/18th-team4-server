@@ -49,9 +49,7 @@ public class AiChatController {
             @AuthenticationPrincipal Long userId,
             @Valid @RequestBody AiChatSessionCreateRequest request
     ) {
-        // TODO: 시큐리티 활성화 시 null 체크 복원 및 아래 줄 제거
-        Long resolvedUserId = userId != null ? userId : 1L;
-        AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(resolvedUserId));
+        AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userId));
         return ApiResponse.created(AiChatSessionCreateResponse.from(result));
     }
 
