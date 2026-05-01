@@ -11,6 +11,8 @@ import com.readum.presentation.controller.auth.dto.LogoutRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -34,6 +36,16 @@ public class AuthController {
     @Value("${jwt.refresh-cookie-secure:true}")
     private boolean refreshCookieSecure;
 
+    @Operation(
+            summary = "액세스 토큰 갱신",
+            description = "refresh_token 쿠키를 검증하고 새 액세스 토큰과 리프레시 토큰을 발급한다. " +
+                    "토큰이 만료·폐기·재사용 감지된 경우 401을 반환한다."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "토큰 갱신 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "refresh_token 쿠키 누락"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "토큰 무효·만료·재사용 감지"),
+    })
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<TokenRefreshResponse>> refresh(
             @CookieValue(name = REFRESH_TOKEN_COOKIE) String refreshToken) {
@@ -46,6 +58,14 @@ public class AuthController {
                 .body(new ApiResponse<>(TokenRefreshResponse.from(pair), null));
     }
 
+    @Operation(
+            summary = "로그아웃",
+            description = "리프레시 토큰을 폐기하고 액세스 토큰을 블랙리스트에 등록한다. " +
+                    "쿠키가 없거나 유효하지 않은 토큰이어도 멱등 처리되어 항상 204를 반환한다."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "204", description = "로그아웃 성공"),
+    })
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
             @CookieValue(name = REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
