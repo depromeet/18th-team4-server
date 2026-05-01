@@ -32,6 +32,10 @@ public class AiChatMessage {
         USER, ASSISTANT, SYSTEM
     }
 
+    public enum Status {
+        COMPLETED, ERROR
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -42,6 +46,10 @@ public class AiChatMessage {
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
     private Role role;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private Status status;
 
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
@@ -64,19 +72,21 @@ public class AiChatMessage {
     public static AiChatMessage create(
             Long sessionId,
             Role role,
+            Status status,
             String content,
             String quoteText,
             Integer inputTokens,
             Integer outputTokens,
             Integer totalTokens
     ) {
-        return new AiChatMessage(null, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, LocalDateTime.now());
+        return new AiChatMessage(null, sessionId, role, status, content, quoteText, inputTokens, outputTokens, totalTokens, LocalDateTime.now());
     }
 
     public static AiChatMessage of(
             Long id,
             Long sessionId,
             Role role,
+            Status status,
             String content,
             String quoteText,
             Integer inputTokens,
@@ -84,6 +94,6 @@ public class AiChatMessage {
             Integer totalTokens,
             LocalDateTime createdAt
     ) {
-        return new AiChatMessage(id, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, createdAt);
+        return new AiChatMessage(id, sessionId, role, status, content, quoteText, inputTokens, outputTokens, totalTokens, createdAt);
     }
 }
