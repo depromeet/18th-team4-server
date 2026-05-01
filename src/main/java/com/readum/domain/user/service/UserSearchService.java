@@ -3,7 +3,7 @@ package com.readum.domain.user.service;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.dto.UserSessionInfoResult;
 import com.readum.domain.user.exception.UserErrorCode;
-import com.readum.model.book.repository.UserBookRepository;
+import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
