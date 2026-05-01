@@ -152,6 +152,24 @@ graph TD
 - 경로 패턴: `/api/v1/{resource}`
 - `ResponseEntity`로 HTTP 상태 코드 명시
 
+## Swagger Convention
+
+모든 Controller 메서드에는 아래 애노테이션을 반드시 작성한다.
+
+```java
+@Operation(
+        summary = "한 줄 요약 (명사형)",
+        description = "상세 설명. 동작 흐름, 조건, 예외 상황을 포함한다."
+)
+@ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "성공 설명"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 값 검증 실패"),
+        // 해당 엔드포인트에서 발생 가능한 응답 코드만 포함
+})
+```
+
+> `@ApiResponse`는 `com.readum.presentation.common.ApiResponse`와 이름이 충돌하므로 FQCN(`io.swagger.v3.oas.annotations.responses.ApiResponse`)으로 사용한다.
+
 ## API Response Format
 
 - 성공 응답: `status 2XX`
