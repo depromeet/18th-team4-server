@@ -1,0 +1,72 @@
+package com.readum.infrastructure.ai.openai;
+
+import com.readum.domain.aiChat.dto.SummaryDraftResult;
+import com.readum.domain.aiChat.out.AiSummaryClient;
+import com.readum.model.aiChat.entity.AiChatMessage;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class AiSummaryClientImpl implements AiSummaryClient {
+
+    // TODO: 컨텍스트 윈도우 초과 방지를 위해 최근 N턴만 사용하는 절삭 로직 추가 필요
+    //       현재는 전체 이력을 그대로 전달함 (세션 이력이 짧은 초기 단계에서는 무방)
+    private static final String USER_TURN_PREFIX = "User: ";
+    private static final String ASSISTANT_TURN_PREFIX = "Assistant: ";
+
+    private final ChatClient chatClient;
+
+    @Value("classpath:prompts/summary-generation.st")
+    private Resource summaryPromptResource;
+
+    private String summaryPromptTemplate;
+
+    @PostConstruct
+    public void init() {
+        try {
+            summaryPromptTemplate = summaryPromptResource.getContentAsString(StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException("summary-generation.st 프롬프트 파일을 로드하지 못했습니다.", e);
+        }
+    }
+
+    @Override
+    public SummaryDraftResult generate(List<AiChatMessage> messages) {
+        String chatHistory = formatChatHistory(messages);
+        log.debug("[Summary] 대화 이력 포맷 완료 - 메시지 수: {}", messages.size());
+
+        return chatClient.prompt()
+                .system(s -> s.text(summaryPromptTemplate).param("chatHistory", chatHistory))
+                .user("위 대화 이력을 바탕으로 감상문 초안을 JSON 형식으로 작성해 주세요.")
+                .call()
+                .entity(SummaryDraftResult.class);
+    }
+
+    private String formatChatHistory(List<AiChatMessage> messages) {
+        StringBuilder sb = new StringBuilder();
+        for (AiChatMessage message : messages) {
+            String prefix = switch (message.getRole()) {
+                case USER -> USER_TURN_PREFIX;
+                case ASSISTANT -> ASSISTANT_TURN_PREFIX;
+                case SYSTEM -> null; // 시스템 메시지는 대화 이력에서 제외
+            };
+            if (prefix == null) {
+                continue;
+            }
+            sb.append(prefix).append(message.getContent()).append("\n");
+        }
+        return sb.toString().trim();
+    }
+}
