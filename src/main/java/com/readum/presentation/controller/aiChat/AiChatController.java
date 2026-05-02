@@ -6,13 +6,14 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
-import com.readum.presentation.common.ApiResponse;
+import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateResponse;
 import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -53,18 +54,18 @@ public class AiChatController {
             description = "사용자가 소유한 도서(userBookId)를 기반으로 새 채팅 세션을 생성한다."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "세션 생성 성공"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 값 검증 실패"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "소유하지 않은 도서")
+            @ApiResponse(responseCode = "201", description = "세션 생성 성공"),
+            @ApiResponse(responseCode = "400", description = "요청 값 검증 실패"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "소유하지 않은 도서")
     })
     @PostMapping("/sessions")
-    public ResponseEntity<ApiResponse<AiChatSessionCreateResponse>> createSession(
+    public ResponseEntity<GlobalApiResponse<AiChatSessionCreateResponse>> createSession(
             @AuthenticationPrincipal Long userId,
             @Valid @RequestBody AiChatSessionCreateRequest request
     ) {
         AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userId));
-        return ApiResponse.created(AiChatSessionCreateResponse.from(result));
+        return GlobalApiResponse.created(AiChatSessionCreateResponse.from(result));
     }
 
     @Operation(
@@ -73,11 +74,11 @@ public class AiChatController {
                     "이벤트 종류: token (실시간 텍스트 청크), done (스트림 정상 종료 + 토큰 사용량), error (스트림 비정상 종료)."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "SSE 스트림 시작"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "본문 검증 실패 / 종료된 세션"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "AI 호출 한도 초과")
+            @ApiResponse(responseCode = "200", description = "SSE 스트림 시작"),
+            @ApiResponse(responseCode = "400", description = "본문 검증 실패 / 종료된 세션"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
+            @ApiResponse(responseCode = "429", description = "AI 호출 한도 초과")
     })
     @PostMapping(value = "/sessions/{sessionId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<Flux<ServerSentEvent<String>>> sendMessage(
@@ -96,19 +97,19 @@ public class AiChatController {
             description = "createdAt 내림차순으로 메시지 이력을 페이지네이션 조회한다."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "page/size 검증 실패"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음")
+            @ApiResponse(responseCode = "200", description = "조회 성공"),
+            @ApiResponse(responseCode = "400", description = "page/size 검증 실패"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음")
     })
     @GetMapping("/sessions/{sessionId}/messages")
-    public ResponseEntity<ApiResponse<MessageListResponse>> getMessages(
+    public ResponseEntity<GlobalApiResponse<MessageListResponse>> getMessages(
             @AuthenticationPrincipal Long userId,
             @PathVariable Long sessionId,
             @Valid @ModelAttribute MessageListRequest request
     ) {
         MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userId, sessionId));
-        return ApiResponse.ok(MessageListResponse.from(result));
+        return GlobalApiResponse.ok(MessageListResponse.from(result));
     }
 
     private ServerSentEvent<String> toServerSentEvent(MessageStreamEvent event) {

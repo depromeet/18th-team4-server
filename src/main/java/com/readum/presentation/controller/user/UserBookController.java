@@ -4,10 +4,11 @@ import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.userbook.dto.UserBookCreateResult;
 import com.readum.domain.user.userbook.service.UserBookCreateService;
-import com.readum.presentation.common.ApiResponse;
+import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.user.dto.UserBookCreateRequest;
 import com.readum.presentation.controller.user.dto.UserBookResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -35,13 +36,13 @@ public class UserBookController {
                     "동일 도서가 이미 책장에 존재하면 409 Conflict를 반환합니다."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "도서 추가 성공"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 값 검증 실패 (bookExternalId 또는 title 누락 등)"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 책장에 등록된 도서")
+            @ApiResponse(responseCode = "201", description = "도서 추가 성공"),
+            @ApiResponse(responseCode = "400", description = "요청 값 검증 실패 (bookExternalId 또는 title 누락 등)"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "409", description = "이미 책장에 등록된 도서")
     })
     @PostMapping
-    public ResponseEntity<ApiResponse<UserBookResponse>> create(
+    public ResponseEntity<GlobalApiResponse<UserBookResponse>> create(
             @AuthenticationPrincipal Long userId,
             @Valid @RequestBody UserBookCreateRequest request) {
         if (userId == null) {
@@ -56,6 +57,6 @@ public class UserBookController {
                         .path("/{id}")
                         .buildAndExpand(result.id())
                         .toUri())
-                .body(new ApiResponse<>(response, null));
+                .body(new GlobalApiResponse<>(response, null));
     }
 }

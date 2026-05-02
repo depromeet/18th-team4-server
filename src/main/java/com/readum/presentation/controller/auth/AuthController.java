@@ -1,15 +1,16 @@
 package com.readum.presentation.controller.auth;
 
 import com.readum.domain.auth.dto.TokenPair;
-import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.auth.service.LogoutService;
 import com.readum.domain.auth.service.TokenRefreshService;
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.presentation.common.ApiResponse;
+import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.common.security.JwtAuthenticationFilter;
 import com.readum.presentation.controller.auth.dto.LogoutRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -36,8 +37,18 @@ public class AuthController {
     @Value("${jwt.refresh-cookie-secure:true}")
     private boolean refreshCookieSecure;
 
+    @Operation(
+            summary = "Access Token 재발급",
+            description = "쿠키의 Refresh Token 으로 새 Access/Refresh Token Pair 를 발급한다. " +
+                    "재발급된 Refresh Token 은 HttpOnly 쿠키로 다시 내려준다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "재발급 성공"),
+            @ApiResponse(responseCode = "400", description = "Refresh Token 쿠키 누락"),
+            @ApiResponse(responseCode = "401", description = "Refresh Token 만료/무효 또는 재사용 감지")
+    })
     @PostMapping("/refresh")
-    public ResponseEntity<ApiResponse<TokenRefreshResponse>> refresh(
+    public ResponseEntity<GlobalApiResponse<TokenRefreshResponse>> refresh(
             @CookieValue(name = REFRESH_TOKEN_COOKIE) String refreshToken) {
         TokenRefreshRequest request = new TokenRefreshRequest(refreshToken);
         TokenPair pair = tokenRefreshService.execute(request.toCommand());
@@ -45,9 +56,17 @@ public class AuthController {
         ResponseCookie cookie = buildRefreshTokenCookie(pair.refreshToken(), pair.refreshTokenTtl().toSeconds());
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(new ApiResponse<>(TokenRefreshResponse.from(pair), null));
+                .body(new GlobalApiResponse<>(TokenRefreshResponse.from(pair), null));
     }
 
+    @Operation(
+            summary = "로그아웃",
+            description = "Access Token 을 블랙리스트에 등록하고 Refresh Token 을 무효화한다. " +
+                    "Refresh Token 쿠키도 즉시 만료시킨다 (idempotent — 토큰 없어도 204)."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "로그아웃 성공 (응답 본문 없음)")
+    })
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
             @CookieValue(name = REFRESH_TOKEN_COOKIE, required = false) String refreshToken,

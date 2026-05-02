@@ -2,9 +2,12 @@ package com.readum.presentation.controller.book;
 
 import com.readum.domain.book.dto.BookSearchResult;
 import com.readum.domain.book.service.BookSearchService;
-import com.readum.presentation.common.ApiResponse;
+import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.book.dto.BookSearchRequest;
 import com.readum.presentation.controller.book.dto.BookSearchResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,9 +25,20 @@ public class BookController {
 
     private final BookSearchService bookSearchService;
 
+    @Operation(
+            summary = "키워드 도서 검색",
+            description = "알라딘 ItemSearch API 로 도서를 검색해 페이지네이션 결과를 반환한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "검색 성공"),
+            @ApiResponse(responseCode = "400", description = "keyword/page/size 검증 실패"),
+            @ApiResponse(responseCode = "502", description = "알라딘 API 응답 오류 (5xx)"),
+            @ApiResponse(responseCode = "504", description = "알라딘 API 응답 시간 초과")
+    })
     @GetMapping
-    public ResponseEntity<ApiResponse<BookSearchResponse>> search(@Valid @ModelAttribute BookSearchRequest request) {
+    public ResponseEntity<GlobalApiResponse<BookSearchResponse>> search(
+            @Valid @ModelAttribute BookSearchRequest request) {
         BookSearchResult result = bookSearchService.search(request.toCommand());
-        return ApiResponse.ok(BookSearchResponse.from(result));
+        return GlobalApiResponse.ok(BookSearchResponse.from(result));
     }
 }
