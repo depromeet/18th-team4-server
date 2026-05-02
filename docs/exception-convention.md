@@ -11,7 +11,8 @@ RuntimeException
      ├─ UnauthorizedException    → 401
      ├─ ForbiddenException       → 403
      ├─ NotFoundException        → 404
-     └─ ConflictException        → 409
+     ├─ ConflictException        → 409
+     └─ TooManyRequestsException → 429
 ```
 
 - `BusinessException` 은 `ErrorCode` 하나만 필드로 들고 있음
@@ -127,17 +128,18 @@ void REUSE_DETECTED_결과면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한�
 3. 서비스/어댑터에서 `throw new {HttpStatus}Exception({Feature}ErrorCode.XXX)` 로 던짐
 4. 테스트에서 위 assertion 패턴으로 검증
 
-> `GlobalExceptionHandler` 는 대부분의 경우 **건드릴 필요 없다**. 기존 5개 HTTP 상태 서브클래스 안에서 끝난다.
+> `GlobalExceptionHandler` 는 대부분의 경우 **건드릴 필요 없다**. 기존 6개 HTTP 상태 서브클래스 안에서 끝난다.
 
 ## 신규 HTTP 상태 추가 (드문 경우)
 
-기존 5개(400/401/403/404/409)로 표현 불가능한 상태가 필요할 때만:
+기존 6개(400/401/403/404/409/429)로 표현 불가능한 상태가 필요할 때만:
 
 1. `domain/exception/{Status}Exception.java` 추가 (`extends BusinessException`)
 2. `GlobalExceptionHandler` 에 `@ExceptionHandler({Status}Exception.class)` 핸들러 추가
 3. 해당 ErrorCode 추가
+4. `CLAUDE.md` 의 "Exception Convention" 표에 행 추가
 
-429(Too Many Requests), 503(Service Unavailable, DB 장애 외) 등이 후보. 추가 전에 기존 분류로 표현 가능한지 먼저 검토.
+> 참고로 `TooManyRequestsException(429)` 는 외부 LLM rate limit 매핑을 위해 도입됐다 (`AiChatErrorCode.AI_RATE_LIMIT_EXCEEDED`). 503(Service Unavailable, DB 장애 외) 등이 다음 후보. 추가 전에 기존 분류로 표현 가능한지 먼저 검토.
 
 ## DB 계층 예외
 

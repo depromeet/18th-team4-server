@@ -130,6 +130,19 @@ graph TD
 
 ## JPQL/Query Convention
 
+- **derived query method 우선**: Spring Data JPA 의 메서드 이름 기반 쿼리(`findBy...And...In...OrderBy...`) 로 표현 가능하면 `@Query` 보다 우선 사용한다. JPQL 본문의 enum FQCN/JPQL 문법 노이즈를 피하고 타입 안전성을 얻는다. 조건이 4~5개 이상으로 메서드명이 흉해지면 그때 `@Query` 로 전환.
+  ```java
+  // ✅ derived (단순 조건)
+  List<AiChatMessage> findBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+          Long sessionId, AiChatMessage.Status status, Collection<AiChatMessage.Role> roles, Pageable pageable);
+
+  // ✅ default 메서드로 호출자 시그니처 짧게 유지
+  default List<AiChatMessage> findRecentForContextWindow(Long sessionId, Pageable pageable) {
+      return findBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+              sessionId, AiChatMessage.Status.COMPLETED,
+              List.of(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT), pageable);
+  }
+  ```
 - **엔티티 별칭(alias)**: 단일 문자 약어(`r`, `u`, `t`) 금지. 엔티티 이름을 camelCase 로 풀어 쓴다.
   ```java
   // ❌ update RefreshToken r set r.rotatedAt = :now where r.id = :id
@@ -154,7 +167,21 @@ graph TD
 
 ## Swagger Convention
 
-모든 Controller 메서드에는 아래 애노테이션을 반드시 작성한다.
+### 컨트롤러 클래스: `@Tag` 필수
+
+Swagger UI 의 그룹명이 클래스명(예: `ai-chat-controller`)으로 표시되지 않도록 모든 컨트롤러에 한국어 라벨을 붙인다.
+
+```java
+@Tag(name = "AI 채팅", description = "AI 와 책 한 권에 대해 대화하는 채팅 세션 및 메시지 관리")
+@RestController
+@RequestMapping("/api/v1/ai-chat")
+public class AiChatController { ... }
+```
+
+- `name`: 사람이 읽기 쉬운 한국어 (예: "AI 채팅", "내 책장", "도서 검색", "인증")
+- `description`: 해당 그룹이 담당하는 API 의 한 줄 설명
+
+### 메서드: `@Operation` + `@ApiResponses` 필수
 
 ```java
 @Operation(
@@ -203,6 +230,7 @@ graph TD
 | `ForbiddenException` | 403 | 인증됐지만 권한 없음 |
 | `NotFoundException` | 404 | 리소스 미존재 |
 | `ConflictException` | 409 | 상태 충돌 (중복, 동시성) |
+| `TooManyRequestsException` | 429 | 외부 API 호출 한도 초과 (LLM rate limit 등) |
 
 - **도메인 ErrorCode**: `domain/{feature}/exception/{Feature}ErrorCode.java` 에 enum 으로 배치, `implements ErrorCode`, 메시지는 한글 (API 응답에 그대로 노출)
 - **예외 던지기**: 서브클래스 타입(HTTP 상태) + ErrorCode(세부 분기) 조합 사용. raw `RuntimeException` / `IllegalArgumentException` 금지. `IllegalStateException` 은 프로그램 버그에만 fail-fast 용으로 사용
@@ -238,6 +266,43 @@ graph TD
   @Test
   void 존재하지_않는_사용자를_조회하면_예외가_발생한다() { ... }
   ```
+
+## Configuration Properties
+
+비즈니스 룰/외부 API 설정값을 `@ConfigurationProperties` record 로 외부화할 때의 위치 규칙.
+
+| 종류 | 위치 | 예시 |
+|------|------|------|
+| **외부 API/시스템 설정** (시크릿, 호스트, 타임아웃) | `infrastructure/{feature}/{provider}/{Provider}Properties.java` | `infrastructure/book/aladin/AladinProperties` |
+| **도메인 비즈니스 룰** (검증 한계, 컨텍스트 크기 등) | `domain/{feature}/config/{Domain}Properties.java` | `domain/aiChat/config/AiChatProperties` |
+
+도메인 비즈니스 룰은 nested record 로 그룹핑한다.
+
+```java
+@ConfigurationProperties(prefix = "ai-chat")
+public record AiChatProperties(
+        ContextWindow contextWindow,
+        MessageRule message
+) {
+    public record ContextWindow(int maxTurns) {
+        public int maxMessages() { return maxTurns * 2; }
+    }
+    public record MessageRule(int maxContentLength) {}
+}
+```
+
+```yaml
+# application.yml
+ai-chat:
+  context-window:
+    max-turns: 20
+  message:
+    max-content-length: 1000
+```
+
+- 등록은 `ReadumApplication` 의 `@ConfigurationPropertiesScan` 이 자동 처리 (별도 `@EnableConfigurationProperties` 불필요)
+- 시크릿/환경별 값은 yml 에 직접 박지 말고 환경변수 (`${OPENAI_API_KEY}`)
+- 비즈니스 룰은 환경 무관 상수이므로 `application.yml` 에 직접값 (재배포 가능)
 
 ## Logging Levels
 
