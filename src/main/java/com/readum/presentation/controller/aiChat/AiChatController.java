@@ -69,7 +69,7 @@ public class AiChatController {
             @PathVariable Long sessionId,
             @AuthenticationPrincipal Long userId
     ) {
-        SummaryDraftResult result = summaryDraftService.execute(sessionId);
+        SummaryDraftResult result = summaryDraftService.execute(sessionId, userId);
         return ApiResponse.ok(SummaryDraftResponse.from(result));
     }
 

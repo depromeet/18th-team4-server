@@ -10,6 +10,7 @@ import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.user.repository.UserBookRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,10 +27,14 @@ public class SummaryDraftService {
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final AiSummaryClient aiSummaryClient;
+    private final UserBookRepository userBookRepository;
 
     @Transactional
-    public SummaryDraftResult execute(Long sessionId) {
-        AiChatSession session = aiChatSessionRepository.findById(sessionId)
+    public SummaryDraftResult execute(Long sessionId, Long userId) {
+        AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
+                .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+
+        userBookRepository.findByIdAndUserId(session.getUserBookId(), userId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         if (session.getStatus() == AiChatSession.Status.CLOSED) {

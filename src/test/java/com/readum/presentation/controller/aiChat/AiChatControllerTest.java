@@ -116,7 +116,7 @@ class AiChatControllerTest {
     @Test
     void 정상_요청시_200과_감상문_초안을_반환한다() throws Exception {
         SummaryDraftResult result = new SummaryDraftResult("나의 독서 감상", "깊은 울림을 주는 책이었다.", "선택의 기로에서");
-        given(summaryDraftService.execute(eq(1L))).willReturn(result);
+        given(summaryDraftService.execute(eq(1L), eq(AUTHENTICATED_USER_ID))).willReturn(result);
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft"))
                 .andExpect(status().isOk())
@@ -127,7 +127,7 @@ class AiChatControllerTest {
 
     @Test
     void 누적_토큰이_부족하면_422를_반환한다() throws Exception {
-        given(summaryDraftService.execute(eq(1L)))
+        given(summaryDraftService.execute(eq(1L), eq(AUTHENTICATED_USER_ID)))
                 .willThrow(new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft"))
@@ -137,7 +137,7 @@ class AiChatControllerTest {
 
     @Test
     void 이미_닫힌_세션이면_409를_반환한다() throws Exception {
-        given(summaryDraftService.execute(eq(1L)))
+        given(summaryDraftService.execute(eq(1L), eq(AUTHENTICATED_USER_ID)))
                 .willThrow(new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft"))
@@ -147,7 +147,7 @@ class AiChatControllerTest {
 
     @Test
     void 존재하지_않는_세션이면_404를_반환한다() throws Exception {
-        given(summaryDraftService.execute(eq(1L)))
+        given(summaryDraftService.execute(eq(1L), eq(AUTHENTICATED_USER_ID)))
                 .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft"))
