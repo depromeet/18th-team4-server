@@ -10,6 +10,7 @@ import com.readum.presentation.common.ApiResponse;
 import com.readum.presentation.controller.user.dto.CompleteOnboardingResponse;
 import com.readum.presentation.controller.user.dto.CreateUserSessionResponse;
 import com.readum.presentation.controller.user.dto.UserSessionInfoResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
 
+@Tag(name = "사용자 세션", description = "사용자 세션 발급 / 조회 / 온보딩 완료 처리")
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor

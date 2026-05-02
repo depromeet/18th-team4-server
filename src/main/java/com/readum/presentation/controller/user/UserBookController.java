@@ -21,8 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-import java.net.URI;
-
+@Tag(name = "내 책장", description = "사용자가 등록한 도서(책장) 관리")
 @RestController
 @RequestMapping("/api/v1/user-books")
 @RequiredArgsConstructor

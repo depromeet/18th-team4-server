@@ -10,6 +10,7 @@ import com.readum.presentation.common.security.JwtAuthenticationFilter;
 import com.readum.presentation.controller.auth.dto.LogoutRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag(name = "인증", description = "Access Token 재발급 및 로그아웃")
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor

@@ -5,6 +5,7 @@ import com.readum.domain.book.service.BookSearchService;
 import com.readum.presentation.common.ApiResponse;
 import com.readum.presentation.controller.book.dto.BookSearchRequest;
 import com.readum.presentation.controller.book.dto.BookSearchResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag(name = "도서 검색", description = "외부 도서 검색 (알라딘 API 기반)")
 @RestController
 @RequestMapping("/api/v1/books")
 @RequiredArgsConstructor
