@@ -34,14 +34,12 @@ public class AiChatMessage {
     }
 
     /**
-     * COMPLETED  : USER 메시지(즉시 저장) 또는 정상 종료된 ASSISTANT 메시지.
-     * STREAMING  : 현재 PR 에서는 미사용. ASSISTANT 메시지를 스트림 종료 후에만 INSERT 하므로 DB 에 남지 않음.
-     *              미래에 append-only 진행 상태가 필요해질 때 사용 가능하도록 enum 만 정의.
-     * FAILED     : 스트림 비정상 종료 시 부분 응답을 보존하기 위한 ASSISTANT 메시지 상태.
-     *              컨텍스트 윈도우(findRecentForContextWindow) 에서 자동 제외된다.
+     * COMPLETED : USER 메시지(즉시 저장) 또는 정상 종료된 ASSISTANT 메시지.
+     * FAILED    : 스트림 비정상 종료 시 부분 응답을 보존하기 위한 ASSISTANT 메시지 상태.
+     *             컨텍스트 윈도우(findRecentForContextWindow) 에서 자동 제외된다.
      */
     public enum Status {
-        COMPLETED, STREAMING, FAILED
+        COMPLETED, FAILED
     }
 
     @Id
