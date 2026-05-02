@@ -10,6 +10,12 @@ jwt:
 user:
   session-cookie-secure: true
 
+ai-chat:
+  context-window:
+    max-turns: 20            # 1턴 = USER 메시지 1 + ASSISTANT 메시지 1
+  message:
+    max-content-length: 1000
+
 springdoc:
   api-docs:
     enabled: false

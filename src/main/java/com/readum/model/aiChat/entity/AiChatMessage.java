@@ -21,7 +21,8 @@ import java.time.LocalDateTime;
 @Table(
         name = "ai_chat_message",
         indexes = {
-                @Index(name = "idx_ai_chat_message_session", columnList = "session_id")
+                @Index(name = "idx_ai_chat_message_session", columnList = "session_id"),
+                @Index(name = "idx_ai_chat_message_session_status_created", columnList = "session_id, status, created_at")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -30,6 +31,17 @@ public class AiChatMessage {
 
     public enum Role {
         USER, ASSISTANT, SYSTEM
+    }
+
+    /**
+     * COMPLETED  : USER 메시지(즉시 저장) 또는 정상 종료된 ASSISTANT 메시지.
+     * STREAMING  : 현재 PR 에서는 미사용. ASSISTANT 메시지를 스트림 종료 후에만 INSERT 하므로 DB 에 남지 않음.
+     *              미래에 append-only 진행 상태가 필요해질 때 사용 가능하도록 enum 만 정의.
+     * FAILED     : 스트림 비정상 종료 시 부분 응답을 보존하기 위한 ASSISTANT 메시지 상태.
+     *              컨텍스트 윈도우(findRecentForContextWindow) 에서 자동 제외된다.
+     */
+    public enum Status {
+        COMPLETED, STREAMING, FAILED
     }
 
     @Id
@@ -58,19 +70,68 @@ public class AiChatMessage {
     @Column(name = "total_tokens")
     private Integer totalTokens;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private Status status;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    public static AiChatMessage create(
+    public static AiChatMessage createUserMessage(Long sessionId, String content) {
+        return new AiChatMessage(
+                null,
+                sessionId,
+                Role.USER,
+                content,
+                null,
+                null,
+                null,
+                null,
+                Status.COMPLETED,
+                LocalDateTime.now()
+        );
+    }
+
+    public static AiChatMessage createAssistantSuccess(
             Long sessionId,
-            Role role,
             String content,
-            String quoteText,
             Integer inputTokens,
             Integer outputTokens,
             Integer totalTokens
     ) {
-        return new AiChatMessage(null, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, LocalDateTime.now());
+        return new AiChatMessage(
+                null,
+                sessionId,
+                Role.ASSISTANT,
+                content,
+                null,
+                inputTokens,
+                outputTokens,
+                totalTokens,
+                Status.COMPLETED,
+                LocalDateTime.now()
+        );
+    }
+
+    public static AiChatMessage createAssistantFailed(
+            Long sessionId,
+            String partialContent,
+            Integer inputTokens,
+            Integer outputTokens,
+            Integer totalTokens
+    ) {
+        return new AiChatMessage(
+                null,
+                sessionId,
+                Role.ASSISTANT,
+                partialContent,
+                null,
+                inputTokens,
+                outputTokens,
+                totalTokens,
+                Status.FAILED,
+                LocalDateTime.now()
+        );
     }
 
     public static AiChatMessage of(
@@ -82,8 +143,9 @@ public class AiChatMessage {
             Integer inputTokens,
             Integer outputTokens,
             Integer totalTokens,
+            Status status,
             LocalDateTime createdAt
     ) {
-        return new AiChatMessage(id, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, createdAt);
+        return new AiChatMessage(id, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, status, createdAt);
     }
 }

@@ -75,4 +75,19 @@ public class AiChatSession {
     ) {
         return new AiChatSession(id, userBookId, status, userMessageCount, accumulatedTokens, lastMessagePreview, createdAt, updatedAt);
     }
+
+    public void appendUserMessage(String preview) {
+        this.userMessageCount += 1;
+        this.lastMessagePreview = preview;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void addAssistantTokens(int totalTokens) {
+        this.accumulatedTokens += totalTokens;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public boolean isClosed() {
+        return this.status == Status.CLOSED;
+    }
 }

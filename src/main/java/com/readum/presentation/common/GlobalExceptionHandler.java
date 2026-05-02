@@ -8,6 +8,7 @@ import com.readum.domain.exception.ExternalApiException;
 import com.readum.domain.exception.ForbiddenException;
 import com.readum.domain.exception.GatewayTimeoutException;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -64,6 +65,13 @@ public class GlobalExceptionHandler {
                     .body(new ApiResponse<>(ex.getPayload(), new ApiResponse.ErrorBody(ex.getErrorCode().getMessage())));
         }
         return ApiResponse.error(HttpStatus.CONFLICT, ex.getErrorCode().getMessage());
+    }
+
+    // 도메인 비즈니스 예외 - 호출 한도 초과 (외부 LLM 등)
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiResponse<?>> handleTooManyRequests(TooManyRequestsException ex) {
+        log.warn("Too many requests: {}", ex.getErrorCode().getMessage());
+        return ApiResponse.error(HttpStatus.TOO_MANY_REQUESTS, ex.getErrorCode().getMessage());
     }
 
     // 외부 시스템 응답 오류 (업스트림 5xx) → 502
