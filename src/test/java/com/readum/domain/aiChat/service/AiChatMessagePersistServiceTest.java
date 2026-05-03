@@ -11,12 +11,15 @@ import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -41,8 +44,18 @@ class AiChatMessagePersistServiceTest {
     @Mock
     private ChatHistoryBuilder chatHistoryBuilder;
 
+    @Mock
+    private AiChatSessionTitleService aiChatSessionTitleService;
+
     @InjectMocks
     private AiChatMessagePersistService persistService;
+
+    @AfterEach
+    void cleanupSynchronization() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.clear();
+        }
+    }
 
     @Test
     void 소유권_없는_세션이면_NotFoundException_을_던지고_USER_메시지는_저장되지_않는다() {
@@ -105,7 +118,53 @@ class AiChatMessagePersistServiceTest {
 
         // 세션 통계 갱신 확인
         assertThat(active.getUserMessageCount()).isEqualTo(1);
-        assertThat(active.getLastMessagePreview()).isEqualTo("이번 질문");
+    }
+
+    @Test
+    void 첫_USER_메시지면_제목_생성_트리거가_afterCommit_로_등록된다() {
+        Long userId = 1L;
+        Long sessionId = 7L;
+        AiChatSession freshSession = AiChatSession.of(
+                sessionId, 100L, AiChatSession.Status.ACTIVE,
+                0, 0, null, LocalDateTime.now(), LocalDateTime.now()
+        );
+        given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(freshSession));
+        given(chatHistoryBuilder.buildPreviousHistory(sessionId)).willReturn(List.of());
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "첫 질문");
+
+            List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            assertThat(synchronizations)
+                    .as("첫 USER 메시지 commit 후 제목 생성을 트리거할 synchronization 이 등록되어야 한다")
+                    .hasSize(1);
+        } finally {
+            TransactionSynchronizationManager.clear();
+        }
+    }
+
+    @Test
+    void 두번째_이후_USER_메시지면_제목_생성_트리거가_등록되지_않는다() {
+        Long userId = 1L;
+        Long sessionId = 7L;
+        AiChatSession existingSession = AiChatSession.of(
+                sessionId, 100L, AiChatSession.Status.ACTIVE,
+                3, 100, "이미 있는 제목", LocalDateTime.now(), LocalDateTime.now()
+        );
+        given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(existingSession));
+        given(chatHistoryBuilder.buildPreviousHistory(sessionId)).willReturn(List.of());
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "후속 질문");
+
+            assertThat(TransactionSynchronizationManager.getSynchronizations())
+                    .as("이미 메시지가 있던 세션은 제목 생성 트리거를 등록하지 않아야 한다")
+                    .isEmpty();
+        } finally {
+            TransactionSynchronizationManager.clear();
+        }
     }
 
     @Test

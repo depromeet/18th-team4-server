@@ -32,6 +32,8 @@ public class AiChatSession {
         ACTIVE, CLOSED
     }
 
+    private static final int TITLE_MAX_LENGTH = 100;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -49,8 +51,8 @@ public class AiChatSession {
     @Column(name = "accumulated_tokens", nullable = false)
     private int accumulatedTokens;
 
-    @Column(name = "last_message_preview", length = 500)
-    private String lastMessagePreview;
+    @Column(name = "title", length = TITLE_MAX_LENGTH)
+    private String title;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -69,17 +71,30 @@ public class AiChatSession {
             Status status,
             int userMessageCount,
             int accumulatedTokens,
-            String lastMessagePreview,
+            String title,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {
-        return new AiChatSession(id, userBookId, status, userMessageCount, accumulatedTokens, lastMessagePreview, createdAt, updatedAt);
+        return new AiChatSession(id, userBookId, status, userMessageCount, accumulatedTokens, title, createdAt, updatedAt);
     }
 
-    public void appendUserMessage(String preview) {
+    public void appendUserMessage() {
         this.userMessageCount += 1;
-        this.lastMessagePreview = preview;
         this.updatedAt = LocalDateTime.now();
+    }
+
+    public boolean isFirstUserMessage() {
+        return this.userMessageCount == 1;
+    }
+
+    // 트리거 무관 generic 갱신. 첫 메시지 트리거뿐 아니라 향후 N턴 재생성·수동 재명명에서도 호출.
+    public void updateTitle(String title) {
+        this.title = truncateTitle(title);
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public boolean hasTitle() {
+        return this.title != null && !this.title.isBlank();
     }
 
     public void addAssistantTokens(int totalTokens) {
@@ -89,5 +104,14 @@ public class AiChatSession {
 
     public boolean isClosed() {
         return this.status == Status.CLOSED;
+    }
+
+    private static String truncateTitle(String title) {
+        if (title == null) {
+            return null;
+        }
+        return title.length() <= TITLE_MAX_LENGTH
+                ? title
+                : title.substring(0, TITLE_MAX_LENGTH);
     }
 }

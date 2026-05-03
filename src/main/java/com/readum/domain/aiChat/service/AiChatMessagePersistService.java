@@ -1,6 +1,7 @@
 package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.dto.AiChatChunk;
+import com.readum.domain.aiChat.dto.GenerateSessionTitleCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.history.ChatHistoryBuilder;
@@ -11,8 +12,13 @@ import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 
@@ -22,16 +28,15 @@ import java.util.List;
  * AiChatMessageSendService 의 Reactor 콜백 안에서 @Transactional 메서드를
  * "외부 호출"(프록시 통과) 로 만들기 위해 별도 service 로 분리했다 (self-invocation 회피).
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiChatMessagePersistService {
 
-    // last_message_preview 컬럼이 VARCHAR(500) 이라 그에 맞춰 자른다 (DB 스키마 결합).
-    private static final int LAST_MESSAGE_PREVIEW_MAX_LENGTH = 500;
-
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final ChatHistoryBuilder chatHistoryBuilder;
+    private final AiChatSessionTitleService aiChatSessionTitleService;
 
     /**
      * 세션 소유권 및 종료 여부 검증, 이전 이력 조회, USER 메시지 INSERT 까지를
@@ -51,8 +56,40 @@ public class AiChatMessagePersistService {
         }
         List<HistoryMessage> previousHistory = chatHistoryBuilder.buildPreviousHistory(sessionId);
         aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, normalizedContent));
-        session.appendUserMessage(buildPreview(normalizedContent));
+        session.appendUserMessage();
+        if (session.isFirstUserMessage()) {
+            scheduleTitleGenerationAfterCommit(sessionId, normalizedContent);
+        }
         return previousHistory;
+    }
+
+    /**
+     * 첫 USER 메시지 commit 직후 세션 제목을 비동기로 생성한다.
+     * 설계 의도:
+     * - commit 전에 호출하면 LLM 실패가 USER 메시지 영속화까지 롤백시킨다 — afterCommit 으로 분리.
+     * - afterCommit 콜백은 호출 스레드(보통 servlet 요청 스레드) 에서 실행되므로,
+     *   LLM blocking 호출은 boundedElastic 으로 즉시 던져 응답 latency 에 영향을 주지 않게 한다.
+     * - 제목 생성이 실패해도 사용자 흐름과 무관하므로 예외는 위로 던지지 않고 로그만 남긴다.
+     * - 확장성: 향후 N턴 재생성·수동 재명명 트리거가 추가되어도 동일한
+     * {@link AiChatSessionTitleService#execute(GenerateSessionTitleCommand)} 진입점만 호출하면 된다.
+     */
+    private void scheduleTitleGenerationAfterCommit(Long sessionId, String firstUserMessage) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            // 트랜잭션 밖에서 직접 호출되는 경우(테스트/배치) 는 skip — 호출자가 직접 titleService 호출.
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                Mono.fromRunnable(() -> aiChatSessionTitleService.execute(
+                                new GenerateSessionTitleCommand(sessionId, firstUserMessage)))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .subscribe(
+                                null,
+                                error -> log.error("세션 제목 생성 실패 sessionId={}", sessionId, error)
+                        );
+            }
+        });
     }
 
     @Transactional
@@ -88,11 +125,5 @@ public class AiChatMessagePersistService {
             aiChatSessionRepository.findById(sessionId)
                     .ifPresent(session -> session.addAssistantTokens(totalTokens));
         }
-    }
-
-    private String buildPreview(String content) {
-        return content.length() <= LAST_MESSAGE_PREVIEW_MAX_LENGTH
-                ? content
-                : content.substring(0, LAST_MESSAGE_PREVIEW_MAX_LENGTH);
     }
 }
