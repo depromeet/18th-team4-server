@@ -30,6 +30,7 @@ dependencies {
 	implementation 'org.springframework.ai:spring-ai-starter-model-openai'
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
 	implementation 'com.github.ben-manes.caffeine:caffeine'
+	implementation 'com.bucket4j:bucket4j-core:8.10.1'
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
@@ -53,7 +54,29 @@ dependencyManagement {
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+	useJUnitPlatform {
+		// Guardrail 평가 / 벤치마크 테스트는 시간이 오래 걸리거나 외부 API(OpenAI Moderation 등)를
+		// 호출할 수 있으므로 기본 빌드(./gradlew test, ./gradlew build)에서는 실행하지 않는다.
+		// 수동으로 ./gradlew guardrailTest 로만 실행한다.
+		excludeTags 'guardrail'
+	}
+}
+
+tasks.register('guardrailTest', Test) {
+	group = 'verification'
+	description = '가드레일 / 프롬프트 인젝션 방어 테스트 (수동 실행 전용). CI 빌드에서 자동 실행되지 않음.'
+	useJUnitPlatform {
+		includeTags 'guardrail'
+	}
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	shouldRunAfter tasks.named('test')
+	// `./gradlew check` / `./gradlew build` 에 끌려들어가지 않도록 명시적으로 분리
+
+	testLogging {
+		events 'passed', 'skipped', 'failed'
+		showStandardStreams = true
+	}
 }
 
 tasks.named('bootRun') {
