@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class AiChatMessageSendService {
 
-    private final AiChatMessagePersistService persistService;
+    private final AiChatMessagePersistService aiChatMessagePersistService;
     private final AiChatClient aiChatClient;
     private final AiChatProperties aiChatProperties;
 
@@ -40,7 +40,7 @@ public class AiChatMessageSendService {
         // 사전 단계: 검증 / 이전 이력 조회 / USER 메시지 영속화는 PersistService 가 단일 트랜잭션으로 처리.
         // LLM 호출 결과와 무관하게 사용자 메시지를 보존해야 하므로(요구사항) 스트림 시작 전에 commit 한다.
         // 여기서 던진 예외는 SSE 이전에 GlobalExceptionHandler 가 처리해 4XX JSON 응답으로 나간다.
-        List<HistoryMessage> previousHistory = persistService.loadHistoryAndRecordUserMessage(
+        List<HistoryMessage> previousHistory = aiChatMessagePersistService.loadHistoryAndRecordUserMessage(
                 sessionId, command.userId(), normalizedContent
         );
 
@@ -80,7 +80,7 @@ public class AiChatMessageSendService {
     private Mono<MessageStreamEvent> persistAssistantMessageAndEmitDone(
             Long sessionId, String accumulated, AiChatChunk.Completion meta
     ) {
-        return Mono.fromCallable(() -> persistService.saveAssistantSuccess(sessionId, accumulated, meta))
+        return Mono.fromCallable(() -> aiChatMessagePersistService.saveAssistantSuccess(sessionId, accumulated, meta))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(saved -> new MessageStreamEvent.Done(
                         saved.getId(),
@@ -101,7 +101,7 @@ public class AiChatMessageSendService {
         // RuntimeException 을 swallow 하고 로그만 남긴다.
         return Mono.fromRunnable(() -> {
                     try {
-                        persistService.saveAssistantFailed(sessionId, partial, meta);
+                        aiChatMessagePersistService.saveAssistantFailed(sessionId, partial, meta);
                     } catch (RuntimeException ex) {
                         log.error("AI FAILED 메시지 영속화 실패 sessionId={}", sessionId, ex);
                     }
@@ -141,7 +141,7 @@ public class AiChatMessageSendService {
         // trim() 대신 strip() 사용: NBSP(U+00A0) / 한자 공백(U+3000) 등 한국어 IME 에서
         // 잘못 들어올 수 있는 유니코드 공백까지 제거하기 위함.
         String stripped = raw.strip();
-        if (stripped.isEmpty()) {
+        if (stripped.isBlank()) {
             throw new BadRequestException(AiChatErrorCode.MESSAGE_CONTENT_BLANK);
         }
         if (stripped.length() > aiChatProperties.message().maxContentLength()) {
