@@ -203,7 +203,8 @@ class AiChatMessagePersistServiceTest {
         assertThat(inserted.getTotalTokens()).isEqualTo(370);
 
         assertThat(saved.getId()).isEqualTo(99L);
-        assertThat(session.getAccumulatedTokens()).isEqualTo(370);
+        // 세션 누적치는 outputTokens(58) 만 합산. totalTokens(370) 는 입력 프롬프트까지 포함해 중복 집계 사유.
+        assertThat(session.getAccumulatedTokens()).isEqualTo(58);
     }
 
     @Test
@@ -216,7 +217,8 @@ class AiChatMessagePersistServiceTest {
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
 
-        AiChatChunk.Completion meta = new AiChatChunk.Completion(10, 0, 10, null);
+        // 입력 10, 출력 4 만 받고 끊긴 케이스. 세션 누적은 outputTokens(4) 만 반영되어야 한다.
+        AiChatChunk.Completion meta = new AiChatChunk.Completion(10, 4, 14, null);
         persistService.saveAssistantFailed(sessionId, null, meta);
 
         ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
@@ -225,7 +227,7 @@ class AiChatMessagePersistServiceTest {
         assertThat(inserted.getRole()).isEqualTo(AiChatMessage.Role.ASSISTANT);
         assertThat(inserted.getStatus()).isEqualTo(AiChatMessage.Status.FAILED);
         assertThat(inserted.getContent()).isEqualTo("");
-        assertThat(session.getAccumulatedTokens()).isEqualTo(10);
+        assertThat(session.getAccumulatedTokens()).isEqualTo(4);
     }
 
     @Test

@@ -103,9 +103,12 @@ public class AiChatMessagePersistService {
         AiChatMessage saved = aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(
                 sessionId, accumulated, inputTokens, outputTokens, totalTokens
         ));
-        if (totalTokens != null && totalTokens > 0) {
+        // 세션 누적치는 ASSISTANT 가 생성한 토큰만 합산한다.
+        // totalTokens 는 입력 프롬프트(이전 대화 + 시스템 프롬프트) 까지 포함하므로 누적에 쓰면
+        // 같은 컨텍스트가 매 턴 중복 집계되어 실제 생성량보다 부풀려진다.
+        if (outputTokens != null && outputTokens > 0) {
             aiChatSessionRepository.findById(sessionId)
-                    .ifPresent(session -> session.addAssistantTokens(totalTokens));
+                    .ifPresent(session -> session.addAssistantTokens(outputTokens));
         }
         return saved;
     }
@@ -121,9 +124,10 @@ public class AiChatMessagePersistService {
         aiChatMessageRepository.save(AiChatMessage.createAssistantFailed(
                 sessionId, partial == null ? "" : partial, inputTokens, outputTokens, totalTokens
         ));
-        if (totalTokens != null && totalTokens > 0) {
+        // 성공 경로와 동일하게 입력 토큰은 누적에서 제외하고 outputTokens 만 합산.
+        if (outputTokens != null && outputTokens > 0) {
             aiChatSessionRepository.findById(sessionId)
-                    .ifPresent(session -> session.addAssistantTokens(totalTokens));
+                    .ifPresent(session -> session.addAssistantTokens(outputTokens));
         }
     }
 }

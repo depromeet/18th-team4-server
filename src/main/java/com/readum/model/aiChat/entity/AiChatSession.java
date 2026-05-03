@@ -97,8 +97,9 @@ public class AiChatSession {
         return this.title != null && !this.title.isBlank();
     }
 
-    public void addAssistantTokens(int totalTokens) {
-        this.accumulatedTokens += totalTokens;
+    // ASSISTANT 가 생성한 토큰 (output) 만 누적. 입력 프롬프트는 매 턴 중복되므로 합산 대상이 아니다.
+    public void addAssistantTokens(int outputTokens) {
+        this.accumulatedTokens += outputTokens;
         this.updatedAt = LocalDateTime.now();
     }
 
