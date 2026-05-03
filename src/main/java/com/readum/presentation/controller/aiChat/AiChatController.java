@@ -5,6 +5,7 @@ import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.AiStreamChatService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
+import com.readum.domain.user.service.UserSearchService;
 import com.readum.presentation.common.ApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
@@ -18,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,6 +35,7 @@ public class AiChatController {
     private final AiStreamChatService aiStreamChatService;
     private final AiChatSessionCreateService aiChatSessionCreateService;
     private final SummaryDraftService summaryDraftService;
+    private final UserSearchService userSearchService;
 
     @Operation(
             summary = "AI 채팅 세션 생성",
@@ -56,10 +59,11 @@ public class AiChatController {
     @Operation(
             summary = "감상문 초안 생성",
             description = "AI 채팅 세션의 대화 내용을 바탕으로 감상문 초안(제목·본문·인상 깊은 구절)을 생성한다. " +
-                    "대화량이 부족하면 422 Unprocessable Entity를 반환한다."
+                    "user_session 쿠키로 사용자를 식별하며, 대화량이 부족하면 422를 반환한다."
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "감상문 초안 생성 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "유효하지 않은 세션 쿠키"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "세션을 찾을 수 없음"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 감상문이 작성된 세션"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "422", description = "누적 토큰 부족으로 초안 생성 불가"),
@@ -67,8 +71,9 @@ public class AiChatController {
     @PostMapping("/sessions/{sessionId}/summary-draft")
     public ResponseEntity<ApiResponse<SummaryDraftResponse>> createSummaryDraft(
             @PathVariable Long sessionId,
-            @AuthenticationPrincipal Long userId
+            @CookieValue(name = "user_session") String userSession
     ) {
+        Long userId = userSearchService.findUserId(userSession);
         SummaryDraftResult result = summaryDraftService.execute(sessionId, userId);
         return ApiResponse.ok(SummaryDraftResponse.from(result));
     }
