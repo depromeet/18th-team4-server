@@ -13,7 +13,7 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
             SELECT aiChatMessage
               FROM AiChatMessage aiChatMessage
              WHERE aiChatMessage.sessionId = :sessionId
-               AND aiChatMessage.status <> com.readum.model.aiChat.entity.AiChatMessage.Status.ERROR
+               AND aiChatMessage.status <> com.readum.model.aiChat.entity.AiChatMessage.Status.FAILED
              ORDER BY aiChatMessage.createdAt ASC
             """)
     List<AiChatMessage> findValidMessagesBySessionIdOrderByCreatedAtAsc(@Param("sessionId") Long sessionId);

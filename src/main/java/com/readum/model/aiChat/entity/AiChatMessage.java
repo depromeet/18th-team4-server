@@ -33,7 +33,7 @@ public class AiChatMessage {
     }
 
     public enum Status {
-        COMPLETED, ERROR
+        COMPLETED, FAILED
     }
 
     @Id
