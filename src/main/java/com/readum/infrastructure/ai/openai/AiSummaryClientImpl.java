@@ -48,8 +48,8 @@ public class AiSummaryClientImpl implements AiSummaryClient {
         log.debug("[Summary] 대화 이력 포맷 완료 - 메시지 수: {}", messages.size());
 
         return chatClient.prompt()
-                .system(s -> s.text(summaryPromptTemplate).param("chatHistory", chatHistory))
-                .user("위 대화 이력을 바탕으로 감상문 초안을 JSON 형식으로 작성해 주세요.")
+                .system(summaryPromptTemplate)
+                .user("[대화 이력]\n" + chatHistory + "\n\n위 대화 이력을 바탕으로 감상문 초안을 JSON 형식으로 작성해 주세요.")
                 .call()
                 .entity(SummaryDraftResult.class);
     }
