@@ -18,7 +18,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -40,18 +39,20 @@ public class AiChatController {
     @Operation(
             summary = "AI 채팅 세션 생성",
             description = "userBookId에 해당하는 책장 도서를 기반으로 AI 채팅 세션을 생성한다. " +
-                    "해당 사용자의 책장에 존재하지 않는 도서 ID를 전달하면 404를 반환한다."
+                    "user_session 쿠키로 사용자를 식별하며, 책장에 존재하지 않는 도서 ID를 전달하면 404를 반환한다."
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "세션 생성 성공"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 값 검증 실패"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "유효하지 않은 세션 쿠키"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "책장에 존재하지 않는 도서"),
     })
     @PostMapping("/sessions")
     public ResponseEntity<ApiResponse<AiChatSessionCreateResponse>> createSession(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSession,
             @Valid @RequestBody AiChatSessionCreateRequest request
     ) {
+        Long userId = userSearchService.findUserId(userSession);
         AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userId));
         return ApiResponse.created(AiChatSessionCreateResponse.from(result));
     }

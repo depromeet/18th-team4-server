@@ -22,13 +22,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
-import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,18 +64,17 @@ class AiChatControllerTest {
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
 
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(AUTHENTICATED_USER_ID, null, List.of())
-        );
     }
 
     // ── 세션 생성 ──────────────────────────────────────────────────────
 
     @Test
     void 정상_요청시_201과_세션_id_를_반환한다() throws Exception {
+        given(userSearchService.findUserId(VALID_SESSION_COOKIE)).willReturn(AUTHENTICATED_USER_ID);
         given(aiChatSessionCreateService.execute(any())).willReturn(new AiChatSessionCreateResult(42L));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions")
+                        .cookie(new Cookie("user_session", VALID_SESSION_COOKIE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AiChatSessionCreateRequest(10L))))
                 .andExpect(status().isCreated())
@@ -89,6 +84,7 @@ class AiChatControllerTest {
     @Test
     void userBookId_누락시_400() throws Exception {
         mockMvc.perform(post("/api/v1/ai-chat/sessions")
+                        .cookie(new Cookie("user_session", VALID_SESSION_COOKIE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -98,6 +94,7 @@ class AiChatControllerTest {
     @Test
     void userBookId_가_음수면_400() throws Exception {
         mockMvc.perform(post("/api/v1/ai-chat/sessions")
+                        .cookie(new Cookie("user_session", VALID_SESSION_COOKIE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AiChatSessionCreateRequest(-1L))))
                 .andExpect(status().isBadRequest())
@@ -106,10 +103,12 @@ class AiChatControllerTest {
 
     @Test
     void 소유권_없는_userBookId_는_404() throws Exception {
+        given(userSearchService.findUserId(VALID_SESSION_COOKIE)).willReturn(AUTHENTICATED_USER_ID);
         given(aiChatSessionCreateService.execute(any()))
                 .willThrow(new NotFoundException(AiChatErrorCode.USER_BOOK_NOT_FOUND));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions")
+                        .cookie(new Cookie("user_session", VALID_SESSION_COOKIE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AiChatSessionCreateRequest(999_999L))))
                 .andExpect(status().isNotFound())
