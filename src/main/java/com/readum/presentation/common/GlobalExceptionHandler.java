@@ -8,6 +8,7 @@ import com.readum.domain.exception.ExternalApiException;
 import com.readum.domain.exception.ForbiddenException;
 import com.readum.domain.exception.GatewayTimeoutException;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.exception.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
@@ -68,10 +69,20 @@ public class GlobalExceptionHandler {
     }
 
     // 도메인 비즈니스 예외 - 호출 한도 초과 (외부 LLM 등)
+    // RateLimitInfo 가 동봉되어 있으면 X-RateLimit-* / Retry-After 헤더로 매핑한다.
+    // SSE 경로의 mid-stream 429 는 이미 응답이 commit 되어 이 핸들러를 거치지 않고
+    // SSE error event payload 로 같은 정보를 운반한다 (AiChatController 참조).
     @ExceptionHandler(TooManyRequestsException.class)
     public ResponseEntity<GlobalApiResponse<?>> handleTooManyRequests(TooManyRequestsException ex) {
-        log.warn("Too many requests: {}", ex.getErrorCode().getMessage());
-        return GlobalApiResponse.error(HttpStatus.TOO_MANY_REQUESTS, ex.getErrorCode().getMessage());
+        log.warn("Too many requests: {} - rateLimitInfo={}",
+                ex.getErrorCode().getMessage(), ex.getRateLimitInfo());
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS);
+        RateLimitInfo info = ex.getRateLimitInfo();
+        if (info != null) {
+            info.toHttpHeaders().forEach(builder::header);
+        }
+        return builder.body(new GlobalApiResponse<>(
+                null, new GlobalApiResponse.ErrorBody(ex.getErrorCode().getMessage())));
     }
 
     // 외부 시스템 응답 오류 (업스트림 5xx) → 502

@@ -3,9 +3,8 @@ package com.readum.infrastructure.ai.openai;
 import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
-import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
-import com.readum.domain.exception.TooManyRequestsException;
+import com.readum.domain.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -16,7 +15,6 @@ import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.RateLimit;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -41,7 +39,7 @@ public class AiChatClientImpl implements AiChatClient {
                 .stream()
                 .chatResponse()
                 .concatMap(this::toChunks)
-                .onErrorMap(this::mapRateLimitException);
+                .doOnError(this::logUnexpectedError);
     }
 
     private Message toSpringMessage(HistoryMessage history) {
@@ -110,24 +108,13 @@ public class AiChatClientImpl implements AiChatClient {
         return number == null ? null : number.intValue();
     }
 
-    private Throwable mapRateLimitException(Throwable error) {
-        // Spring AI 가 OpenAI 의 모든 4xx/5xx 를 NonTransientAiException 으로 일괄 wrap 하기 때문에,
-        // HTTP 상태 코드를 직접 볼 수 없다. 메시지 본문의 키워드("429"/"rate"/"quota")로 rate limit 만 식별해
-        // TooManyRequestsException 으로 변환 → GlobalExceptionHandler 에서 HTTP 429 로 응답.
-        // 그 외 예외는 그대로 흘려보내 SendService 가 적절한 ErrorCode 로 분류한다.
-        if (error instanceof NonTransientAiException && isRateLimitMessage(error.getMessage())) {
-            log.warn("OpenAI Rate limit 감지 — 429 로 변환: {}", error.getMessage());
-            return new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_EXCEEDED);
+    // 429 / quota / 기타 4xx-5xx 분류는 OpenAiResponseErrorHandler 가 가장 낮은 계층에서
+    // 처리한다 (HTTP status / 응답 헤더 / body JSON 모두 typed 하게 접근 가능한 곳).
+    // 여기서는 미분류 예외(네트워크 끊김 등) 만 ERROR 로 남기고, 이미 도메인 예외로 분류된 건 그대로 흘려보낸다.
+    private void logUnexpectedError(Throwable error) {
+        if (error instanceof BusinessException) {
+            return;
         }
         log.error("[Stream] OpenAI API 호출 실패", error);
-        return error;
-    }
-
-    private boolean isRateLimitMessage(String message) {
-        if (message == null) {
-            return false;
-        }
-        String lower = message.toLowerCase();
-        return lower.contains("429") || lower.contains("rate") || lower.contains("quota");
     }
 }
