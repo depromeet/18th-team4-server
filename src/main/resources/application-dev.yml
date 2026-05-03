@@ -6,6 +6,25 @@ spring:
         options:
           model: gpt-4o-mini
           stream-usage: true
+          max-tokens: 1024
+      moderation:
+        options:
+          model: omni-moderation-latest
+
+readum:
+  guardrail:
+    input:
+      max-characters: 4000
+      max-tokens: 1500
+    output:
+      max-response-tokens: 1024
+    moderation:
+      enabled: true
+      model: omni-moderation-latest
+    rate-limit:
+      enabled: true
+      requests-per-minute: 20
+      daily-requests: 200
   datasource:
     url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?sslMode=REQUIRED&characterEncoding=UTF-8&serverTimezone=Asia/Seoul
     username: ${MYSQL_USER}
