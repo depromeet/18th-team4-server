@@ -71,7 +71,7 @@ class AiChatControllerTest {
                 aiChatSessionCreateService,
                 aiChatMessageSendService,
                 aiChatMessageSearchService,
-                objectMapper
+                new MessageStreamSseSerializer(objectMapper)
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -135,7 +135,7 @@ class AiChatControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.message", containsString("content는")));
+                .andExpect(jsonPath("$.error.message", containsString("메시지 본문은 비어 있을 수 없습니다.")));
     }
 
     @Test
@@ -227,7 +227,7 @@ class AiChatControllerTest {
     void 메시지_전송_스트림_에러_이벤트도_정상_방출된다() throws Exception {
         given(aiChatMessageSendService.execute(any())).willReturn(Flux.just(
                 new MessageStreamEvent.Token("부분"),
-                new MessageStreamEvent.Error(
+                MessageStreamEvent.Error.of(
                         AiChatErrorCode.AI_STREAM_INTERRUPTED.name(),
                         AiChatErrorCode.AI_STREAM_INTERRUPTED.getMessage()
                 )

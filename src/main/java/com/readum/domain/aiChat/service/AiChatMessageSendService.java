@@ -10,6 +10,7 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
+import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,39 +49,45 @@ public class AiChatMessageSendService {
         withCurrent.addAll(previousHistory);
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
 
-        StringBuilder buffer = new StringBuilder();
-        AtomicReference<AiChatChunk.Completion> completion = new AtomicReference<>();
+        StringBuilder contentBuffer = new StringBuilder();
+        AtomicReference<AiChatChunk.Completion> completionRef = new AtomicReference<>();
 
         return aiChatClient.stream(new AiChatStreamCommand(withCurrent))
-                .concatMap(chunk -> bufferAndConvertChunk(chunk, buffer, completion))
-                .concatWith(Mono.defer(() -> persistAssistantMessageAndEmitDone(sessionId, buffer.toString(), completion.get())))
-                .onErrorResume(error -> persistFailedAssistantMessageAndEmitError(sessionId, buffer.toString(), completion.get(), error));
+                .concatMap(chunk -> bufferAndConvertChunk(chunk, contentBuffer, completionRef))
+                // doOnCancel 위치 주의: concatMap 직후, concatWith 앞.
+                // Phase 1 (LLM 스트리밍 중) 에 클라이언트가 끊기면 여기로 cancel 이 전파돼 fire.
+                // Phase 2 (concatWith 의 saveAssistantSuccess JDBC 중) 에 cancel 이 들어와도
+                // concatMap 이 이미 onComplete 된 이후라 cancel 이 이 위치까지 올라오지 않는다.
+                // 즉 success path 와 cancel path 가 동시에 영속화하는 케이스가 구조적으로 차단된다.
+                .doOnCancel(() -> persistOnClientCancel(sessionId, contentBuffer.toString(), completionRef.get()))
+                .concatWith(Mono.defer(() -> persistAssistantMessageAndEmitDone(sessionId, contentBuffer.toString(), completionRef.get())))
+                .onErrorResume(error -> persistFailedAssistantMessageAndEmitError(sessionId, contentBuffer.toString(), completionRef.get(), error));
     }
 
     private Flux<MessageStreamEvent> bufferAndConvertChunk(
             AiChatChunk chunk,
-            StringBuilder buffer,
-            AtomicReference<AiChatChunk.Completion> completion
+            StringBuilder contentBuffer,
+            AtomicReference<AiChatChunk.Completion> completionRef
     ) {
         return switch (chunk) {
             case AiChatChunk.Token token -> {
-                // 누적 텍스트는 종료 후 영속화에 쓰고, delta 는 외부에 즉시 흘려 보낸다.
-                buffer.append(token.delta());
+                // 누적된 응답 텍스트는 종료 후 영속화에 쓰고, delta 는 외부에 즉시 흘려 보낸다.
+                contentBuffer.append(token.delta());
                 yield Flux.just(new MessageStreamEvent.Token(token.delta()));
             }
-            case AiChatChunk.Completion meta -> {
+            case AiChatChunk.Completion completion -> {
                 // Done 이벤트는 ASSISTANT 영속화 후 messageId/createdAt 까지 채워서 만들어야 하므로
                 // 여기서는 메타만 잡아두고 외부로는 emit 하지 않는다 (concatWith 의 finalize 단계에서 발행).
-                completion.set(meta);
+                completionRef.set(completion);
                 yield Flux.empty();
             }
         };
     }
 
     private Mono<MessageStreamEvent> persistAssistantMessageAndEmitDone(
-            Long sessionId, String accumulated, AiChatChunk.Completion meta
+            Long sessionId, String content, AiChatChunk.Completion completion
     ) {
-        return Mono.fromCallable(() -> aiChatMessagePersistService.saveAssistantSuccess(sessionId, accumulated, meta))
+        return Mono.fromCallable(() -> aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, completion))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(saved -> new MessageStreamEvent.Done(
                         saved.getId(),
@@ -94,33 +101,69 @@ public class AiChatMessageSendService {
     }
 
     private Flux<MessageStreamEvent> persistFailedAssistantMessageAndEmitError(
-            Long sessionId, String partial, AiChatChunk.Completion meta, Throwable error
+            Long sessionId, String content, AiChatChunk.Completion completion, Throwable error
     ) {
-        log.warn("AI 스트림 비정상 종료 sessionId={} error={}", sessionId, error.toString());
-        // 영속화 자체가 실패해도 클라이언트에게는 반드시 error 이벤트를 보내야 하므로
-        // RuntimeException 을 swallow 하고 로그만 남긴다.
-        return Mono.fromRunnable(() -> {
+        log.error("AI 스트림 비정상 종료 sessionId={} error={}", sessionId, error.toString());
+        // 클라이언트에 error 이벤트를 먼저 보내고, FAILED 영속화는 별도 스레드에서 결과를 기다리지 않고 실행.
+        // 영속화 완료를 기다린 뒤 emit 하면(`.thenMany`) DB JDBC 가 느릴수록 사용자가 더 오래
+        // "응답 없음" 으로 보이게 된다. 영속화가 실패해도 클라이언트에 영향이 가지 않도록
+        // 예외는 잡아서 로그만 남기고 외부로 다시 던지지 않는다.
+        // 같은 파일의 persistOnClientCancel 과 동일한 비동기 패턴.
+        Mono.fromRunnable(() -> {
                     try {
-                        aiChatMessagePersistService.saveAssistantFailed(sessionId, partial, meta);
+                        aiChatMessagePersistService.saveAssistantFailed(sessionId, content, completion);
                     } catch (RuntimeException ex) {
                         log.error("AI FAILED 메시지 영속화 실패 sessionId={}", sessionId, ex);
                     }
                 })
                 .subscribeOn(Schedulers.boundedElastic())
-                .thenMany(Flux.just(buildErrorEvent(error)));
+                .subscribe();
+
+        return Flux.just(buildErrorEvent(error));
+    }
+
+    /**
+     * 클라이언트 disconnect (탭 닫힘 / 네트워크 끊김) 로 SSE writer 가 cancel 을 보낸 경우의 영속화.
+     * 분기 정책:
+     * - completion != null            : LLM 응답이 끝까지 도착했고 토큰 메타도 받았다.
+     *                                   Done 이벤트만 전송 못 했을 뿐 의미상 정상 종료라 COMPLETED 저장.
+     * - completion == null && content != "" : LLM 응답 도중 끊김. 부분 응답을 FAILED 로 보존
+     *                                          (컨텍스트 윈도우에서 자동 제외됨).
+     * - completion == null && content == "" : 첫 토큰도 받기 전 끊김. 저장할 의미 없으므로 skip.
+     *
+     * 클라이언트는 이미 떠났으므로 영속화 실패 시에도 던지지 않고 로그만 남긴다.
+     */
+    private void persistOnClientCancel(Long sessionId, String content, AiChatChunk.Completion completion) {
+        if (completion == null && content.isEmpty()) {
+            log.info("AI 클라이언트 disconnect (응답 0byte) - 영속화 skip sessionId={}", sessionId);
+            return;
+        }
+        Mono.fromRunnable(() -> {
+                    try {
+                        if (completion != null) {
+                            aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, completion);
+                        } else {
+                            aiChatMessagePersistService.saveAssistantFailed(sessionId, content, null);
+                        }
+                    } catch (RuntimeException ex) {
+                        log.error("AI 클라이언트 disconnect 후 ASSISTANT 메시지 영속화 실패 sessionId={}", sessionId, ex);
+                    }
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe();
     }
 
     private MessageStreamEvent.Error buildErrorEvent(Throwable error) {
         AiChatErrorCode code = toErrorCode(error);
-        return new MessageStreamEvent.Error(code.name(), code.getMessage());
+        RateLimitInfo rateLimitInfo = (error instanceof TooManyRequestsException tooMany)
+                ? tooMany.getRateLimitInfo()
+                : null;
+        return new MessageStreamEvent.Error(code.name(), code.getMessage(), rateLimitInfo);
     }
 
     private AiChatErrorCode toErrorCode(Throwable error) {
-        // 분류 순서가 중요. TooManyRequestsException 도 BusinessException 의 자식이므로
-        // 더 구체적인 타입을 먼저 매칭해야 한다.
-        if (error instanceof TooManyRequestsException) {
-            return AiChatErrorCode.AI_RATE_LIMIT_EXCEEDED;
-        }
+        // OpenAiResponseErrorHandler 가 이미 도메인 예외(TooManyRequestsException 포함) 로
+        // 분류해 던지므로, BusinessException + AiChatErrorCode 케이스 하나로 처리된다.
         if (error instanceof BusinessException businessException
                 && businessException.getErrorCode() instanceof AiChatErrorCode aiChatErrorCode) {
             return aiChatErrorCode;
@@ -134,19 +177,25 @@ public class AiChatMessageSendService {
         return AiChatErrorCode.AI_STREAM_INTERRUPTED;
     }
 
+    // 한국어 IME 의 NBSP(U+00A0) / Narrow NBSP(U+202F) / Figure Space(U+2007) 는
+    // Character.isWhitespace() 에서 빠져 String.strip()/isBlank() 로는 못 잡힌다.
+    // \p{Z}(Unicode Separator: Zs/Zl/Zp) + \s 로 모든 유니코드 공백 + ASCII 공백류를
+    // 단일 공백으로 정규화한 뒤 양끝을 다듬어, Bean Validation 의 @NotBlank 가 놓치는
+    // NBSP-only 입력까지 빈 본문으로 거절한다.
+    private static final java.util.regex.Pattern WHITESPACE_RUN =
+            java.util.regex.Pattern.compile("[\\p{Z}\\s]+");
+
     private String validateAndStripContent(String raw) {
         if (raw == null) {
             throw new BadRequestException(AiChatErrorCode.MESSAGE_CONTENT_BLANK);
         }
-        // trim() 대신 strip() 사용: NBSP(U+00A0) / 한자 공백(U+3000) 등 한국어 IME 에서
-        // 잘못 들어올 수 있는 유니코드 공백까지 제거하기 위함.
-        String stripped = raw.strip();
-        if (stripped.isBlank()) {
+        String normalized = WHITESPACE_RUN.matcher(raw).replaceAll(" ").strip();
+        if (normalized.isEmpty()) {
             throw new BadRequestException(AiChatErrorCode.MESSAGE_CONTENT_BLANK);
         }
-        if (stripped.length() > aiChatProperties.message().maxContentLength()) {
+        if (normalized.length() > aiChatProperties.message().maxContentLength()) {
             throw new BadRequestException(AiChatErrorCode.MESSAGE_CONTENT_TOO_LONG);
         }
-        return stripped;
+        return normalized;
     }
 }
