@@ -5,8 +5,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -35,13 +35,13 @@ class AiChatMessageRepositoryTest {
             aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "메시지 " + i));
         }
 
-        Page<AiChatMessage> page = aiChatMessageRepository
+        Slice<AiChatMessage> slice = aiChatMessageRepository
                 .findBySessionIdOrderByCreatedAtDescIdDesc(sessionId, PageRequest.of(0, 10));
 
-        assertThat(page.getTotalElements()).isEqualTo(5);
-        assertThat(page.getContent()).hasSize(5);
-        assertThat(page.getContent().get(0).getContent()).isEqualTo("메시지 5");
-        assertThat(page.getContent().get(4).getContent()).isEqualTo("메시지 1");
+        assertThat(slice.getContent()).hasSize(5);
+        assertThat(slice.hasNext()).isFalse();
+        assertThat(slice.getContent().get(0).getContent()).isEqualTo("메시지 5");
+        assertThat(slice.getContent().get(4).getContent()).isEqualTo("메시지 1");
     }
 
     @Test

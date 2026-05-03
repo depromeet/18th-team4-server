@@ -14,8 +14,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.SliceImpl;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -75,14 +75,13 @@ class AiChatMessageSearchServiceTest {
         );
         given(aiChatMessageRepository.findBySessionIdOrderByCreatedAtDescIdDesc(
                 sessionId, PageRequest.of(0, 20)
-        )).willReturn(new PageImpl<>(rows, PageRequest.of(0, 20), 2));
+        )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 20), false));
 
         MessageListResult result = aiChatMessageSearchService.findBySessionId(
                 new MessageListCommand(userId, sessionId, 1, 20)
         );
 
         assertThat(result.messages()).hasSize(2);
-        assertThat(result.totalResultCount()).isEqualTo(2);
         assertThat(result.page()).isEqualTo(1);
         assertThat(result.size()).isEqualTo(20);
         assertThat(result.hasNext()).isFalse();

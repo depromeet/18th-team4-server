@@ -274,7 +274,6 @@ class AiChatControllerTest {
                                         LocalDateTime.of(2026, 5, 2, 14, 33, 21)
                                 )
                         ),
-                        2,
                         1,
                         20,
                         false
@@ -290,14 +289,14 @@ class AiChatControllerTest {
                 .andExpect(jsonPath("$.data.messages[0].tokenCount").value(370))
                 .andExpect(jsonPath("$.data.messages[0].status").value("COMPLETED"))
                 .andExpect(jsonPath("$.data.messages[1].role").value("USER"))
-                .andExpect(jsonPath("$.data.totalResultCount").value(2))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
     }
 
     @Test
     void 메시지_조회_page_가_0이면_400() throws Exception {
         mockMvc.perform(get("/api/v1/ai-chat/sessions/7/messages")
-                        .param("page", "0"))
+                        .param("page", "0")
+                        .param("size", "20"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message", containsString("page는 1 이상")));
     }
@@ -305,6 +304,7 @@ class AiChatControllerTest {
     @Test
     void 메시지_조회_size_가_101이면_400() throws Exception {
         mockMvc.perform(get("/api/v1/ai-chat/sessions/7/messages")
+                        .param("page", "1")
                         .param("size", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message", containsString("size는 100 이하")));

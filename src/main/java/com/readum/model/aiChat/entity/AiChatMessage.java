@@ -21,8 +21,7 @@ import java.time.LocalDateTime;
 @Table(
         name = "ai_chat_message",
         indexes = {
-                @Index(name = "idx_ai_chat_message_session", columnList = "session_id"),
-                @Index(name = "idx_ai_chat_message_session_status_created", columnList = "session_id, status, created_at")
+                @Index(name = "idx_ai_chat_message_session_created_id", columnList = "session_id, created_at, id")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

@@ -1,8 +1,8 @@
 package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatMessage;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Collection;
@@ -10,7 +10,7 @@ import java.util.List;
 
 public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Long> {
 
-    Page<AiChatMessage> findBySessionIdOrderByCreatedAtDescIdDesc(Long sessionId, Pageable pageable);
+    Slice<AiChatMessage> findBySessionIdOrderByCreatedAtDescIdDesc(Long sessionId, Pageable pageable);
 
     /**
      * 컨텍스트 윈도우용 최근 메시지 조회.
