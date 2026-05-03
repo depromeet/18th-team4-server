@@ -8,6 +8,7 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.domain.aiChat.ratelimit.AiChatRateLimiter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
@@ -50,16 +51,20 @@ class AiChatMessageSendServiceTest {
     @Mock
     private AiChatClient aiChatClient;
 
+    @Mock
+    private AiChatRateLimiter aiChatRateLimiter;
+
     private final AiChatProperties aiChatProperties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
-            new AiChatProperties.MessageRule(1000)
+            new AiChatProperties.MessageRule(1000),
+            new AiChatProperties.RateLimit(10, 5)
     );
 
     private AiChatMessageSendService service;
 
     @BeforeEach
     void setUp() {
-        service = new AiChatMessageSendService(persistService, aiChatClient, aiChatProperties);
+        service = new AiChatMessageSendService(persistService, aiChatClient, aiChatProperties, aiChatRateLimiter);
     }
 
     @Test
@@ -98,6 +103,24 @@ class AiChatMessageSendServiceTest {
                 .isEqualTo(AiChatErrorCode.MESSAGE_CONTENT_TOO_LONG);
 
         verify(persistService, never()).loadHistoryAndRecordUserMessage(anyLong(), anyLong(), anyString());
+    }
+
+    @Test
+    void rate_limiter_가_한도_초과를_던지면_persist_도_LLM_호출도_없이_그대로_전파된다() {
+        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        TooManyRequestsException thrown = new TooManyRequestsException(
+                AiChatErrorCode.USER_RATE_LIMIT_BURST,
+                new RateLimitInfo(java.time.Duration.ofSeconds(10), 5L, null, 0L, null, null, null)
+        );
+        org.mockito.BDDMockito.willThrow(thrown).given(aiChatRateLimiter).check(1L);
+
+        assertThatThrownBy(() -> service.execute(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
+                .extracting(TooManyRequestsException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.USER_RATE_LIMIT_BURST);
+
+        verify(persistService, never()).loadHistoryAndRecordUserMessage(anyLong(), anyLong(), anyString());
+        verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
     }
 
     @Test

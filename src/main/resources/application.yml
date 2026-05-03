@@ -15,6 +15,9 @@ ai-chat:
     max-turns: 20            # 1턴 = USER 메시지 1 + ASSISTANT 메시지 1
   message:
     max-content-length: 1000
+  rate-limit:
+    burst-window-seconds: 10  # 슬라이딩 윈도우 길이 (초)
+    burst-max-count: 5        # 윈도우 내 USER 메시지 허용 횟수. 초과 시 HTTP 429.
 
 springdoc:
   api-docs:

@@ -77,8 +77,12 @@ public class AiChatController {
                     - `AI_QUOTA_EXHAUSTED`: OpenAI quota 소진 (insufficient_quota). 사람 개입 전까지 회복 불가, rateLimit payload 없음.
                     - `AI_PROVIDER_ERROR` / `AI_PROVIDER_TRANSIENT` / `AI_STREAM_INTERRUPTED`: 그 외 OpenAI 호출 실패.
 
-                    OpenAI 의 429 는 모두 mid-stream 으로 발생하므로 SSE 응답 (status 200) 내부의 error 이벤트로 노출된다.
-                    HTTP 응답이 이미 commit 되어 X-RateLimit-* 헤더는 사용 불가하고, 동일 정보는 error.rateLimit payload 로 운반된다.
+                    rate-limit 처리 경로 (둘이 다름에 유의):
+                    - **자체 rate limiter (USER_RATE_LIMIT_BURST)**: SSE 시작 전에 동기 검사. 한도 초과 시 SSE 가 시작되지 않고
+                      HTTP 429 + Retry-After / X-RateLimit-* 헤더 + 에러 JSON 으로 응답된다 (아래 429 spec 참고).
+                    - **OpenAI 의 429** (AI_RATE_LIMIT_BURST / AI_QUOTA_EXHAUSTED): mid-stream 발생이라
+                      status 200 SSE 안에서 error 이벤트로 노출. HTTP 응답이 이미 commit 되어 X-RateLimit-* 헤더는 사용 불가하고,
+                      동일 정보는 error.rateLimit payload 로 운반된다.
 
                     rateLimit payload (BURST 일 때만):
                     ```
@@ -101,11 +105,12 @@ public class AiChatController {
             @ApiResponse(
                     responseCode = "429",
                     description = """
-                            pre-stream 단계의 호출 한도 초과 (자체 rate limiter 또는 사전 quota 검사로 발생).
-                            현재 구현엔 pre-stream 한도 검사가 없어 이 응답 자체는 발생 경로가 없지만,
-                            X-RateLimit-* / Retry-After 헤더 명세는 미래 확장 (자체 rate limiter 도입 등) 을 위해 유지한다.
+                            pre-stream 단계의 호출 한도 초과. 자체 rate limiter (USER_RATE_LIMIT_BURST) 가
+                            SSE 시작 전에 동기적으로 검사하므로, 한도를 넘으면 SSE 가 시작되지 않고
+                            HTTP 429 + Retry-After / X-RateLimit-* 헤더 + 에러 JSON 이 응답된다.
 
-                            OpenAI 의 429 는 mid-stream 이라 status 200 SSE 안에서 error 이벤트로 노출됨에 유의.
+                            대조적으로 OpenAI 의 429 (AI_RATE_LIMIT_BURST / AI_QUOTA_EXHAUSTED) 는 mid-stream 으로
+                            발생하므로, 이미 commit 된 status 200 SSE 안에서 error 이벤트로 노출된다 (description 본문 참고).
                             """,
                     headers = {
                             @Header(name = "Retry-After",

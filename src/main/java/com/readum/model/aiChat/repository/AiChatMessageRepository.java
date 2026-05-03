@@ -4,7 +4,10 @@ import com.readum.model.aiChat.entity.AiChatMessage;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -31,4 +34,35 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
             Collection<AiChatMessage.Role> roles,
             Pageable pageable
     );
+
+    /**
+     * 사용자별 burst rate-limit 검사를 위한 카운트.
+     * since 이후 생성된 USER role 메시지 수를, 소유자(userId) 가 자신의 UserBook 으로 만든 모든 세션에서 합산한다.
+     * AiChatSessionRepository.findByIdAndOwner 와 동일한 패턴으로 EXISTS 서브쿼리를 거쳐
+     * AiChatMessage → AiChatSession → UserBook → user_id 매핑을 수행한다.
+     * role 은 FQCN 노이즈를 피하기 위해 파라미터로 바인딩하고, default 메서드가 USER 로 고정해 노출한다.
+     */
+    @Query("""
+            select count(aiChatMessage)
+              from AiChatMessage aiChatMessage
+             where aiChatMessage.role = :role
+               and aiChatMessage.createdAt >= :since
+               and exists (
+                     select 1
+                       from AiChatSession aiChatSession
+                          , UserBook userBook
+                      where aiChatSession.id = aiChatMessage.sessionId
+                        and userBook.id = aiChatSession.userBookId
+                        and userBook.userId = :userId
+                   )
+            """)
+    long countRecentMessagesByRoleAndOwner(
+            @Param("role") AiChatMessage.Role role,
+            @Param("userId") Long userId,
+            @Param("since") LocalDateTime since
+    );
+
+    default long countRecentUserMessagesByOwner(Long userId, LocalDateTime since) {
+        return countRecentMessagesByRoleAndOwner(AiChatMessage.Role.USER, userId, since);
+    }
 }
