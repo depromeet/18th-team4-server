@@ -47,7 +47,7 @@ public class AiChatController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "유효하지 않은 세션 쿠키"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "책장에 존재하지 않는 도서"),
     })
-    @PostMapping("/sessions")
+    @PostMapping("/chat-sessions")
     public ResponseEntity<ApiResponse<AiChatSessionCreateResponse>> createSession(
             @CookieValue(name = "user_session") String userSession,
             @Valid @RequestBody AiChatSessionCreateRequest request
@@ -69,7 +69,7 @@ public class AiChatController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 감상문이 작성된 세션"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "422", description = "누적 토큰 부족으로 초안 생성 불가"),
     })
-    @PostMapping("/sessions/{sessionId}/summary-draft")
+    @PostMapping("/chat-sessions/{sessionId}/summary-draft")
     public ResponseEntity<ApiResponse<SummaryDraftResponse>> createSummaryDraft(
             @PathVariable Long sessionId,
             @CookieValue(name = "user_session") String userSession

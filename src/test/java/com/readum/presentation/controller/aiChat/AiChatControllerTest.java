@@ -73,7 +73,7 @@ class AiChatControllerTest {
         given(userSearchService.findUserId(VALID_SESSION_COOKIE)).willReturn(AUTHENTICATED_USER_ID);
         given(aiChatSessionCreateService.execute(any())).willReturn(new AiChatSessionCreateResult(42L));
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AiChatSessionCreateRequest(10L))))
@@ -83,7 +83,7 @@ class AiChatControllerTest {
 
     @Test
     void userBookId_누락시_400() throws Exception {
-        mockMvc.perform(post("/api/v1/ai-chat/sessions")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
@@ -93,7 +93,7 @@ class AiChatControllerTest {
 
     @Test
     void userBookId_가_음수면_400() throws Exception {
-        mockMvc.perform(post("/api/v1/ai-chat/sessions")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AiChatSessionCreateRequest(-1L))))
@@ -107,7 +107,7 @@ class AiChatControllerTest {
         given(aiChatSessionCreateService.execute(any()))
                 .willThrow(new NotFoundException(AiChatErrorCode.USER_BOOK_NOT_FOUND));
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AiChatSessionCreateRequest(999_999L))))
@@ -123,7 +123,7 @@ class AiChatControllerTest {
         given(userSearchService.findUserId(VALID_SESSION_COOKIE)).willReturn(AUTHENTICATED_USER_ID);
         given(summaryDraftService.execute(eq(1L), eq(AUTHENTICATED_USER_ID))).willReturn(result);
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions/1/summary-draft")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("나의 독서 감상"))
@@ -136,7 +136,7 @@ class AiChatControllerTest {
         given(userSearchService.findUserId("invalid-session"))
                 .willThrow(new UnauthorizedException(UserErrorCode.INVALID_SESSION));
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions/1/summary-draft")
                         .cookie(new Cookie("user_session", "invalid-session")))
                 .andExpect(status().isUnauthorized());
     }
@@ -147,7 +147,7 @@ class AiChatControllerTest {
         given(summaryDraftService.execute(eq(1L), eq(AUTHENTICATED_USER_ID)))
                 .willThrow(new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH));
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions/1/summary-draft")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.message").value("감상문 초안을 생성하기에 대화량이 부족합니다."));
@@ -159,7 +159,7 @@ class AiChatControllerTest {
         given(summaryDraftService.execute(eq(1L), eq(AUTHENTICATED_USER_ID)))
                 .willThrow(new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED));
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions/1/summary-draft")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.message").value("이미 감상문이 작성된 세션입니다."));
@@ -171,7 +171,7 @@ class AiChatControllerTest {
         given(summaryDraftService.execute(eq(1L), eq(AUTHENTICATED_USER_ID)))
                 .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft")
+        mockMvc.perform(post("/api/v1/ai-chat/chat-sessions/1/summary-draft")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.message").value("채팅 세션을 찾을 수 없습니다."));
