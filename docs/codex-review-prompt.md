@@ -131,8 +131,43 @@ AI 가 작성한 코드의 가장 흔한 결함은 **사람이 한 번 읽고 �
 - Port : `{Domain}{Action}Client`, Adapter : `{Port}Impl`
 - 공용 예외 : `{HttpStatus}Exception`
 - 개수 필드는 `Count` 접미사 (`totalResultCount`)
-- 추상 영어 jargon 금지 (fail-fast / silent fallback / SoT 등) — 한글로 풀어 쓰기. 코드 식별자/표준 스펙 영문은 유지
 - JWT 식별자 변수는 `jwtId`, JWT payload claim 이름만 `"jti"`
+
+## 추상 영어 jargon 검사 (식별자 + 주석 + PR 본문)
+
+추상 개념을 영어로 압축한 표현 (소위 *AI 가 만든 듯한 jargon*) 을 한글로 풀어 쓰지 않고 그대로 박아둔 경우, 변경된 라인 + 그 라인에 추가된 주석 + PR 설명에 등장하면 모두 지적합니다. **검사 범위가 식별자에 한정되지 않습니다 — 주석/PR 본문이 가장 흔한 발생 위치입니다.**
+
+### 피할 표현 → 한국어 풀이
+
+- `fail-fast` → 즉시 실패 응답 / 호출을 빠르게 끊는다
+- `silent fallback` → 빈 결과 대신 다른 응답으로 조용히 바뀜
+- `fire-and-forget` → 결과를 기다리지 않고 비동기 실행 / 응답 대기 없이 백그라운드에서 실행
+- `swallow` (예외를 swallow) → 예외를 잡아 로그만 남기고 외부로 안 던짐
+- `happy path` → 정상 흐름
+- `best-effort` → 가능한 범위에서 시도, 실패해도 통과
+- `short-circuit` → 조건 만족 시 이후 단계 건너뜀
+- `noop` → 아무 일도 안 함
+- `SoT` (Source of Truth) → 데이터 출처 기준 / 정답을 갖는 곳
+- `ROI` → 비용 대비 효용 / 그만큼의 가치가 없음
+- `stateless` → 상태 저장 없이
+- `graceful degradation` → 부분 장애 시 점진적 성능 저하
+- `race condition` → 동시성 충돌
+- `eventually consistent` → 일정 시간 후 데이터가 맞춰짐
+
+### 그대로 두는 경우 (영문 유지)
+
+- 클래스/라이브러리 이름: `RestClient`, `Adapter`, `Spring Boot`
+- HTTP/REST 표준: `GET`, `400`, `Bearer Token`, `Retry-After`
+- 정착된 약어: `JWT`, `JPA`, `MVP`, `SSE`, `RPM`, `TPM`
+
+### 판단 기준
+
+그 용어가 코드 식별자/표준 스펙에 그대로 등장하면 영문 유지, **추상 개념을 영어로 줄여 쓴 것이면 한국어로 풀어 쓰기**. 애매하면 *"비전문가가 PR 본문을 처음 읽었을 때 이해할 수 있나"* 로 판단.
+
+### 리뷰 지적 형식 예시
+
+> 🟢 Minor — `path/to/Foo.java:42` 의 주석에 *"fire-and-forget 패턴"* 이 그대로 등장합니다. 한국어로 풀어 *"결과를 기다리지 않고 비동기로 실행"* 같은 표현으로 바꾸기를 권합니다 (`docs/codex-review-prompt.md` 의 jargon 검사 항목).
+
 
 ## 로깅
 

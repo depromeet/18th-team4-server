@@ -46,6 +46,7 @@ description: readum 서버 저장소에서 PR, diff, 코드 리뷰를 요청할 
 - 이름만 보고 5초 안에 의도를 추측할 수 있는가
 - 계층 의존 방향이 깨지지 않았는가
 - 추상적 `Manager`, `Helper`, `process`, `handle` 같은 이름이 새로 들어오지 않았는가
+- 영어 jargon (`fire-and-forget`, `swallow`, `fail-fast`, `happy path`, `best-effort`, `noop`, `SoT` 등) 이 주석/PR 본문/식별자에 그대로 박혀 있지 않은가 — 자세한 목록은 [codex-review-prompt.md 의 jargon 검사 섹션](../../../docs/codex-review-prompt.md) 참조
 - DTO/Entity/Exception 구조가 팀 컨벤션에 맞는가
 - 변경 범위 안에서 더 단순하고 안전한 설계/구현 방향이 보이는가
 - 트랜잭션, 소유권 검증, 입력 검증, 민감 정보 노출 문제가 없는가
