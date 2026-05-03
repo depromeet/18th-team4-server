@@ -16,8 +16,10 @@ RuntimeException
 ```
 
 - `BusinessException` 은 `ErrorCode` 하나만 필드로 들고 있음
-- 서브클래스는 **HTTP 상태 매핑** 용도일 뿐 추가 필드 없음
-- 세부 분기 정보는 `ErrorCode` enum 값으로 표현
+- 서브클래스는 **HTTP 상태 매핑** 용도가 주 목적. 세부 분기 정보는 `ErrorCode` enum 값으로 표현
+- 예외: `TooManyRequestsException` 은 선택적으로 `retryAfterSeconds` 필드를 추가로 가진다.
+  retry 간격이 서비스마다 다를 수 있으므로 호출자(서비스/어댑터)가 직접 결정한다.
+  값이 있으면 `GlobalExceptionHandler` 가 `Retry-After: N` 응답 헤더로 포함한다.
 
 ## ErrorCode enum 템플릿
 
@@ -140,6 +142,21 @@ void REUSE_DETECTED_결과면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한�
 4. `CLAUDE.md` 의 "Exception Convention" 표에 행 추가
 
 > 참고로 `TooManyRequestsException(429)` 는 외부 LLM rate limit 매핑을 위해 도입됐다 (`AiChatErrorCode.AI_RATE_LIMIT_EXCEEDED`). 503(Service Unavailable, DB 장애 외) 등이 다음 후보. 추가 전에 기존 분류로 표현 가능한지 먼저 검토.
+
+### `TooManyRequestsException` 의 Retry-After 사용법
+
+retry 간격을 알고 있는 서비스는 두 번째 생성자를 사용한다.
+
+```java
+// retry 간격을 알 때 — Retry-After: 60 헤더가 응답에 포함된다
+throw new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_EXCEEDED, 60L);
+
+// retry 간격을 모를 때 — Retry-After 헤더 없이 429만 반환
+throw new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_EXCEEDED);
+```
+
+- retry 간격을 알 수 없는 경우(예: 외부 API 에러 메시지에서 파싱 불가)에는 단일 인자 생성자를 쓴다
+- 적절한 대기 시간을 아는 경우(예: 외부 API 헤더 `Retry-After` 값)에는 이를 그대로 전달한다
 
 ## DB 계층 예외
 

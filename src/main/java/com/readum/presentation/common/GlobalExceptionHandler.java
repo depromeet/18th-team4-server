@@ -68,14 +68,21 @@ public class GlobalExceptionHandler {
     }
 
     // 도메인 비즈니스 예외 - 호출 한도 초과 (외부 LLM 등)
+    // Retry-After 헤더는 예외를 던진 서비스가 retryAfterSeconds 를 지정했을 때만 포함된다.
+    // retry 간격은 서비스마다 다를 수 있으므로 GlobalExceptionHandler 가 고정값을 내리지 않는다.
     @ExceptionHandler(TooManyRequestsException.class)
     public ResponseEntity<GlobalApiResponse<?>> handleTooManyRequests(TooManyRequestsException ex) {
         log.warn("Too many requests: {}", ex.getErrorCode().getMessage());
-        return GlobalApiResponse.error(HttpStatus.TOO_MANY_REQUESTS, ex.getErrorCode().getMessage());
+        GlobalApiResponse<?> body = new GlobalApiResponse<>(null, new GlobalApiResponse.ErrorBody(ex.getErrorCode().getMessage()));
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS);
+        if (ex.getRetryAfterSeconds() != null) {
+            builder = builder.header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()));
+        }
+        return builder.body(body);
     }
 
     // 외부 시스템 응답 오류 (업스트림 5xx) → 502
-    @ExceptionHandler(BadGatewayException.class)
+
     public ResponseEntity<GlobalApiResponse<?>> handleBadGateway(BadGatewayException ex) {
         log.error("외부 시스템 오류 응답 - {}", ex.getErrorCode().name(), ex);
         return GlobalApiResponse.error(HttpStatus.BAD_GATEWAY, ex.getErrorCode().getMessage());
