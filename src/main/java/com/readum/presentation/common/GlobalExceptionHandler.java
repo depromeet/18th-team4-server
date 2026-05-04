@@ -116,11 +116,11 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    // @CookieValue(required = true) 로 선언된 쿠키가 요청에 없을 때
+    // @CookieValue(required = true) 로 선언된 쿠키가 요청에 없을 때 (user_session 등 인증 쿠키 → 401)
     @ExceptionHandler(MissingRequestCookieException.class)
     public ResponseEntity<ApiResponse<?>> handleMissingCookie(MissingRequestCookieException ex) {
-        log.debug("Missing cookie: {}", ex.getCookieName());
-        return ApiResponse.error(HttpStatus.BAD_REQUEST, "필수 쿠키가 없습니다: " + ex.getCookieName());
+        log.warn("Missing cookie: {}", ex.getCookieName());
+        return ApiResponse.error(HttpStatus.UNAUTHORIZED, "필수 쿠키가 없습니다: " + ex.getCookieName());
     }
 
     // @Valid 어노테이션 검증 실패 (필드 제약 조건 위반)
