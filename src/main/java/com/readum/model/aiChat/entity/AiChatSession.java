@@ -63,6 +63,11 @@ public class AiChatSession {
         return new AiChatSession(null, userBookId, Status.ACTIVE, 0, 0, null, now, now);
     }
 
+    public void close() {
+        this.status = Status.CLOSED;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     public static AiChatSession of(
             Long id,
             Long userBookId,
