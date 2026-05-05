@@ -29,11 +29,11 @@ public class SummaryDraftPolicy {
         if (eligibility.eligible()) {
             return;
         }
-        switch (eligibility.reason()) {
+        throw switch (eligibility.reason()) {
             case SESSION_ALREADY_CLOSED ->
-                    throw new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED);
+                    new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED);
             case CHAT_VOLUME_NOT_ENOUGH ->
-                    throw new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
-        }
+                    new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
+        };
     }
 }
