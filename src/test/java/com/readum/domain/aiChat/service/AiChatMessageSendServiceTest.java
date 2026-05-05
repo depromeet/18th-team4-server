@@ -59,7 +59,7 @@ class AiChatMessageSendServiceTest {
 
     private final AiChatProperties aiChatProperties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
-            new AiChatProperties.MessageRule(1000),
+            new AiChatProperties.MessageRule(4000),
             new AiChatProperties.RateLimit(10, 5)
     );
 
@@ -97,8 +97,8 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 본문이_1001자면_BadRequest_MESSAGE_CONTENT_TOO_LONG() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "가".repeat(1001));
+    void 본문이_4001자면_BadRequest_MESSAGE_CONTENT_TOO_LONG() {
+        SendMessageCommand command = new SendMessageCommand(1L, 7L, "가".repeat(4001));
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))

@@ -30,7 +30,7 @@ ai-chat:
   context-window:
     max-turns: 20
   message:
-    max-content-length: 1000
+    max-content-length: 4000
 
 aladin:
   ttb-key: test-ttb-key

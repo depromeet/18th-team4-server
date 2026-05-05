@@ -156,13 +156,13 @@ class AiChatControllerTest {
     }
 
     @Test
-    void 메시지_전송_1001자_본문이면_400() throws Exception {
-        String tooLong = "가".repeat(1001);
+    void 메시지_전송_4001자_본문이면_400() throws Exception {
+        String tooLong = "가".repeat(4001);
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new SendMessageRequest(tooLong))))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.message", containsString("1000자")));
+                .andExpect(jsonPath("$.error.message", containsString("4000자")));
     }
 
     @Test
