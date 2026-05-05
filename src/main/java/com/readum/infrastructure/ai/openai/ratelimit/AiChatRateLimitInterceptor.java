@@ -17,8 +17,12 @@ import org.springframework.web.servlet.HandlerInterceptor;
  *
  * key 우선순위:
  *   1) Spring Security 의 인증 principal (Long userId 형태) — 인증 활성화 시
- *   2) X-Forwarded-For 헤더 첫 번째 IP (프록시 환경)
- *   3) ServletRequest.getRemoteAddr()
+ *   2) ServletRequest.getRemoteAddr()
+ *
+ * 클라이언트가 임의로 설정 가능한 X-Forwarded-For 헤더는 신뢰하지 않는다.
+ * (현 인프라는 단일 EC2 + nginx 직결이라 getRemoteAddr() 가 실제 클라이언트 IP 다.)
+ * 향후 ALB / CDN 등 신뢰된 프록시 뒤로 들어가게 되면 Spring 의
+ * `server.forward-headers-strategy: native` 설정으로 위임하여 인프라 레벨에서 처리한다.
  */
 @Slf4j
 @Component
@@ -60,10 +64,6 @@ public class AiChatRateLimitInterceptor implements HandlerInterceptor {
                 && authentication.getPrincipal() != null
                 && !"anonymousUser".equals(authentication.getPrincipal())) {
             return "user:" + authentication.getPrincipal();
-        }
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return "ip:" + forwarded.split(",", 2)[0].trim();
         }
         String remote = request.getRemoteAddr();
         return "ip:" + (remote == null ? "unknown" : remote);

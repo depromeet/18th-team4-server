@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 @Configuration
 @EnableConfigurationProperties(GuardrailProperties.class)
@@ -58,21 +57,27 @@ public class OpenAiConfig {
                     .build());
         }
 
-        // 3) OpenAI Moderation API 기반 입출력 advisor (외부 호출, 비용 발생)
+        // 3) OpenAI Moderation API 기반 입출력 advisor (외부 호출, 비용 발생).
+        //    enabled=true 인데 빈이 없으면 운영자가 보안 기능이 동작 중이라고 오해할 수 있어 fail-fast.
         if (guardrailProperties.moderation().enabled()) {
             ModerationModel moderationModel = moderationModelProvider.getIfAvailable();
-            if (Objects.nonNull(moderationModel)) {
-                advisors.add(new ModerationInputAdvisor(
-                        moderationModel,
-                        guardrailProperties.input().failureResponse(),
-                        ORDER_MODERATION_INPUT
-                ));
-                advisors.add(new ModerationOutputAdvisor(
-                        moderationModel,
-                        guardrailProperties.output().failureResponse(),
-                        ORDER_MODERATION_OUTPUT
-                ));
+            if (moderationModel == null) {
+                throw new IllegalStateException(
+                        "readum.guardrail.moderation.enabled=true 이지만 ModerationModel 빈이 등록되어 있지 않습니다. "
+                                + "spring.ai.openai.moderation 설정을 확인하거나, moderation 을 비활성화하려면 "
+                                + "readum.guardrail.moderation.enabled=false 로 변경하세요."
+                );
             }
+            advisors.add(new ModerationInputAdvisor(
+                    moderationModel,
+                    guardrailProperties.input().failureResponse(),
+                    ORDER_MODERATION_INPUT
+            ));
+            advisors.add(new ModerationOutputAdvisor(
+                    moderationModel,
+                    guardrailProperties.output().failureResponse(),
+                    ORDER_MODERATION_OUTPUT
+            ));
         }
 
         ChatClient.Builder chatClientBuilder = builder.defaultSystem(systemPrompt);

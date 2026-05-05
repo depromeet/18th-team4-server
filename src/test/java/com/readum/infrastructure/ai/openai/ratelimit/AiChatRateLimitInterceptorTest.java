@@ -92,4 +92,26 @@ class AiChatRateLimitInterceptorTest {
 
         assertThat(proceeded).isTrue();
     }
+
+    @Test
+    void X_Forwarded_For_헤더는_신뢰하지_않고_getRemoteAddr_만_사용한다() throws Exception {
+        // 클라이언트가 X-Forwarded-For 헤더만 바꿔서 IP bucket 을 갈아치우려 해도,
+        // 실제 식별자는 getRemoteAddr() 기준으로 결정되어야 한다.
+        AiChatRateLimiter limiter = mock(AiChatRateLimiter.class);
+        given(limiter.isEnabled()).willReturn(true);
+        given(limiter.tryConsume("ip:203.0.113.10")).willReturn(true);
+        AiChatRateLimitInterceptor interceptor = new AiChatRateLimitInterceptor(limiter);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/ai-chat/stream");
+        request.setRemoteAddr("203.0.113.10");
+        request.addHeader("X-Forwarded-For", "1.2.3.4, 5.6.7.8");      // 무시되어야 함
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        boolean proceeded = interceptor.preHandle(request, response, new Object());
+
+        assertThat(proceeded).isTrue();
+        // limiter.tryConsume("ip:203.0.113.10") 만 매칭되도록 stubbing 했으므로,
+        // XFF 의 "1.2.3.4" 가 사용됐다면 stubbed 된 mock 이 false 를 반환해 429 가 됐을 것.
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
 }

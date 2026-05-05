@@ -1,15 +1,22 @@
 package com.readum.infrastructure.ai.openai;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.List;
 
+@Validated
 @ConfigurationProperties(prefix = "readum.guardrail")
 public record GuardrailProperties(
-        Input input,
-        Output output,
-        Moderation moderation,
-        RateLimit rateLimit
+        @Valid @NotNull Input input,
+        @Valid @NotNull Output output,
+        @Valid @NotNull Moderation moderation,
+        @Valid @NotNull RateLimit rateLimit
 ) {
 
     public GuardrailProperties {
@@ -20,64 +27,108 @@ public record GuardrailProperties(
     }
 
     public record Input(
-            int maxCharacters,
-            int maxTokens,
-            List<String> sensitiveWords,
-            List<String> injectionPatterns,
-            String failureResponse
+            @Min(1) int maxCharacters,
+            @Min(1) int maxTokens,
+            @NotNull List<String> sensitiveWords,
+            @NotEmpty List<String> injectionPatterns,
+            @NotBlank String failureResponse
     ) {
+        private static final int DEFAULT_MAX_CHARACTERS = 4000;
+        private static final int DEFAULT_MAX_TOKENS = 1500;
+        private static final List<String> DEFAULT_SENSITIVE_WORDS = List.of();
+        private static final List<String> DEFAULT_INJECTION_PATTERNS = List.of(
+                "(?i)ignore (all |any |the )?(previous|prior|above) (instructions|prompts?|messages?)",
+                "(?i)disregard (all |any |the )?(previous|prior|above) (instructions|prompts?|messages?)",
+                "(?i)forget (all |any |the )?(previous|prior|above) (instructions|prompts?|messages?)",
+                "(?i)###\\s*system\\s*###",
+                "(?i)<\\s*/\\s*system\\s*>",
+                "(?i)you are now (an? )?(unrestricted|developer|admin|jailbroken)",
+                "(?i)\\bDAN\\b.{0,80}(do anything now|jailbreak|no restrictions)",
+                "(?i)(?:이제부터|지금부터)\\s*너는\\s*DAN\\b",
+                "이전\\s*(모든\\s*)?지시(사항)?\\s*(을|를)?\\s*(무시|잊어)",
+                "지금부터\\s*너는\\s*(?:readum-)?(admin|관리자|개발자|시스템)",
+                "(?i)system\\s*prompt\\s*(을|를)?\\s*(출력|보여|알려|dump)",
+                "(?i)repeat the (words|text|instructions) above"
+        );
+        private static final String DEFAULT_FAILURE_RESPONSE =
+                "요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요.";
+
+        public Input {
+            // 부분 바인딩 시(YAML 에 input 블록은 있지만 일부 필드가 누락된 경우) defaults 로 보완.
+            // injectionPatterns 가 비어 있으면 PromptInjectionPatternAdvisor 가 침묵 미등록되므로
+            // 반드시 기본 패턴 셋으로 보강해야 한다.
+            if (maxCharacters <= 0) maxCharacters = DEFAULT_MAX_CHARACTERS;
+            if (maxTokens <= 0) maxTokens = DEFAULT_MAX_TOKENS;
+            if (sensitiveWords == null) sensitiveWords = DEFAULT_SENSITIVE_WORDS;
+            if (injectionPatterns == null || injectionPatterns.isEmpty()) {
+                injectionPatterns = DEFAULT_INJECTION_PATTERNS;
+            }
+            if (failureResponse == null || failureResponse.isBlank()) {
+                failureResponse = DEFAULT_FAILURE_RESPONSE;
+            }
+        }
+
         public static Input defaults() {
             return new Input(
-                    4000,
-                    1500,
-                    List.of(),
-                    List.of(
-                            "(?i)ignore (all |any |the )?(previous|prior|above) (instructions|prompts?|messages?)",
-                            "(?i)disregard (all |any |the )?(previous|prior|above) (instructions|prompts?|messages?)",
-                            "(?i)forget (all |any |the )?(previous|prior|above) (instructions|prompts?|messages?)",
-                            "(?i)###\\s*system\\s*###",
-                            "(?i)<\\s*/\\s*system\\s*>",
-                            "(?i)you are now (an? )?(unrestricted|developer|admin|jailbroken)",
-                            "(?i)\\bDAN\\b.{0,80}(do anything now|jailbreak|no restrictions)",
-                            "(?i)(?:이제부터|지금부터)\\s*너는\\s*DAN\\b",
-                            "이전\\s*(모든\\s*)?지시(사항)?\\s*(을|를)?\\s*(무시|잊어)",
-                            "지금부터\\s*너는\\s*(?:readum-)?(admin|관리자|개발자|시스템)",
-                            "(?i)system\\s*prompt\\s*(을|를)?\\s*(출력|보여|알려|dump)",
-                            "(?i)repeat the (words|text|instructions) above"
-                    ),
-                    "요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요."
+                    DEFAULT_MAX_CHARACTERS,
+                    DEFAULT_MAX_TOKENS,
+                    DEFAULT_SENSITIVE_WORDS,
+                    DEFAULT_INJECTION_PATTERNS,
+                    DEFAULT_FAILURE_RESPONSE
             );
         }
     }
 
     public record Output(
-            int maxResponseTokens,
-            String failureResponse
+            @Min(1) int maxResponseTokens,
+            @NotBlank String failureResponse
     ) {
+        private static final int DEFAULT_MAX_RESPONSE_TOKENS = 1024;
+        private static final String DEFAULT_FAILURE_RESPONSE =
+                "응답을 안전하게 생성할 수 없어 거부되었습니다. 다른 질문을 해주세요.";
+
+        public Output {
+            if (maxResponseTokens <= 0) maxResponseTokens = DEFAULT_MAX_RESPONSE_TOKENS;
+            if (failureResponse == null || failureResponse.isBlank()) {
+                failureResponse = DEFAULT_FAILURE_RESPONSE;
+            }
+        }
+
         public static Output defaults() {
-            return new Output(
-                    1024,
-                    "응답을 안전하게 생성할 수 없어 거부되었습니다. 다른 질문을 해주세요."
-            );
+            return new Output(DEFAULT_MAX_RESPONSE_TOKENS, DEFAULT_FAILURE_RESPONSE);
         }
     }
 
     public record Moderation(
             boolean enabled,
-            String model
+            @NotBlank String model
     ) {
+        private static final String DEFAULT_MODEL = "omni-moderation-latest";
+
+        public Moderation {
+            if (model == null || model.isBlank()) model = DEFAULT_MODEL;
+        }
+
         public static Moderation defaults() {
-            return new Moderation(true, "omni-moderation-latest");
+            return new Moderation(true, DEFAULT_MODEL);
         }
     }
 
     public record RateLimit(
             boolean enabled,
-            int requestsPerMinute,
-            int dailyRequests
+            @Min(1) int requestsPerMinute,
+            @Min(1) int dailyRequests
     ) {
+        private static final int DEFAULT_REQUESTS_PER_MINUTE = 20;
+        private static final int DEFAULT_DAILY_REQUESTS = 200;
+
+        public RateLimit {
+            if (requestsPerMinute <= 0) requestsPerMinute = DEFAULT_REQUESTS_PER_MINUTE;
+            if (dailyRequests <= 0) dailyRequests = DEFAULT_DAILY_REQUESTS;
+        }
+
         public static RateLimit defaults() {
-            return new RateLimit(true, 20, 200);
+            return new RateLimit(true, DEFAULT_REQUESTS_PER_MINUTE, DEFAULT_DAILY_REQUESTS);
         }
     }
 }

@@ -1,3 +1,6 @@
+server:
+  forward-headers-strategy: framework
+
 jwt:
   secret: ${JWT_SECRET:}
   issuer: readum

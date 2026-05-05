@@ -22,6 +22,7 @@ import reactor.test.StepVerifier;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -81,6 +82,36 @@ class ModerationOutputAdvisorTest {
 
         StepVerifier.create(flux)
                 .assertNext(r -> assertThat(extractText(r)).isEqualTo(FAILURE_MSG))
+                .verifyComplete();
+    }
+
+    @Test
+    void 스트리밍_차단_시_마지막_chunk_의_context_가_보존된다() {
+        // 상위 advisor 들이 스트림 처리 과정에서 누적시킨 context 메타데이터를 잃지 않아야 한다.
+        ModerationModel moderationModel = mock(ModerationModel.class);
+        given(moderationModel.call(any())).willReturn(flaggedResponse());
+        ModerationOutputAdvisor advisor = new ModerationOutputAdvisor(moderationModel, FAILURE_MSG, 1000);
+
+        ChatClientRequest request = newRequest("질문");
+        StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
+        ChatClientResponse last = ChatClientResponse.builder()
+                .chatResponse(ChatResponse.builder()
+                        .generations(List.of(new Generation(new AssistantMessage("위험"))))
+                        .build())
+                .context(Map.of("upstream-meta", "from-last-chunk"))
+                .build();
+        given(chain.nextStream(any())).willReturn(Flux.just(
+                responseFromAssistant("이 책은"),
+                last
+        ));
+
+        Flux<ChatClientResponse> flux = advisor.adviseStream(request, chain);
+
+        StepVerifier.create(flux)
+                .assertNext(r -> {
+                    assertThat(extractText(r)).isEqualTo(FAILURE_MSG);
+                    assertThat(r.context()).containsEntry("upstream-meta", "from-last-chunk");
+                })
                 .verifyComplete();
     }
 

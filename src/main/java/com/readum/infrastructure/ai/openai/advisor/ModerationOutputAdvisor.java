@@ -10,6 +10,7 @@ import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.moderation.Moderation;
 import org.springframework.ai.moderation.ModerationModel;
 import org.springframework.ai.moderation.ModerationPrompt;
 import org.springframework.ai.moderation.ModerationResponse;
@@ -75,7 +76,11 @@ public class ModerationOutputAdvisor implements CallAdvisor, StreamAdvisor {
                     if (isFlagged(accumulated)) {
                         log.info("[Guardrail] {} blocked output (stream): length={}",
                                 getName(), accumulated.length());
-                        return Flux.just(buildFailureResponse(request));
+                        // 차단 시 마지막 chunk 의 context 를 유지한다.
+                        // 그래야 체인 상위 advisor 들이 응답 전파 과정에서 누적시킨 메타데이터가 보존되어
+                        // adviseCall 경로(replaceWithFailure)와 동일한 동작이 된다.
+                        ChatClientResponse lastChunk = chunks.isEmpty() ? null : chunks.getLast();
+                        return Flux.just(replaceWithFailure(request, lastChunk));
                     }
                     return Flux.fromIterable(chunks);
                 });
@@ -104,11 +109,12 @@ public class ModerationOutputAdvisor implements CallAdvisor, StreamAdvisor {
         try {
             ModerationResponse response = moderationModel.call(new ModerationPrompt(text));
             ModerationResult result = Optional.ofNullable(response.getResult())
-                    .map(generation -> generation.getOutput())
-                    .map(moderation -> moderation.getResults())
+                    .map(org.springframework.ai.moderation.Generation::getOutput)
+                    .map(Moderation::getResults)
                     .filter(list -> !list.isEmpty())
-                    .map(list -> list.get(0))
+                    .map(List::getFirst)
                     .orElse(null);
+
             return result != null && result.isFlagged();
         } catch (Exception e) {
             log.warn("[Guardrail] {} moderation API failure (fail-open): {}", getName(), e.getMessage());
@@ -120,20 +126,12 @@ public class ModerationOutputAdvisor implements CallAdvisor, StreamAdvisor {
         Map<String, Object> context = original != null
                 ? Map.copyOf(original.context())
                 : Map.copyOf(request.context());
+
         return ChatClientResponse.builder()
                 .chatResponse(ChatResponse.builder()
                         .generations(List.of(new Generation(new AssistantMessage(failureResponse))))
                         .build())
                 .context(context)
-                .build();
-    }
-
-    private ChatClientResponse buildFailureResponse(ChatClientRequest request) {
-        return ChatClientResponse.builder()
-                .chatResponse(ChatResponse.builder()
-                        .generations(List.of(new Generation(new AssistantMessage(failureResponse))))
-                        .build())
-                .context(Map.copyOf(request.context()))
                 .build();
     }
 }
