@@ -5,8 +5,8 @@ import com.readum.domain.auth.dto.LogoutResult;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.exception.AuthErrorCode;
-import com.readum.domain.auth.jwt.JwtTokenProvider;
 import com.readum.domain.auth.out.TokenBlacklistStore;
+import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.model.auth.repository.RefreshTokenRepository;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ import static org.mockito.Mockito.verify;
 class LogoutServiceTest {
 
     @Mock
-    private JwtTokenProvider jwtTokenProvider;
+    private TokenGenerator tokenGenerator;
 
     @Mock
     private TokenBlacklistStore tokenBlacklistStore;
@@ -57,10 +57,10 @@ class LogoutServiceTest {
         String accessJwtId = "access-jwt-id";
         Instant accessExpiresAt = Instant.now().plus(Duration.ofMinutes(15));
 
-        given(jwtTokenProvider.parse(refreshToken)).willReturn(
+        given(tokenGenerator.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        given(jwtTokenProvider.parse(accessToken)).willReturn(
+        given(tokenGenerator.parse(accessToken)).willReturn(
                 new ParsedToken(userId, "USER", accessJwtId, accessExpiresAt, TokenType.ACCESS)
         );
 
@@ -79,7 +79,7 @@ class LogoutServiceTest {
         String refreshToken = "refresh-token";
         Long userId = 5L;
 
-        given(jwtTokenProvider.parse(refreshToken)).willReturn(
+        given(tokenGenerator.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
 
@@ -102,7 +102,7 @@ class LogoutServiceTest {
     @Test
     void Refresh_Token이_유효하지_않으면_멱등하게_anonymous_결과를_반환한다() {
         String refreshToken = "invalid-refresh-token";
-        given(jwtTokenProvider.parse(refreshToken))
+        given(tokenGenerator.parse(refreshToken))
                 .willThrow(new UnauthorizedException(AuthErrorCode.INVALID_TOKEN));
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, null));
@@ -115,7 +115,7 @@ class LogoutServiceTest {
     @Test
     void Refresh_Token_자리에_Access_Token이_들어오면_멱등하게_anonymous_결과를_반환한다() {
         String notRefreshToken = "access-token";
-        given(jwtTokenProvider.parse(notRefreshToken)).willReturn(
+        given(tokenGenerator.parse(notRefreshToken)).willReturn(
                 new ParsedToken(5L, "USER", "jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
         );
 
@@ -132,10 +132,10 @@ class LogoutServiceTest {
         String invalidAccessToken = "invalid-access-token";
         Long userId = 5L;
 
-        given(jwtTokenProvider.parse(refreshToken)).willReturn(
+        given(tokenGenerator.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        given(jwtTokenProvider.parse(invalidAccessToken))
+        given(tokenGenerator.parse(invalidAccessToken))
                 .willThrow(new UnauthorizedException(AuthErrorCode.INVALID_TOKEN));
 
         LogoutResult result = logoutService.execute(new LogoutCommand(refreshToken, invalidAccessToken));
@@ -152,10 +152,10 @@ class LogoutServiceTest {
         Long refreshUserId = 5L;
         Long otherUserId = 9L;
 
-        given(jwtTokenProvider.parse(refreshToken)).willReturn(
+        given(tokenGenerator.parse(refreshToken)).willReturn(
                 new ParsedToken(refreshUserId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        given(jwtTokenProvider.parse(accessToken)).willReturn(
+        given(tokenGenerator.parse(accessToken)).willReturn(
                 new ParsedToken(otherUserId, "USER", "access-jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
         );
 
@@ -172,10 +172,10 @@ class LogoutServiceTest {
         String accessToken = "access-token";
         Long userId = 5L;
 
-        given(jwtTokenProvider.parse(refreshToken)).willReturn(
+        given(tokenGenerator.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
-        given(jwtTokenProvider.parse(accessToken)).willReturn(
+        given(tokenGenerator.parse(accessToken)).willReturn(
                 new ParsedToken(userId, "USER", "access-jwt-id", Instant.now().plus(Duration.ofMinutes(15)), TokenType.ACCESS)
         );
         doThrow(new DataAccessResourceFailureException("simulated blacklist failure"))
@@ -193,7 +193,7 @@ class LogoutServiceTest {
         String accessToken = "access-token";
         Long userId = 5L;
 
-        given(jwtTokenProvider.parse(refreshToken)).willReturn(
+        given(tokenGenerator.parse(refreshToken)).willReturn(
                 new ParsedToken(userId, "USER", "refresh-jwt-id", Instant.now().plus(Duration.ofDays(14)), TokenType.REFRESH)
         );
         doThrow(new DataAccessResourceFailureException("simulated RT store failure"))

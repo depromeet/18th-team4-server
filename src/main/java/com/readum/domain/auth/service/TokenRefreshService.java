@@ -1,5 +1,6 @@
 package com.readum.domain.auth.service;
 
+import com.readum.domain.auth.config.AuthProperties;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
@@ -7,7 +8,7 @@ import com.readum.domain.auth.dto.RotateResult;
 import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.dto.TokenRefreshCommand;
 import com.readum.domain.auth.exception.AuthErrorCode;
-import com.readum.domain.auth.jwt.JwtTokenProvider;
+import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.model.auth.entity.RefreshToken;
 import com.readum.model.auth.repository.RefreshTokenRepository;
@@ -26,12 +27,13 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TokenRefreshService {
 
-    private final JwtTokenProvider jwtTokenProvider;
+    private final TokenGenerator tokenGenerator;
+    private final AuthProperties authProperties;
     private final RefreshTokenRepository refreshTokenRepository;
 
     @Transactional
     public TokenPair execute(TokenRefreshCommand command) {
-        ParsedToken parsed = jwtTokenProvider.parse(command.refreshToken());
+        ParsedToken parsed = tokenGenerator.parse(command.refreshToken());
         if (parsed.type() != TokenType.REFRESH) {
             throw new UnauthorizedException(AuthErrorCode.INVALID_TOKEN);
         }
@@ -42,8 +44,8 @@ public class TokenRefreshService {
 
         Instant now = Instant.now();
         String newRefreshJwtId = UUID.randomUUID().toString();
-        Instant newRefreshExpiresAt = now.plus(jwtTokenProvider.refreshTokenTtl());
-        Duration gracePeriod = jwtTokenProvider.refreshGracePeriod();
+        Instant newRefreshExpiresAt = now.plus(authProperties.refreshTokenTtl());
+        Duration gracePeriod = authProperties.refreshGracePeriod();
 
         RotateResult result = rotate(userId, oldJwtId, newRefreshJwtId, now, newRefreshExpiresAt, gracePeriod);
 
@@ -146,8 +148,8 @@ public class TokenRefreshService {
             Instant newIssuedAt, Instant newExpiresAt, String oldJwtId
     ) {
         String newAccessJwtId = UUID.randomUUID().toString();
-        String newAccessToken = jwtTokenProvider.generateAccessToken(userId, role, newAccessJwtId);
-        String newRefreshToken = jwtTokenProvider.generateRefreshToken(new RefreshTokenPayload(
+        String newAccessToken = tokenGenerator.generateAccessToken(userId, role, newAccessJwtId);
+        String newRefreshToken = tokenGenerator.generateRefreshToken(new RefreshTokenPayload(
                 userId, role, newRefreshJwtId, newIssuedAt, newExpiresAt
         ));
 
@@ -155,7 +157,7 @@ public class TokenRefreshService {
         return new TokenPair(
                 newAccessToken,
                 newRefreshToken,
-                jwtTokenProvider.accessTokenTtl(),
+                authProperties.accessTokenTtl(),
                 Duration.between(Instant.now(), newExpiresAt)
         );
     }
@@ -166,8 +168,8 @@ public class TokenRefreshService {
         Instant childExpiresAt = result.graceChildExpiresAt();
 
         String newAccessJwtId = UUID.randomUUID().toString();
-        String newAccessToken = jwtTokenProvider.generateAccessToken(userId, role, newAccessJwtId);
-        String refreshToken = jwtTokenProvider.generateRefreshToken(new RefreshTokenPayload(
+        String newAccessToken = tokenGenerator.generateAccessToken(userId, role, newAccessJwtId);
+        String refreshToken = tokenGenerator.generateRefreshToken(new RefreshTokenPayload(
                 userId, role, childJwtId, childIssuedAt, childExpiresAt
         ));
 
@@ -176,7 +178,7 @@ public class TokenRefreshService {
         return new TokenPair(
                 newAccessToken,
                 refreshToken,
-                jwtTokenProvider.accessTokenTtl(),
+                authProperties.accessTokenTtl(),
                 Duration.between(Instant.now(), childExpiresAt)
         );
     }

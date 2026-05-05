@@ -1,9 +1,10 @@
 package com.readum.domain.auth.service;
 
+import com.readum.domain.auth.config.AuthProperties;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.dto.TokenIssueCommand;
 import com.readum.domain.auth.dto.TokenPair;
-import com.readum.domain.auth.jwt.JwtTokenProvider;
+import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.model.auth.entity.RefreshToken;
 import com.readum.model.auth.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TokenIssueService {
 
-    private final JwtTokenProvider jwtTokenProvider;
+    private final TokenGenerator tokenGenerator;
+    private final AuthProperties authProperties;
     private final RefreshTokenRepository refreshTokenRepository;
 
     @Transactional
@@ -28,10 +30,10 @@ public class TokenIssueService {
         String refreshJwtId = UUID.randomUUID().toString();
 
         Instant now = Instant.now();
-        Instant refreshExpiresAt = now.plus(jwtTokenProvider.refreshTokenTtl());
+        Instant refreshExpiresAt = now.plus(authProperties.refreshTokenTtl());
 
-        String accessToken = jwtTokenProvider.generateAccessToken(command.userId(), command.role(), accessJwtId);
-        String refreshToken = jwtTokenProvider.generateRefreshToken(new RefreshTokenPayload(
+        String accessToken = tokenGenerator.generateAccessToken(command.userId(), command.role(), accessJwtId);
+        String refreshToken = tokenGenerator.generateRefreshToken(new RefreshTokenPayload(
                 command.userId(), command.role(), refreshJwtId, now, refreshExpiresAt
         ));
 
@@ -43,8 +45,8 @@ public class TokenIssueService {
         return new TokenPair(
                 accessToken,
                 refreshToken,
-                jwtTokenProvider.accessTokenTtl(),
-                jwtTokenProvider.refreshTokenTtl()
+                authProperties.accessTokenTtl(),
+                authProperties.refreshTokenTtl()
         );
     }
 }

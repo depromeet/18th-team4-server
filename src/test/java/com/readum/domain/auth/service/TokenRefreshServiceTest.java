@@ -1,12 +1,13 @@
 package com.readum.domain.auth.service;
 
+import com.readum.domain.auth.config.AuthProperties;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.dto.TokenPair;
 import com.readum.domain.auth.dto.TokenRefreshCommand;
 import com.readum.domain.auth.exception.AuthErrorCode;
-import com.readum.domain.auth.jwt.JwtTokenProvider;
+import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.model.auth.entity.RefreshToken;
 import com.readum.model.auth.repository.RefreshTokenRepository;
@@ -37,7 +38,10 @@ import static org.mockito.Mockito.verify;
 class TokenRefreshServiceTest {
 
     @Mock
-    private JwtTokenProvider jwtTokenProvider;
+    private TokenGenerator tokenGenerator;
+
+    @Mock
+    private AuthProperties authProperties;
 
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
@@ -112,15 +116,15 @@ class TokenRefreshServiceTest {
 
     @Test
     void ACTIVE_row_를_rotate_하면_새로운_Token_Pair_를_발급한다() {
-        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
-        given(jwtTokenProvider.accessTokenTtl()).willReturn(AT_TTL);
+        given(tokenGenerator.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(authProperties.refreshTokenTtl()).willReturn(RT_TTL);
+        given(authProperties.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(authProperties.accessTokenTtl()).willReturn(AT_TTL);
         given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
                 .willReturn(Optional.of(activeRow()));
         given(refreshTokenRepository.rotate(eq(100L), any(Instant.class), any(Instant.class))).willReturn(1);
-        given(jwtTokenProvider.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenProvider.generateRefreshToken(any(RefreshTokenPayload.class))).willReturn(NEW_REFRESH_TOKEN);
+        given(tokenGenerator.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
+        given(tokenGenerator.generateRefreshToken(any(RefreshTokenPayload.class))).willReturn(NEW_REFRESH_TOKEN);
 
         TokenPair pair = tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT));
 
@@ -148,10 +152,10 @@ class TokenRefreshServiceTest {
                 LocalDateTime.now()
         );
 
-        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
-        given(jwtTokenProvider.accessTokenTtl()).willReturn(AT_TTL);
+        given(tokenGenerator.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(authProperties.refreshTokenTtl()).willReturn(RT_TTL);
+        given(authProperties.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(authProperties.accessTokenTtl()).willReturn(AT_TTL);
         given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
                 .willReturn(Optional.of(inGraceRow()));
         given(refreshTokenRepository.findByParentJwtId(OLD_JWT_ID)).willReturn(Optional.of(child));
@@ -159,22 +163,22 @@ class TokenRefreshServiceTest {
         RefreshTokenPayload expectedPayload = new RefreshTokenPayload(
                 USER_ID, ROLE, childJwtId, childIssuedAt, childExpiresAt
         );
-        given(jwtTokenProvider.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
-        given(jwtTokenProvider.generateRefreshToken(expectedPayload)).willReturn(GRACE_REFRESH_TOKEN);
+        given(tokenGenerator.generateAccessToken(eq(USER_ID), eq(ROLE), anyString())).willReturn(NEW_ACCESS_TOKEN);
+        given(tokenGenerator.generateRefreshToken(expectedPayload)).willReturn(GRACE_REFRESH_TOKEN);
 
         TokenPair pair = tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT));
 
         assertThat(pair.accessToken()).isEqualTo(NEW_ACCESS_TOKEN);
         assertThat(pair.refreshToken()).isEqualTo(GRACE_REFRESH_TOKEN);
-        verify(jwtTokenProvider).generateRefreshToken(expectedPayload);
+        verify(tokenGenerator).generateRefreshToken(expectedPayload);
         verify(refreshTokenRepository, never()).saveAndFlush(any(RefreshToken.class));
     }
 
     @Test
     void 저장소에_row_가_없으면_REFRESH_TOKEN_NOT_FOUND_예외가_발생한다() {
-        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(tokenGenerator.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(authProperties.refreshTokenTtl()).willReturn(RT_TTL);
+        given(authProperties.refreshGracePeriod()).willReturn(GRACE_TTL);
         given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> tokenRefreshService.execute(new TokenRefreshCommand(OLD_RT)))
@@ -185,9 +189,9 @@ class TokenRefreshServiceTest {
 
     @Test
     void EXPIRED_row_면_REFRESH_TOKEN_EXPIRED_예외가_발생한다() {
-        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(tokenGenerator.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(authProperties.refreshTokenTtl()).willReturn(RT_TTL);
+        given(authProperties.refreshGracePeriod()).willReturn(GRACE_TTL);
         given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
                 .willReturn(Optional.of(expiredRow()));
 
@@ -200,9 +204,9 @@ class TokenRefreshServiceTest {
 
     @Test
     void REVOKED_row_면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한다() {
-        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(tokenGenerator.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(authProperties.refreshTokenTtl()).willReturn(RT_TTL);
+        given(authProperties.refreshGracePeriod()).willReturn(GRACE_TTL);
         given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
                 .willReturn(Optional.of(revokedRow()));
 
@@ -214,9 +218,9 @@ class TokenRefreshServiceTest {
 
     @Test
     void POST_GRACE_row_면_userId_전체를_폐기하고_REUSE_DETECTED_예외가_발생한다() {
-        given(jwtTokenProvider.parse(OLD_RT)).willReturn(refreshTokenClaims());
-        given(jwtTokenProvider.refreshTokenTtl()).willReturn(RT_TTL);
-        given(jwtTokenProvider.refreshGracePeriod()).willReturn(GRACE_TTL);
+        given(tokenGenerator.parse(OLD_RT)).willReturn(refreshTokenClaims());
+        given(authProperties.refreshTokenTtl()).willReturn(RT_TTL);
+        given(authProperties.refreshGracePeriod()).willReturn(GRACE_TTL);
         given(refreshTokenRepository.findByUserIdAndJwtId(USER_ID, OLD_JWT_ID))
                 .willReturn(Optional.of(postGraceRow()));
 
@@ -229,7 +233,7 @@ class TokenRefreshServiceTest {
 
     @Test
     void Refresh_Token이_아닌_Access_Token을_넘기면_INVALID_TOKEN_예외가_발생한다() {
-        given(jwtTokenProvider.parse(OLD_RT)).willReturn(
+        given(tokenGenerator.parse(OLD_RT)).willReturn(
                 new ParsedToken(USER_ID, ROLE, OLD_JWT_ID, Instant.now().plus(AT_TTL), TokenType.ACCESS)
         );
 

@@ -1,6 +1,6 @@
 package com.readum.infrastructure.auth.inmemory;
 
-import com.readum.domain.auth.jwt.JwtProperties;
+import com.readum.infrastructure.security.jwt.JwtProperties;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -13,9 +13,6 @@ class TokenBlacklistStoreImplTest {
     private static final JwtProperties PROPERTIES = new JwtProperties(
             "dGVzdHNlY3JldHRlc3RzZWNyZXR0ZXN0c2VjcmV0dGVzdA==",
             "readum-test",
-            Duration.ofMinutes(30),
-            Duration.ofDays(14),
-            Duration.ofSeconds(3),
             10_000L
     );
 

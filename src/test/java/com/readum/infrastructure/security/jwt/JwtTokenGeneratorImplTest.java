@@ -1,5 +1,6 @@
-package com.readum.domain.auth.jwt;
+package com.readum.infrastructure.security.jwt;
 
+import com.readum.domain.auth.config.AuthProperties;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
@@ -16,38 +17,32 @@ import java.util.Base64;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class JwtTokenProviderTest {
+class JwtTokenGeneratorImplTest {
 
     private static final String SECRET = Base64.getEncoder()
             .encodeToString("01234567890123456789012345678901".getBytes());
     private static final String ISSUER = "readum-test";
 
-    private JwtTokenProvider client;
+    private JwtTokenGeneratorImpl tokenGenerator;
 
     @BeforeEach
     void setUp() {
-        client = newClient(Duration.ofMinutes(30), Duration.ofDays(14));
+        tokenGenerator = newGenerator(Duration.ofMinutes(30), Duration.ofDays(14));
     }
 
-    private JwtTokenProvider newClient(Duration accessTtl, Duration refreshTtl) {
-        JwtProperties properties = new JwtProperties(
-                SECRET,
-                ISSUER,
-                accessTtl,
-                refreshTtl,
-                Duration.ofSeconds(3),
-                10_000L
-        );
-        JwtTokenProvider c = new JwtTokenProvider(properties);
-        c.init();
-        return c;
+    private JwtTokenGeneratorImpl newGenerator(Duration accessTtl, Duration refreshTtl) {
+        JwtProperties jwtProperties = new JwtProperties(SECRET, ISSUER, 10_000L);
+        AuthProperties authProperties = new AuthProperties(accessTtl, refreshTtl, Duration.ofSeconds(3));
+        JwtTokenGeneratorImpl generator = new JwtTokenGeneratorImpl(jwtProperties, authProperties);
+        generator.init();
+        return generator;
     }
 
     @Test
     void Access_Token을_생성하고_파싱하면_동일한_클레임이_복원된다() {
-        String token = client.generateAccessToken(1L, "USER", "jwt-id-1");
+        String token = tokenGenerator.generateAccessToken(1L, "USER", "jwt-id-1");
 
-        ParsedToken parsed = client.parse(token);
+        ParsedToken parsed = tokenGenerator.parse(token);
 
         assertThat(parsed.userId()).isEqualTo(1L);
         assertThat(parsed.role()).isEqualTo("USER");
@@ -59,11 +54,11 @@ class JwtTokenProviderTest {
     void Refresh_Token도_role_claim을_포함하여_REFRESH_타입으로_파싱된다() {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(Duration.ofDays(14));
-        String token = client.generateRefreshToken(new RefreshTokenPayload(
+        String token = tokenGenerator.generateRefreshToken(new RefreshTokenPayload(
                 2L, "ADMIN", "jwt-id-2", issuedAt, expiresAt
         ));
 
-        ParsedToken parsed = client.parse(token);
+        ParsedToken parsed = tokenGenerator.parse(token);
 
         assertThat(parsed.userId()).isEqualTo(2L);
         assertThat(parsed.role()).isEqualTo("ADMIN");
@@ -73,10 +68,10 @@ class JwtTokenProviderTest {
 
     @Test
     void 만료된_토큰을_파싱하면_TOKEN_EXPIRED_예외가_발생한다() {
-        JwtTokenProvider expiredClient = newClient(Duration.ofSeconds(-1), Duration.ofDays(14));
-        String token = expiredClient.generateAccessToken(1L, "USER", "jwt-id");
+        JwtTokenGeneratorImpl expiredGenerator = newGenerator(Duration.ofSeconds(-1), Duration.ofDays(14));
+        String token = expiredGenerator.generateAccessToken(1L, "USER", "jwt-id");
 
-        assertThatThrownBy(() -> expiredClient.parse(token))
+        assertThatThrownBy(() -> expiredGenerator.parse(token))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
                 .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.TOKEN_EXPIRED);
@@ -84,11 +79,11 @@ class JwtTokenProviderTest {
 
     @Test
     void 서명이_변조된_토큰을_파싱하면_INVALID_TOKEN_예외가_발생한다() {
-        String token = client.generateAccessToken(1L, "USER", "jwt-id");
+        String token = tokenGenerator.generateAccessToken(1L, "USER", "jwt-id");
         char last = token.charAt(token.length() - 1);
         String tampered = token.substring(0, token.length() - 1) + (last == 'A' ? 'B' : 'A');
 
-        assertThatThrownBy(() -> client.parse(tampered))
+        assertThatThrownBy(() -> tokenGenerator.parse(tampered))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
                 .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.INVALID_TOKEN);
@@ -96,7 +91,7 @@ class JwtTokenProviderTest {
 
     @Test
     void 파싱_불가능한_문자열을_넘기면_INVALID_TOKEN_예외가_발생한다() {
-        assertThatThrownBy(() -> client.parse("not-a-jwt"))
+        assertThatThrownBy(() -> tokenGenerator.parse("not-a-jwt"))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
                 .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(AuthErrorCode.INVALID_TOKEN);
