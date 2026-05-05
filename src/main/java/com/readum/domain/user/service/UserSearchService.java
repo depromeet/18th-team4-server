@@ -22,10 +22,6 @@ public class UserSearchService {
 
         boolean hasRegisteredBooks = userBookRepository.existsByUserId(user.getId());
 
-        return new UserSessionInfoResult(
-                user.getLastSelectedUserBookId(),
-                hasRegisteredBooks,
-                user.isOnboardingCompleted()
-        );
+        return UserSessionInfoResult.from(user, hasRegisteredBooks);
     }
 }

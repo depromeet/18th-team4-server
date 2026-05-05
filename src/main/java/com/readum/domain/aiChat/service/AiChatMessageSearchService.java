@@ -29,6 +29,8 @@ public class AiChatMessageSearchService {
                 command.sessionId(),
                 PageRequest.of(pageIndex, command.size())
         );
+        // Slice 의 unwrap (hasNext 등) 은 인프라-도메인 매핑이라 service 가 책임지고,
+        // DTO 는 plain types 만 알도록 둔다 (Spring Data 결합 격리).
         return new MessageListResult(
                 slice.getContent().stream().map(MessageResult::from).toList(),
                 command.page(),

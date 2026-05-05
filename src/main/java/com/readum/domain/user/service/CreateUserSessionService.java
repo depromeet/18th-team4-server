@@ -19,6 +19,6 @@ public class CreateUserSessionService {
     public CreateUserSessionResult execute() {
         UUID sessionId = UUID.randomUUID();
         User saved = userRepository.save(User.create(sessionId));
-        return new CreateUserSessionResult(saved.getId(), sessionId, saved.getCreatedAt());
+        return CreateUserSessionResult.from(saved, sessionId);
     }
 }

@@ -24,6 +24,6 @@ public class CompleteOnboardingService {
             user.completeOnboarding();
         }
 
-        return new CompleteOnboardingResult(user.isOnboardingCompleted());
+        return CompleteOnboardingResult.from(user);
     }
 }
