@@ -5,7 +5,10 @@ import com.readum.domain.aiChat.out.AiChatClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AbstractMessage;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -27,14 +30,14 @@ public class AiChatClientImpl implements AiChatClient {
                 .doOnNext(this::logUsageIfPresent)
                 .doOnError(e -> log.error("[Stream] OpenAI API 호출 실패", e))
                 .mapNotNull(chatResponse -> Optional.ofNullable(chatResponse.getResult())
-                        .map(result -> result.getOutput())
-                        .map(output -> output.getText())
+                        .map(Generation::getOutput)
+                        .map(AbstractMessage::getText)
                         .orElse(null));
     }
 
     private void logUsageIfPresent(ChatResponse chatResponse) {
-        Optional.ofNullable(chatResponse.getMetadata())
-                .map(metadata -> metadata.getUsage())
+        Optional.of(chatResponse.getMetadata())
+                .map(ChatResponseMetadata::getUsage)
                 .filter(usage -> usage.getTotalTokens() > 0)
                 .ifPresent(usage -> log.info("[Stream Token Usage] Prompt tokens: {}, Completion tokens: {}, Total tokens: {}",
                         usage.getPromptTokens(),
