@@ -1,7 +1,9 @@
 package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatSession;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -30,4 +32,15 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
             @Param("sessionId") Long sessionId,
             @Param("userId") Long userId
     );
+
+    /**
+     * 감상문 초안 생성 시 동시 요청에 대한 중복 처리 방지를 위한 비관적 락 조회.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select aiChatSession
+              from AiChatSession aiChatSession
+             where aiChatSession.id = :id
+            """)
+    Optional<AiChatSession> findByIdForUpdate(@Param("id") Long id);
 }

@@ -36,6 +36,18 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
     );
 
     /**
+     * 감상문 초안 생성용. FAILED 메시지는 제외하고 createdAt 오름차순으로 모든 유효 메시지를 조회한다.
+     */
+    @Query("""
+            select aiChatMessage
+              from AiChatMessage aiChatMessage
+             where aiChatMessage.sessionId = :sessionId
+               and aiChatMessage.status <> com.readum.model.aiChat.entity.AiChatMessage.Status.FAILED
+             order by aiChatMessage.createdAt asc
+            """)
+    List<AiChatMessage> findValidMessagesBySessionIdOrderByCreatedAtAsc(@Param("sessionId") Long sessionId);
+
+    /**
      * 사용자별 burst rate-limit 검사를 위한 카운트.
      * since 이후 생성된 USER role 메시지 수를, 소유자(userId) 가 자신의 UserBook 으로 만든 모든 세션에서 합산한다.
      * AiChatSessionRepository.findByIdAndOwner 와 동일한 패턴으로 EXISTS 서브쿼리를 거쳐

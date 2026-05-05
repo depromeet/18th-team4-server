@@ -2,15 +2,18 @@ package com.readum.presentation.controller.aiChat;
 
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
+import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
+import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateResponse;
 import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
+import com.readum.presentation.controller.aiChat.dto.SummaryDraftResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -41,6 +44,7 @@ public class AiChatController {
     private final AiChatSessionCreateService aiChatSessionCreateService;
     private final AiChatMessageSendService aiChatMessageSendService;
     private final AiChatMessageSearchService aiChatMessageSearchService;
+    private final SummaryDraftService summaryDraftService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
 
     @Operation(
@@ -163,5 +167,26 @@ public class AiChatController {
     ) {
         MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userId, sessionId));
         return GlobalApiResponse.ok(MessageListResponse.from(result));
+    }
+
+    @Operation(
+            summary = "감상문 초안 생성",
+            description = "AI 채팅 세션의 대화 내용을 바탕으로 감상문 초안(제목·본문·인상 깊은 구절)을 생성하고 세션을 종료한다. " +
+                    "누적 토큰이 임계값에 미치지 못하면 422 를 반환한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "감상문 초안 생성 성공"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
+            @ApiResponse(responseCode = "409", description = "이미 감상문이 작성된 세션"),
+            @ApiResponse(responseCode = "422", description = "누적 토큰 부족으로 초안 생성 불가")
+    })
+    @PostMapping("/sessions/{sessionId}/summary-draft")
+    public ResponseEntity<GlobalApiResponse<SummaryDraftResponse>> createSummaryDraft(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId
+    ) {
+        SummaryDraftResult result = summaryDraftService.execute(sessionId, userId);
+        return GlobalApiResponse.ok(SummaryDraftResponse.from(result));
     }
 }

@@ -68,8 +68,7 @@ public class UserController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공"),
-            @ApiResponse(responseCode = "400", description = "user_session 쿠키 누락"),
-            @ApiResponse(responseCode = "404", description = "세션에 해당하는 사용자 미존재")
+            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
     })
     @GetMapping("/me")
     public ResponseEntity<GlobalApiResponse<UserSessionInfoResponse>> getSessionInfo(
@@ -84,8 +83,7 @@ public class UserController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "온보딩 완료 처리 성공"),
-            @ApiResponse(responseCode = "400", description = "user_session 쿠키 누락"),
-            @ApiResponse(responseCode = "404", description = "세션에 해당하는 사용자 미존재")
+            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
     })
     @PostMapping("/me/onboarding")
     public ResponseEntity<GlobalApiResponse<CompleteOnboardingResponse>> completeOnboarding(

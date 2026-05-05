@@ -11,6 +11,7 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.exception.UnprocessableEntityException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
@@ -54,6 +55,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<GlobalApiResponse<?>> handleNotFound(NotFoundException ex) {
         log.warn("Not found: {}", ex.getErrorCode().getMessage());
         return GlobalApiResponse.error(HttpStatus.NOT_FOUND, ex.getErrorCode().getMessage());
+    }
+
+    // 도메인 비즈니스 예외 - 처리 불가 엔티티 (422)
+    @ExceptionHandler(UnprocessableEntityException.class)
+    public ResponseEntity<GlobalApiResponse<?>> handleUnprocessableEntity(UnprocessableEntityException ex) {
+        log.warn("Unprocessable entity: {}", ex.getErrorCode().getMessage());
+        return GlobalApiResponse.error(HttpStatus.UNPROCESSABLE_ENTITY, ex.getErrorCode().getMessage());
     }
 
     // 도메인 비즈니스 예외 - 상태 충돌
@@ -127,11 +135,11 @@ public class GlobalExceptionHandler {
         return GlobalApiResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    // @CookieValue(required = true) 로 선언된 쿠키가 요청에 없을 때
+    // @CookieValue(required = true) 로 선언된 쿠키가 요청에 없을 때 (user_session 등 인증 쿠키 → 401)
     @ExceptionHandler(MissingRequestCookieException.class)
     public ResponseEntity<GlobalApiResponse<?>> handleMissingCookie(MissingRequestCookieException ex) {
-        log.debug("Missing cookie: {}", ex.getCookieName());
-        return GlobalApiResponse.error(HttpStatus.BAD_REQUEST, "필수 쿠키가 없습니다: " + ex.getCookieName());
+        log.warn("Missing cookie: {}", ex.getCookieName());
+        return GlobalApiResponse.error(HttpStatus.UNAUTHORIZED, "필수 쿠키가 없습니다: " + ex.getCookieName());
     }
 
     // @Valid 어노테이션 검증 실패 (필드 제약 조건 위반)

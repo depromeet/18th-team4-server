@@ -44,8 +44,7 @@ public class AuthController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "재발급 성공"),
-            @ApiResponse(responseCode = "400", description = "Refresh Token 쿠키 누락"),
-            @ApiResponse(responseCode = "401", description = "Refresh Token 만료/무효 또는 재사용 감지")
+            @ApiResponse(responseCode = "401", description = "Refresh Token 누락/만료/무효 또는 재사용 감지")
     })
     @PostMapping("/refresh")
     public ResponseEntity<GlobalApiResponse<TokenRefreshResponse>> refresh(
