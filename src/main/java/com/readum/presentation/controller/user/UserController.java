@@ -6,12 +6,14 @@ import com.readum.domain.user.dto.UserSessionInfoResult;
 import com.readum.domain.user.service.CompleteOnboardingService;
 import com.readum.domain.user.service.CreateUserSessionService;
 import com.readum.domain.user.service.UserSearchService;
-import com.readum.presentation.common.ApiResponse;
+import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.user.dto.CompleteOnboardingResponse;
 import com.readum.presentation.controller.user.dto.CreateUserSessionResponse;
 import com.readum.presentation.controller.user.dto.UserSessionInfoResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -26,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
 
+@Tag(name = "사용자 세션", description = "사용자 세션 발급 / 조회 / 온보딩 완료 처리")
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
@@ -42,55 +45,51 @@ public class UserController {
     private boolean sessionCookieSecure;
 
     @Operation(
-            summary = "익명 사용자 세션 생성",
-            description = "UUID 기반 세션 ID를 발급하고 user_session 쿠키에 설정한다. " +
-                    "소셜 로그인 전 익명 사용자 식별에 사용된다."
+            summary = "사용자 세션 생성",
+            description = "신규 익명 세션을 생성하고 user_session 쿠키(HttpOnly, 365일)를 발급한다. " +
+                    "이미 쿠키가 있어도 새로 발급된다."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "세션 생성 성공"),
+            @ApiResponse(responseCode = "201", description = "세션 생성 성공")
     })
     @PostMapping("/sessions")
-    public ResponseEntity<ApiResponse<CreateUserSessionResponse>> createSession() {
+    public ResponseEntity<GlobalApiResponse<CreateUserSessionResponse>> createSession() {
         CreateUserSessionResult result = createUserSessionService.execute();
 
         ResponseCookie cookie = buildSessionCookie(result.sessionId().toString(), SESSION_COOKIE_MAX_AGE_SECONDS);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(new ApiResponse<>(CreateUserSessionResponse.from(result), null));
+                .body(new GlobalApiResponse<>(CreateUserSessionResponse.from(result), null));
     }
 
     @Operation(
-            summary = "세션 정보 조회",
-            description = "user_session 쿠키로 사용자를 식별하고 온보딩 완료 여부, 책장 도서 등록 여부, " +
-                    "마지막 선택 도서 ID를 반환한다."
+            summary = "현재 세션 정보 조회",
+            description = "user_session 쿠키로 사용자의 세션 정보(온보딩 완료 여부 등)를 조회한다."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "user_session 쿠키 누락"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "유효하지 않은 세션"),
+            @ApiResponse(responseCode = "200", description = "조회 성공"),
+            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
     })
     @GetMapping("/me")
-    public ResponseEntity<ApiResponse<UserSessionInfoResponse>> getSessionInfo(
+    public ResponseEntity<GlobalApiResponse<UserSessionInfoResponse>> getSessionInfo(
             @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
         UserSessionInfoResult result = userSearchService.findSessionInfo(sessionId);
-        return ApiResponse.ok(UserSessionInfoResponse.from(result));
+        return GlobalApiResponse.ok(UserSessionInfoResponse.from(result));
     }
 
     @Operation(
             summary = "온보딩 완료 처리",
-            description = "user_session 쿠키로 사용자를 식별하고 온보딩 완료 상태로 전환한다. " +
-                    "이미 완료된 경우에도 멱등 처리되어 200을 반환한다."
+            description = "현재 세션의 사용자에 대해 온보딩 완료 플래그를 true 로 갱신한다."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "온보딩 완료 처리 성공"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "user_session 쿠키 누락"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "유효하지 않은 세션"),
+            @ApiResponse(responseCode = "200", description = "온보딩 완료 처리 성공"),
+            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
     })
     @PostMapping("/me/onboarding")
-    public ResponseEntity<ApiResponse<CompleteOnboardingResponse>> completeOnboarding(
+    public ResponseEntity<GlobalApiResponse<CompleteOnboardingResponse>> completeOnboarding(
             @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
         CompleteOnboardingResult result = completeOnboardingService.execute(sessionId);
-        return ApiResponse.ok(CompleteOnboardingResponse.from(result));
+        return GlobalApiResponse.ok(CompleteOnboardingResponse.from(result));
     }
 
     private ResponseCookie buildSessionCookie(String value, long maxAgeSeconds) {

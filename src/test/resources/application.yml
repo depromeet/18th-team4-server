@@ -17,14 +17,25 @@ spring:
       hibernate:
         format_sql: true
 
-jwt:
-  secret: dGVzdHNlY3JldHRlc3RzZWNyZXR0ZXN0c2VjcmV0dGVzdA==
-  issuer: readum-test
+auth:
   access-token-ttl: PT30M
   refresh-token-ttl: P14D
   refresh-grace-period: PT3S
+
+jwt:
+  secret: dGVzdHNlY3JldHRlc3RzZWNyZXR0ZXN0c2VjcmV0dGVzdA==
+  issuer: readum-test
   refresh-cookie-secure: false
   blacklist-max-size: 10000
+
+ai-chat:
+  context-window:
+    max-turns: 20
+  message:
+    max-content-length: 4000
+  rate-limit:
+    count-period-seconds: 10
+    max-message-count: 5
 
 aladin:
   ttb-key: test-ttb-key

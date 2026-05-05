@@ -1,9 +1,10 @@
 package com.readum.domain.auth.service;
 
+import com.readum.domain.auth.config.AuthProperties;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.dto.TokenIssueCommand;
 import com.readum.domain.auth.dto.TokenPair;
-import com.readum.domain.auth.jwt.JwtTokenProvider;
+import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.model.auth.entity.RefreshToken;
 import com.readum.model.auth.repository.RefreshTokenRepository;
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,10 @@ import static org.mockito.Mockito.verify;
 class TokenIssueServiceTest {
 
     @Mock
-    private JwtTokenProvider jwtTokenProvider;
+    private TokenGenerator tokenGenerator;
+
+    @Mock
+    private AuthProperties authProperties;
 
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
@@ -41,10 +45,10 @@ class TokenIssueServiceTest {
         Duration accessTtl = Duration.ofMinutes(30);
         Duration refreshTtl = Duration.ofDays(14);
 
-        given(jwtTokenProvider.generateAccessToken(eq(userId), eq(role), anyString())).willReturn("access-token");
-        given(jwtTokenProvider.generateRefreshToken(any(RefreshTokenPayload.class))).willReturn("refresh-token");
-        given(jwtTokenProvider.accessTokenTtl()).willReturn(accessTtl);
-        given(jwtTokenProvider.refreshTokenTtl()).willReturn(refreshTtl);
+        given(tokenGenerator.generateAccessToken(eq(userId), eq(role), anyString())).willReturn("access-token");
+        given(tokenGenerator.generateRefreshToken(any(RefreshTokenPayload.class))).willReturn("refresh-token");
+        given(authProperties.accessTokenTtl()).willReturn(accessTtl);
+        given(authProperties.refreshTokenTtl()).willReturn(refreshTtl);
 
         TokenPair pair = tokenIssueService.execute(new TokenIssueCommand(userId, role));
 

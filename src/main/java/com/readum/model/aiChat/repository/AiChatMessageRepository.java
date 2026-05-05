@@ -1,20 +1,80 @@
 package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatMessage;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Long> {
 
+    Slice<AiChatMessage> findBySessionIdOrderByCreatedAtDescIdDesc(Long sessionId, Pageable pageable);
+
+    /**
+     * 컨텍스트 윈도우용 최근 메시지 조회.
+     * status=COMPLETED 인 USER/ASSISTANT 메시지만 최신순으로 가져온다 (FAILED 메시지 제외).
+     */
+    default List<AiChatMessage> findRecentForContextWindow(Long sessionId, Pageable pageable) {
+        return findBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+                sessionId,
+                AiChatMessage.Status.COMPLETED,
+                List.of(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT),
+                pageable
+        );
+    }
+
+    List<AiChatMessage> findBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+            Long sessionId,
+            AiChatMessage.Status status,
+            Collection<AiChatMessage.Role> roles,
+            Pageable pageable
+    );
+
+    /**
+     * 감상문 초안 생성용. FAILED 메시지는 제외하고 createdAt 오름차순으로 모든 유효 메시지를 조회한다.
+     */
     @Query("""
-            SELECT aiChatMessage
-              FROM AiChatMessage aiChatMessage
-             WHERE aiChatMessage.sessionId = :sessionId
-               AND aiChatMessage.status <> com.readum.model.aiChat.entity.AiChatMessage.Status.FAILED
-             ORDER BY aiChatMessage.createdAt ASC
+            select aiChatMessage
+              from AiChatMessage aiChatMessage
+             where aiChatMessage.sessionId = :sessionId
+               and aiChatMessage.status <> com.readum.model.aiChat.entity.AiChatMessage.Status.FAILED
+             order by aiChatMessage.createdAt asc
             """)
     List<AiChatMessage> findValidMessagesBySessionIdOrderByCreatedAtAsc(@Param("sessionId") Long sessionId);
+
+    /**
+     * 사용자별 burst rate-limit 검사를 위한 카운트.
+     * since 이후 생성된 USER role 메시지 수를, 소유자(userId) 가 자신의 UserBook 으로 만든 모든 세션에서 합산한다.
+     * AiChatSessionRepository.findByIdAndOwner 와 동일한 패턴으로 EXISTS 서브쿼리를 거쳐
+     * AiChatMessage → AiChatSession → UserBook → user_id 매핑을 수행한다.
+     * role 은 FQCN 노이즈를 피하기 위해 파라미터로 바인딩하고, default 메서드가 USER 로 고정해 노출한다.
+     */
+    @Query("""
+            select count(aiChatMessage)
+              from AiChatMessage aiChatMessage
+             where aiChatMessage.role = :role
+               and aiChatMessage.createdAt >= :since
+               and exists (
+                     select 1
+                       from AiChatSession aiChatSession
+                          , UserBook userBook
+                      where aiChatSession.id = aiChatMessage.sessionId
+                        and userBook.id = aiChatSession.userBookId
+                        and userBook.userId = :userId
+                   )
+            """)
+    long countRecentMessagesByRoleAndOwner(
+            @Param("role") AiChatMessage.Role role,
+            @Param("userId") Long userId,
+            @Param("since") LocalDateTime since
+    );
+
+    default long countRecentUserMessagesByOwner(Long userId, LocalDateTime since) {
+        return countRecentMessagesByRoleAndOwner(AiChatMessage.Role.USER, userId, since);
+    }
 }
