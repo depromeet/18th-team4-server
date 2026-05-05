@@ -7,11 +7,15 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -31,8 +35,16 @@ class AiChatSessionTitleServiceTest {
     @Mock
     private AiChatTitleClient aiChatTitleClient;
 
-    @InjectMocks
     private AiChatSessionTitleService titleService;
+
+    @BeforeEach
+    void setUp() {
+        titleService = new AiChatSessionTitleService(
+                aiChatSessionRepository,
+                aiChatTitleClient,
+                new NoopTransactionManager()
+        );
+    }
 
     @Test
     void 세션이_존재하고_LLM_이_제목을_반환하면_세션_title_이_갱신된다() {
@@ -41,6 +53,7 @@ class AiChatSessionTitleServiceTest {
                 sessionId, 100L, AiChatSession.Status.ACTIVE,
                 1, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
+        given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
         given(aiChatTitleClient.generate("작가의 의도가 뭐야"))
                 .willReturn("작가의 의도 분석");
@@ -53,7 +66,7 @@ class AiChatSessionTitleServiceTest {
     @Test
     void 세션이_없으면_NotFoundException_을_던지고_LLM_은_호출되지_않는다() {
         Long sessionId = 7L;
-        given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.empty());
+        given(aiChatSessionRepository.existsById(sessionId)).willReturn(false);
 
         assertThatThrownBy(() -> titleService.execute(new GenerateSessionTitleCommand(sessionId, "질문")))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
@@ -70,7 +83,7 @@ class AiChatSessionTitleServiceTest {
                 sessionId, 100L, AiChatSession.Status.ACTIVE,
                 1, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
-        given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
+        given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
         given(aiChatTitleClient.generate("질문")).willReturn("   ");
 
         titleService.execute(new GenerateSessionTitleCommand(sessionId, "질문"));
@@ -85,6 +98,7 @@ class AiChatSessionTitleServiceTest {
                 sessionId, 100L, AiChatSession.Status.ACTIVE,
                 1, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
+        given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
         String longTitle = "가".repeat(150);
         given(aiChatTitleClient.generate("질문")).willReturn(longTitle);
@@ -92,5 +106,23 @@ class AiChatSessionTitleServiceTest {
         titleService.execute(new GenerateSessionTitleCommand(sessionId, "질문"));
 
         assertThat(session.getTitle()).hasSize(100);
+    }
+
+    /**
+     * TransactionTemplate 가 콜백을 그대로 실행하도록 한 테스트 전용 noop 매니저.
+     */
+    private static final class NoopTransactionManager implements PlatformTransactionManager {
+        @Override
+        public TransactionStatus getTransaction(TransactionDefinition definition) {
+            return new SimpleTransactionStatus();
+        }
+
+        @Override
+        public void commit(TransactionStatus status) {
+        }
+
+        @Override
+        public void rollback(TransactionStatus status) {
+        }
     }
 }

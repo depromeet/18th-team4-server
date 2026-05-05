@@ -4,12 +4,11 @@ import com.readum.domain.aiChat.dto.GenerateSessionTitleCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatTitleClient;
 import com.readum.domain.exception.NotFoundException;
-import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 채팅 세션의 제목을 생성·갱신하는 Command 서비스.
@@ -19,22 +18,41 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class AiChatSessionTitleService {
 
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatTitleClient aiChatTitleClient;
+    private final TransactionTemplate transactionTemplate;
 
-    @Transactional
+    public AiChatSessionTitleService(
+            AiChatSessionRepository aiChatSessionRepository,
+            AiChatTitleClient aiChatTitleClient,
+            PlatformTransactionManager transactionManager
+    ) {
+        this.aiChatSessionRepository = aiChatSessionRepository;
+        this.aiChatTitleClient = aiChatTitleClient;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+    }
+
+    /**
+     * LLM 호출 동안 DB 커넥션을 잡지 않도록 트랜잭션을 두 단계로 쪼갠다.
+     * 1) existsById 로 세션 존재만 짧게 검증 (SimpleJpaRepository 의 자동 readOnly tx)
+     * 2) 트랜잭션 밖에서 LLM 호출
+     * 3) findById + updateTitle 만 짧은 트랜잭션으로 묶어 dirty-check flush 를 보장
+     */
     public void execute(GenerateSessionTitleCommand command) {
-        AiChatSession session = aiChatSessionRepository.findById(command.sessionId())
-                .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+        if (!aiChatSessionRepository.existsById(command.sessionId())) {
+            throw new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND);
+        }
 
         String generated = aiChatTitleClient.generate(command.firstUserMessage());
         if (generated == null || generated.isBlank()) {
             log.warn("세션 제목 생성 결과가 비어 있어 갱신을 skip 한다 sessionId={}", command.sessionId());
             return;
         }
-        session.updateTitle(generated);
+
+        transactionTemplate.executeWithoutResult(status ->
+                aiChatSessionRepository.findById(command.sessionId())
+                        .ifPresent(session -> session.updateTitle(generated)));
     }
 }
