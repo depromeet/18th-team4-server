@@ -7,8 +7,8 @@ import com.readum.domain.user.userbook.dto.UserBookCreateCommand;
 import com.readum.domain.user.userbook.dto.UserBookCreateResult;
 import com.readum.domain.user.userbook.exception.UserBookErrorCode;
 import com.readum.model.book.entity.Book;
-import com.readum.model.user.entity.UserBook;
 import com.readum.model.book.repository.BookRepository;
+import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -50,25 +50,11 @@ public class UserBookCreateService {
         // 새 트랜잭션으로 재조회 후 409로 전환한다.
         try {
             UserBook saved = userBookRepository.save(UserBook.create(command.userId(), book.getId()));
-            return toResult(saved, book);
+            return UserBookCreateResult.from(saved, book);
         } catch (DataIntegrityViolationException ex) {
             UserBook raced = userBookConflictReader.find(command.userId(), book.getId())
                     .orElseThrow(() -> ex);
-            throw new ConflictException(UserBookErrorCode.ALREADY_EXISTS, toResult(raced, book));
+            throw new ConflictException(UserBookErrorCode.ALREADY_EXISTS, UserBookCreateResult.from(raced, book));
         }
-    }
-
-    private UserBookCreateResult toResult(UserBook userBook, Book book) {
-        return new UserBookCreateResult(
-                userBook.getId(),
-                userBook.getUserId(),
-                book.getExternalId(),
-                book.getTitle(),
-                book.getAuthors(),
-                book.getPublisher(),
-                book.getPublishedYear(),
-                book.getCoverUrl(),
-                userBook.getCreatedAt()
-        );
     }
 }

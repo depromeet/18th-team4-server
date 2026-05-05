@@ -194,6 +194,12 @@ EOF
 |---|---|
 | fail-fast | 즉시 실패 응답 / 호출을 빠르게 끊는다 |
 | silent fallback | 빈 결과 대신 다른 응답으로 조용히 바뀜 |
+| fire-and-forget | 결과를 기다리지 않고 비동기 실행 / 응답 대기 없이 백그라운드에서 실행 |
+| swallow (예외를 swallow) | 예외를 잡아 로그만 남기고 외부로 안 던짐 |
+| happy path | 정상 흐름 |
+| best-effort | 가능한 범위에서 시도, 실패해도 통과 |
+| short-circuit | 조건 만족 시 이후 단계 건너뜀 |
+| noop | 아무 일도 안 함 |
 | ROI | 비용 대비 효용 / 그만큼의 가치가 없음 |
 | SoT (Source of Truth) | 데이터 출처 기준 / 정답을 갖는 곳 |
 | stateless | 상태 저장 없이 / 상태를 두지 않고 |
@@ -220,7 +226,7 @@ EOF
 ## 안티패턴 (피할 것)
 
 - 단순 코드 diff 나열 ("X.java 파일 추가, Y.java 수정") — 기능/이유 관점으로 재구성.
-- 추상 영어 jargon (fail-fast, silent fallback, ROI, SoT, stateless 등) — 위 어휘 가이드대로 한국어로 풀어 쓰기.
+- 추상 영어 jargon (fail-fast, silent fallback, fire-and-forget, swallow, happy path, best-effort, noop, ROI, SoT, stateless 등) — 위 어휘 가이드대로 한국어로 풀어 쓰기.
 - 영문 본문, 영문 섹션 헤더 (`## Summary`, `## Test plan`) — 한국어로.
 - 사용자 confirm 없이 `gh pr create` 자동 호출 — 반드시 본문 보여주고 OK 받기.
 - 미커밋 변경이 남은 채로 PR 생성 — commit 부터.

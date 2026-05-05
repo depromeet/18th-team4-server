@@ -1,18 +1,18 @@
 package com.readum.presentation.controller.auth;
 
 import com.readum.domain.auth.dto.TokenPair;
-import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.auth.service.LogoutService;
 import com.readum.domain.auth.service.TokenRefreshService;
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.presentation.common.ApiResponse;
+import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.common.security.JwtAuthenticationFilter;
 import com.readum.presentation.controller.auth.dto.LogoutRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshRequest;
 import com.readum.presentation.controller.auth.dto.TokenRefreshResponse;
-import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag(name = "인증", description = "Access Token 재발급 및 로그아웃")
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
@@ -37,17 +38,16 @@ public class AuthController {
     private boolean refreshCookieSecure;
 
     @Operation(
-            summary = "액세스 토큰 갱신",
-            description = "refresh_token 쿠키를 검증하고 새 액세스 토큰과 리프레시 토큰을 발급한다. " +
-                    "토큰이 만료·폐기·재사용 감지된 경우 401을 반환한다."
+            summary = "Access Token 재발급",
+            description = "쿠키의 Refresh Token 으로 새 Access/Refresh Token Pair 를 발급한다. " +
+                    "재발급된 Refresh Token 은 HttpOnly 쿠키로 다시 내려준다."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "토큰 갱신 성공"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "refresh_token 쿠키 누락"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "토큰 무효·만료·재사용 감지"),
+            @ApiResponse(responseCode = "200", description = "재발급 성공"),
+            @ApiResponse(responseCode = "401", description = "Refresh Token 누락/만료/무효 또는 재사용 감지")
     })
     @PostMapping("/refresh")
-    public ResponseEntity<ApiResponse<TokenRefreshResponse>> refresh(
+    public ResponseEntity<GlobalApiResponse<TokenRefreshResponse>> refresh(
             @CookieValue(name = REFRESH_TOKEN_COOKIE) String refreshToken) {
         TokenRefreshRequest request = new TokenRefreshRequest(refreshToken);
         TokenPair pair = tokenRefreshService.execute(request.toCommand());
@@ -55,16 +55,16 @@ public class AuthController {
         ResponseCookie cookie = buildRefreshTokenCookie(pair.refreshToken(), pair.refreshTokenTtl().toSeconds());
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(new ApiResponse<>(TokenRefreshResponse.from(pair), null));
+                .body(new GlobalApiResponse<>(TokenRefreshResponse.from(pair), null));
     }
 
     @Operation(
             summary = "로그아웃",
-            description = "리프레시 토큰을 폐기하고 액세스 토큰을 블랙리스트에 등록한다. " +
-                    "쿠키가 없거나 유효하지 않은 토큰이어도 멱등 처리되어 항상 204를 반환한다."
+            description = "Access Token 을 블랙리스트에 등록하고 Refresh Token 을 무효화한다. " +
+                    "Refresh Token 쿠키도 즉시 만료시킨다 (idempotent — 토큰 없어도 204)."
     )
     @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "204", description = "로그아웃 성공"),
+            @ApiResponse(responseCode = "204", description = "로그아웃 성공 (응답 본문 없음)")
     })
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(

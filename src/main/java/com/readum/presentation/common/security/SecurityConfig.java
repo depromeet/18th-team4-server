@@ -26,27 +26,25 @@ public class SecurityConfig {
                 .httpBasic(httpBasic -> httpBasic.disable())
                 .formLogin(formLogin -> formLogin.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // MVP 단계: 인증/인가 비활성화. 모든 요청 허용.
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
-//                .authorizeHttpRequests(auth -> auth
-//                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
-//                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
-//                        .requestMatchers(
-//                                "/v3/api-docs",
-//                                "/v3/api-docs/**",
-//                                "/swagger-ui.html",
-//                                "/swagger-ui/**"
-//                        ).permitAll()
-//                        .anyRequest().authenticated()
-//                )
-//                .exceptionHandling(exception -> exception
-//                        .authenticationEntryPoint(jwtAuthenticationEntryPoint)
-//                        .accessDeniedHandler(jwtAccessDeniedHandler)
-//                )
-//                .addFilterBefore(
-//                        new JwtAuthenticationFilter(tokenAuthenticationService),
-//                        UsernamePasswordAuthenticationFilter.class
-//                )
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
+                        .requestMatchers(
+                                "/v3/api-docs",
+                                "/v3/api-docs/**",
+                                "/swagger-ui.html",
+                                "/swagger-ui/**"
+                        ).permitAll()
+                        .anyRequest().authenticated()
+                )
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(jwtAuthenticationEntryPoint)
+                        .accessDeniedHandler(jwtAccessDeniedHandler)
+                )
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(tokenAuthenticationService),
+                        UsernamePasswordAuthenticationFilter.class
+                )
                 .build();
     }
 }

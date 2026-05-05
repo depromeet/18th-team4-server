@@ -24,6 +24,6 @@ public class AiChatSessionCreateService {
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.USER_BOOK_NOT_FOUND));
 
         AiChatSession saved = aiChatSessionRepository.save(AiChatSession.create(command.userBookId()));
-        return new AiChatSessionCreateResult(saved.getId());
+        return AiChatSessionCreateResult.from(saved);
     }
 }

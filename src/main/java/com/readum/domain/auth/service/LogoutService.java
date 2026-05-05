@@ -4,8 +4,8 @@ import com.readum.domain.auth.dto.LogoutCommand;
 import com.readum.domain.auth.dto.LogoutResult;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
-import com.readum.domain.auth.jwt.JwtTokenProvider;
 import com.readum.domain.auth.out.TokenBlacklistStore;
+import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.model.auth.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +22,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class LogoutService {
 
-    private final JwtTokenProvider jwtTokenProvider;
+    private final TokenGenerator tokenGenerator;
     private final TokenBlacklistStore tokenBlacklistStore;
     private final RefreshTokenRepository refreshTokenRepository;
 
@@ -54,7 +54,7 @@ public class LogoutService {
             return Optional.empty();
         }
         try {
-            ParsedToken parsed = jwtTokenProvider.parse(token);
+            ParsedToken parsed = tokenGenerator.parse(token);
             return parsed.type() == expected ? Optional.of(parsed) : Optional.empty();
         } catch (UnauthorizedException ex) {
             return Optional.empty();

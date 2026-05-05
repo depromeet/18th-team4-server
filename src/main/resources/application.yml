@@ -5,17 +5,28 @@ spring:
 server:
   forward-headers-strategy: framework
 
-jwt:
-  secret: ${JWT_SECRET:}
-  issuer: readum
+auth:
   access-token-ttl: PT30M
   refresh-token-ttl: P14D
   refresh-grace-period: PT3S
+
+jwt:
+  secret: ${JWT_SECRET:}
+  issuer: readum
   refresh-cookie-secure: true
   blacklist-max-size: 10000
 
 user:
   session-cookie-secure: true
+
+ai-chat:
+  context-window:
+    max-turns: 20            # 1턴 = USER 메시지 1 + ASSISTANT 메시지 1
+  message:
+    max-content-length: 4000
+  rate-limit:
+    count-period-seconds: 10   # 카운트 기간 (초). 최근 N 초 동안의 메시지를 센다.
+    max-message-count: 5       # 카운트 기간 안에 허용되는 USER 메시지 수. 초과 시 HTTP 429.
 
 springdoc:
   api-docs:

@@ -1,9 +1,11 @@
-package com.readum.domain.auth.jwt;
+package com.readum.infrastructure.security.jwt;
 
+import com.readum.domain.auth.config.AuthProperties;
 import com.readum.domain.auth.dto.ParsedToken;
 import com.readum.domain.auth.dto.ParsedToken.TokenType;
 import com.readum.domain.auth.dto.RefreshTokenPayload;
 import com.readum.domain.auth.exception.AuthErrorCode;
+import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.domain.exception.UnauthorizedException;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
@@ -11,17 +13,16 @@ import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.micrometer.common.util.StringUtils;
 import jakarta.annotation.PostConstruct;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
 
-@Service
-public class JwtTokenProvider {
+@Component
+public class JwtTokenGeneratorImpl implements TokenGenerator {
 
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_TYP = "typ";
@@ -29,16 +30,18 @@ public class JwtTokenProvider {
     private static final String TYP_REFRESH = "refresh";
     private static final int HS256_MIN_KEY_BYTES = 32;
 
-    private final JwtProperties properties;
+    private final JwtProperties jwtProperties;
+    private final AuthProperties authProperties;
     private SecretKey signingKey;
 
-    public JwtTokenProvider(JwtProperties properties) {
-        this.properties = properties;
+    public JwtTokenGeneratorImpl(JwtProperties jwtProperties, AuthProperties authProperties) {
+        this.jwtProperties = jwtProperties;
+        this.authProperties = authProperties;
     }
 
     @PostConstruct
     void init() {
-        String secret = properties.secret();
+        String secret = jwtProperties.secret();
         if (StringUtils.isBlank(secret)) {
             throw new IllegalStateException(
                     "jwt.secret 이 비어있습니다. 환경변수 JWT_SECRET 또는 application-{profile}.yml 의 jwt.secret 을 설정하세요."
@@ -62,11 +65,13 @@ public class JwtTokenProvider {
         this.signingKey = new SecretKeySpec(decoded, "HmacSHA256");
     }
 
+    @Override
     public String generateAccessToken(Long userId, String role, String jwtId) {
         Instant now = Instant.now();
-        return buildToken(userId, role, jwtId, TYP_ACCESS, now, now.plus(properties.accessTokenTtl()));
+        return buildToken(userId, role, jwtId, TYP_ACCESS, now, now.plus(authProperties.accessTokenTtl()));
     }
 
+    @Override
     public String generateRefreshToken(RefreshTokenPayload payload) {
         return buildToken(
                 payload.userId(),
@@ -80,7 +85,7 @@ public class JwtTokenProvider {
 
     private String buildToken(Long userId, String role, String jwtId, String typ, Instant issuedAt, Instant expiresAt) {
         return Jwts.builder()
-                .issuer(properties.issuer())
+                .issuer(jwtProperties.issuer())
                 .subject(String.valueOf(userId))
                 .id(jwtId)
                 .claim(CLAIM_TYP, typ)
@@ -91,12 +96,13 @@ public class JwtTokenProvider {
                 .compact();
     }
 
+    @Override
     public ParsedToken parse(String token) {
         Claims claims;
         try {
             claims = Jwts.parser()
                     .verifyWith(signingKey)
-                    .requireIssuer(properties.issuer())
+                    .requireIssuer(jwtProperties.issuer())
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
@@ -127,17 +133,5 @@ public class JwtTokenProvider {
                 claims.getExpiration().toInstant(),
                 type
         );
-    }
-
-    public Duration accessTokenTtl() {
-        return properties.accessTokenTtl();
-    }
-
-    public Duration refreshTokenTtl() {
-        return properties.refreshTokenTtl();
-    }
-
-    public Duration refreshGracePeriod() {
-        return properties.refreshGracePeriod();
     }
 }
