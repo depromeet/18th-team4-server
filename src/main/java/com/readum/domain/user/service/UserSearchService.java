@@ -18,6 +18,13 @@ public class UserSearchService {
     private final UserBookRepository userBookRepository;
 
     @Transactional(readOnly = true)
+    public Long findUserId(String sessionId) {
+        return userRepository.findBySessionId(sessionId)
+                .map(User::getId)
+                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
+    }
+
+    @Transactional(readOnly = true)
     public UserSessionInfoResult findSessionInfo(String sessionId) {
         User user = userRepository.findBySessionId(sessionId)
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
