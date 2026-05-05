@@ -2,10 +2,13 @@ package com.readum.presentation.controller.aiChat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
+import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
+import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.AiStreamChatService;
+import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
@@ -27,9 +30,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -47,6 +52,9 @@ class AiChatControllerTest {
     private SummaryDraftService summaryDraftService;
 
     @Mock
+    private SummaryDraftSearchService summaryDraftSearchService;
+
+    @Mock
     private UserSearchService userSearchService;
 
     private MockMvc mockMvc;
@@ -58,7 +66,8 @@ class AiChatControllerTest {
     @BeforeEach
     void setUp() {
         AiChatController controller = new AiChatController(
-                aiStreamChatService, aiChatSessionCreateService, summaryDraftService, userSearchService);
+                aiStreamChatService, aiChatSessionCreateService, summaryDraftService,
+                summaryDraftSearchService, userSearchService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
@@ -172,6 +181,87 @@ class AiChatControllerTest {
                 .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         mockMvc.perform(post("/api/v1/ai-chat/chat-sessions/1/summary-draft")
+                        .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.message").value("채팅 세션을 찾을 수 없습니다."));
+    }
+
+    // ── 감상문 초안 생성 가능 여부 조회 ──────────────────────────────────────────────
+
+    @Test
+    void eligibility_정상_요청시_200과_eligible_true를_반환한다() throws Exception {
+        given(userSearchService.findUserId(VALID_SESSION_COOKIE)).willReturn(AUTHENTICATED_USER_ID);
+        given(summaryDraftSearchService.findEligibility(eq(1L), eq(AUTHENTICATED_USER_ID)))
+                .willReturn(new SummaryDraftEligibilityResult(true, null, null));
+
+        mockMvc.perform(get("/api/v1/ai-chat/chat-sessions/1/summary-draft/eligibility")
+                        .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eligible").value(true))
+                .andExpect(jsonPath("$.data.reason").value(nullValue()))
+                .andExpect(jsonPath("$.data.message").value(nullValue()));
+    }
+
+    @Test
+    void eligibility_종료된_세션이면_200과_SESSION_ALREADY_CLOSED를_반환한다() throws Exception {
+        given(userSearchService.findUserId(VALID_SESSION_COOKIE)).willReturn(AUTHENTICATED_USER_ID);
+        given(summaryDraftSearchService.findEligibility(eq(1L), eq(AUTHENTICATED_USER_ID)))
+                .willReturn(new SummaryDraftEligibilityResult(
+                        false,
+                        IneligibleReason.SESSION_ALREADY_CLOSED.name(),
+                        AiChatErrorCode.SESSION_ALREADY_CLOSED.getMessage()
+                ));
+
+        mockMvc.perform(get("/api/v1/ai-chat/chat-sessions/1/summary-draft/eligibility")
+                        .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eligible").value(false))
+                .andExpect(jsonPath("$.data.reason").value("SESSION_ALREADY_CLOSED"))
+                .andExpect(jsonPath("$.data.message").value("이미 감상문이 작성된 세션입니다."));
+    }
+
+    @Test
+    void eligibility_토큰_부족이면_200과_CHAT_VOLUME_NOT_ENOUGH를_반환한다() throws Exception {
+        given(userSearchService.findUserId(VALID_SESSION_COOKIE)).willReturn(AUTHENTICATED_USER_ID);
+        given(summaryDraftSearchService.findEligibility(eq(1L), eq(AUTHENTICATED_USER_ID)))
+                .willReturn(new SummaryDraftEligibilityResult(
+                        false,
+                        IneligibleReason.CHAT_VOLUME_NOT_ENOUGH.name(),
+                        AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH.getMessage()
+                ));
+
+        mockMvc.perform(get("/api/v1/ai-chat/chat-sessions/1/summary-draft/eligibility")
+                        .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eligible").value(false))
+                .andExpect(jsonPath("$.data.reason").value("CHAT_VOLUME_NOT_ENOUGH"))
+                .andExpect(jsonPath("$.data.message").value("감상문 초안을 생성하기에 대화량이 부족합니다."));
+    }
+
+    @Test
+    void eligibility_쿠키가_없으면_401을_반환한다() throws Exception {
+        mockMvc.perform(get("/api/v1/ai-chat/chat-sessions/1/summary-draft/eligibility"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.message", containsString("user_session")));
+    }
+
+    @Test
+    void eligibility_유효하지_않은_쿠키면_401을_반환한다() throws Exception {
+        given(userSearchService.findUserId("invalid-session"))
+                .willThrow(new UnauthorizedException(UserErrorCode.INVALID_SESSION));
+
+        mockMvc.perform(get("/api/v1/ai-chat/chat-sessions/1/summary-draft/eligibility")
+                        .cookie(new Cookie("user_session", "invalid-session")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void eligibility_세션이_없으면_404를_반환한다() throws Exception {
+        given(userSearchService.findUserId(VALID_SESSION_COOKIE)).willReturn(AUTHENTICATED_USER_ID);
+        given(summaryDraftSearchService.findEligibility(eq(1L), eq(AUTHENTICATED_USER_ID)))
+                .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/ai-chat/chat-sessions/1/summary-draft/eligibility")
                         .cookie(new Cookie("user_session", VALID_SESSION_COOKIE)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.message").value("채팅 세션을 찾을 수 없습니다."));

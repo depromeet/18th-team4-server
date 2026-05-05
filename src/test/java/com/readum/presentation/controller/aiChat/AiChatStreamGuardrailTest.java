@@ -39,7 +39,8 @@ class AiChatStreamGuardrailTest {
 
     @BeforeEach
     void setUp() {
-        AiChatController controller = new AiChatController(aiStreamChatService, aiChatSessionCreateService);
+        AiChatController controller = new AiChatController(
+                aiStreamChatService, aiChatSessionCreateService, null, null, null);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
