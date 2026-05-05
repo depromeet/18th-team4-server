@@ -15,13 +15,12 @@ public class SummaryDraftPolicy {
     public static final int MIN_ACCUMULATED_TOKENS = 500;
 
     public SummaryDraftEligibility evaluate(AiChatSession session) {
-        if (session.getStatus() == AiChatSession.Status.CLOSED) {
-            return SummaryDraftEligibility.fail(IneligibleReason.SESSION_ALREADY_CLOSED);
-        }
-        if (session.getAccumulatedTokens() < MIN_ACCUMULATED_TOKENS) {
-            return SummaryDraftEligibility.fail(IneligibleReason.CHAT_VOLUME_NOT_ENOUGH);
-        }
-        return SummaryDraftEligibility.pass();
+        return switch (session.getStatus()) {
+            case CLOSED -> SummaryDraftEligibility.fail(IneligibleReason.SESSION_ALREADY_CLOSED);
+            case ACTIVE -> session.getAccumulatedTokens() < MIN_ACCUMULATED_TOKENS
+                    ? SummaryDraftEligibility.fail(IneligibleReason.CHAT_VOLUME_NOT_ENOUGH)
+                    : SummaryDraftEligibility.pass();
+        };
     }
 
     public void assertEligible(AiChatSession session) {
@@ -30,10 +29,8 @@ public class SummaryDraftPolicy {
             return;
         }
         throw switch (eligibility.reason()) {
-            case SESSION_ALREADY_CLOSED ->
-                    new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED);
-            case CHAT_VOLUME_NOT_ENOUGH ->
-                    new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
+            case SESSION_ALREADY_CLOSED -> new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED);
+            case CHAT_VOLUME_NOT_ENOUGH -> new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
         };
     }
 }
