@@ -3,6 +3,7 @@ package com.readum.domain.aiChat.service;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiSummaryClient;
+import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnprocessableEntityException;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
@@ -49,6 +51,9 @@ class SummaryDraftServiceTest {
 
     @Mock
     private UserBookRepository userBookRepository;
+
+    @Spy
+    private SummaryDraftPolicy summaryDraftPolicy = new SummaryDraftPolicy();
 
     @InjectMocks
     private SummaryDraftService summaryDraftService;
