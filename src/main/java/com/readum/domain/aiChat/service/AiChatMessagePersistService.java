@@ -4,7 +4,6 @@ import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.GenerateSessionTitleCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
-import com.readum.domain.aiChat.history.ChatHistoryBuilder;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatMessage;
@@ -35,7 +34,7 @@ public class AiChatMessagePersistService {
 
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
-    private final ChatHistoryBuilder chatHistoryBuilder;
+    private final AiChatHistorySearchService aiChatHistorySearchService;
     private final AiChatSessionTitleService aiChatSessionTitleService;
 
     /**
@@ -54,7 +53,7 @@ public class AiChatMessagePersistService {
         if (session.isClosed()) {
             throw new BadRequestException(AiChatErrorCode.SESSION_CLOSED);
         }
-        List<HistoryMessage> previousHistory = chatHistoryBuilder.buildPreviousHistory(sessionId);
+        List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);
         aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, normalizedContent));
         session.appendUserMessage();
         if (session.isFirstUserMessage()) {

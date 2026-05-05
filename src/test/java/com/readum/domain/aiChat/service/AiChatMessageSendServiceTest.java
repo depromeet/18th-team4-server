@@ -8,28 +8,31 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
-import com.readum.domain.aiChat.ratelimit.AiChatRateLimiter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -52,7 +55,7 @@ class AiChatMessageSendServiceTest {
     private AiChatClient aiChatClient;
 
     @Mock
-    private AiChatRateLimiter aiChatRateLimiter;
+    private AiChatMessageRepository aiChatMessageRepository;
 
     private final AiChatProperties aiChatProperties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
@@ -64,7 +67,7 @@ class AiChatMessageSendServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiChatMessageSendService(persistService, aiChatClient, aiChatProperties, aiChatRateLimiter);
+        service = new AiChatMessageSendService(persistService, aiChatClient, aiChatProperties, aiChatMessageRepository);
     }
 
     @Test
@@ -106,21 +109,79 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void rate_limiter_가_한도_초과를_던지면_persist_도_LLM_호출도_없이_그대로_전파된다() {
+    void 최근_USER_메시지_카운트가_한도_미만이면_rate_limit_검사를_통과한다() {
         SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
-        TooManyRequestsException thrown = new TooManyRequestsException(
-                AiChatErrorCode.USER_RATE_LIMIT_BURST,
-                new RateLimitInfo(java.time.Duration.ofSeconds(10), 5L, null, 0L, null, null, null)
-        );
-        org.mockito.BDDMockito.willThrow(thrown).given(aiChatRateLimiter).check(1L);
+        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
+                .willReturn(4L);
+        given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
+                .willReturn(List.of());
+        given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
+                new AiChatChunk.Completion(1, 1, 2, null)
+        ));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessage.of(
+                        1L, 7L, AiChatMessage.Role.ASSISTANT, "", null,
+                        1, 1, 2, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                ));
+
+        assertThatCode(() -> service.execute(command).blockLast()).doesNotThrowAnyException();
+    }
+
+    @Test
+    void 최근_USER_메시지_카운트가_한도_도달이면_TooManyRequestsException_을_던진다() {
+        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
+                .willReturn(5L);
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
                 .extracting(TooManyRequestsException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.USER_RATE_LIMIT_BURST);
+                .isEqualTo(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED);
 
         verify(persistService, never()).loadHistoryAndRecordUserMessage(anyLong(), anyLong(), anyString());
         verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
+    }
+
+    @Test
+    void 한도_초과_시_RateLimitInfo_에_retryAfter_와_limit_정보가_담긴다() {
+        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
+                .willReturn(7L);
+
+        assertThatThrownBy(() -> service.execute(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
+                .satisfies(ex -> {
+                    RateLimitInfo info = ex.getRateLimitInfo();
+                    assertThat(info).isNotNull();
+                    assertThat(info.retryAfter()).isEqualTo(Duration.ofSeconds(10));
+                    assertThat(info.limitRequests()).isEqualTo(5L);
+                    assertThat(info.remainingRequests()).isZero();
+                });
+    }
+
+    @Test
+    void rate_limit_카운트_쿼리는_count_period_초만큼_과거_시점부터_조회한다() {
+        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
+                .willReturn(0L);
+        given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
+                .willReturn(List.of());
+        given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
+                new AiChatChunk.Completion(1, 1, 2, null)
+        ));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessage.of(
+                        1L, 7L, AiChatMessage.Role.ASSISTANT, "", null,
+                        1, 1, 2, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                ));
+
+        LocalDateTime before = LocalDateTime.now().minusSeconds(10);
+        service.execute(command).blockLast();
+        LocalDateTime after = LocalDateTime.now().minusSeconds(10);
+
+        ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(aiChatMessageRepository).countRecentUserMessagesByOwner(eq(1L), captor.capture());
+        assertThat(captor.getValue()).isBetween(before, after);
     }
 
     @Test

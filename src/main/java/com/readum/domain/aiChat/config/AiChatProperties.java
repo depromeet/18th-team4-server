@@ -29,13 +29,13 @@ public record AiChatProperties(
     }
 
     /**
-     * 사용자별 burst 호출 차단을 위한 한도. 정밀 정책은 추후 도입.
-     * 현재는 OpenAI 비용 폭주(클라이언트 무한 retry, 키 유출) 방어 용도.
-     * burstWindowSeconds 안에 USER 메시지가 burstMaxCount 회 이상이면 429.
+     * 사용자별 호출 한도. 정밀 정책은 추후 도입 예정이고, 현재는 OpenAI 비용 폭주
+     * (클라이언트 무한 retry, 키 유출) 방어 용도다.
+     * 정책: 최근 countPeriodSeconds 초 안에 USER 메시지가 maxMessageCount 회 이상이면 429.
      */
     public record RateLimit(
-            @Positive int burstWindowSeconds,
-            @Positive int burstMaxCount
+            @Positive int countPeriodSeconds,
+            @Positive int maxMessageCount
     ) {
     }
 }

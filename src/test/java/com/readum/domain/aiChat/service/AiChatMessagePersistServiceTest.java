@@ -3,7 +3,6 @@ package com.readum.domain.aiChat.service;
 import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
-import com.readum.domain.aiChat.history.ChatHistoryBuilder;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatMessage;
@@ -42,7 +41,7 @@ class AiChatMessagePersistServiceTest {
     private AiChatMessageRepository aiChatMessageRepository;
 
     @Mock
-    private ChatHistoryBuilder chatHistoryBuilder;
+    private AiChatHistorySearchService aiChatHistorySearchService;
 
     @Mock
     private AiChatSessionTitleService aiChatSessionTitleService;
@@ -99,7 +98,7 @@ class AiChatMessagePersistServiceTest {
                 0, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(active));
-        given(chatHistoryBuilder.buildPreviousHistory(sessionId)).willReturn(List.of(
+        given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of(
                 new HistoryMessage(HistoryMessage.Role.USER, "이전 질문"),
                 new HistoryMessage(HistoryMessage.Role.ASSISTANT, "이전 응답")
         ));
@@ -112,8 +111,8 @@ class AiChatMessagePersistServiceTest {
         assertThat(result.get(1).content()).isEqualTo("이전 응답");
 
         // history 조회 후 USER 메시지 저장 — 순서 검증 (Hibernate auto-flush 회피)
-        org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(chatHistoryBuilder, aiChatMessageRepository);
-        inOrder.verify(chatHistoryBuilder).buildPreviousHistory(sessionId);
+        org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(aiChatHistorySearchService, aiChatMessageRepository);
+        inOrder.verify(aiChatHistorySearchService).findPreviousHistory(sessionId);
         inOrder.verify(aiChatMessageRepository).save(any(AiChatMessage.class));
 
         // 세션 통계 갱신 확인
@@ -129,7 +128,7 @@ class AiChatMessagePersistServiceTest {
                 0, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(freshSession));
-        given(chatHistoryBuilder.buildPreviousHistory(sessionId)).willReturn(List.of());
+        given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of());
 
         TransactionSynchronizationManager.initSynchronization();
         try {
@@ -153,7 +152,7 @@ class AiChatMessagePersistServiceTest {
                 3, 100, "이미 있는 제목", LocalDateTime.now(), LocalDateTime.now()
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(existingSession));
-        given(chatHistoryBuilder.buildPreviousHistory(sessionId)).willReturn(List.of());
+        given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of());
 
         TransactionSynchronizationManager.initSynchronization();
         try {

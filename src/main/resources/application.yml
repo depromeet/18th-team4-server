@@ -18,8 +18,8 @@ ai-chat:
   message:
     max-content-length: 1000
   rate-limit:
-    burst-window-seconds: 10  # 슬라이딩 윈도우 길이 (초)
-    burst-max-count: 5        # 윈도우 내 USER 메시지 허용 횟수. 초과 시 HTTP 429.
+    count-period-seconds: 10   # 카운트 기간 (초). 최근 N 초 동안의 메시지를 센다.
+    max-message-count: 5       # 카운트 기간 안에 허용되는 USER 메시지 수. 초과 시 HTTP 429.
 
 springdoc:
   api-docs:

@@ -1,4 +1,4 @@
-package com.readum.domain.aiChat.history;
+package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.HistoryMessage;
@@ -16,10 +16,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
 @ExtendWith(MockitoExtension.class)
-class ChatHistoryBuilderTest {
+class AiChatHistorySearchServiceTest {
 
     @Mock
     private AiChatMessageRepository aiChatMessageRepository;
@@ -30,11 +31,11 @@ class ChatHistoryBuilderTest {
             new AiChatProperties.RateLimit(10, 5)
     );
 
-    private ChatHistoryBuilder builder;
+    private AiChatHistorySearchService service;
 
     @BeforeEach
     void setUp() {
-        builder = new ChatHistoryBuilder(aiChatMessageRepository, properties);
+        service = new AiChatHistorySearchService(aiChatMessageRepository, properties);
     }
 
     @Test
@@ -59,7 +60,7 @@ class ChatHistoryBuilderTest {
         given(aiChatMessageRepository.findRecentForContextWindow(sessionId, PageRequest.of(0, 40)))
                 .willReturn(recentDesc);
 
-        List<HistoryMessage> history = builder.buildPreviousHistory(sessionId);
+        List<HistoryMessage> history = service.findPreviousHistory(sessionId);
 
         assertThat(history).hasSize(40);
         assertThat(history.get(0).content()).isEqualTo("내용 1");
@@ -83,7 +84,7 @@ class ChatHistoryBuilderTest {
         given(aiChatMessageRepository.findRecentForContextWindow(sessionId, PageRequest.of(0, 40)))
                 .willReturn(List.of(onlyOne));
 
-        List<HistoryMessage> history = builder.buildPreviousHistory(sessionId);
+        List<HistoryMessage> history = service.findPreviousHistory(sessionId);
 
         assertThat(history).hasSize(1);
         assertThat(history.get(0).content()).isEqualTo("이전 user 메시지");
@@ -95,8 +96,30 @@ class ChatHistoryBuilderTest {
         given(aiChatMessageRepository.findRecentForContextWindow(sessionId, PageRequest.of(0, 40)))
                 .willReturn(List.of());
 
-        List<HistoryMessage> history = builder.buildPreviousHistory(sessionId);
+        List<HistoryMessage> history = service.findPreviousHistory(sessionId);
 
         assertThat(history).isEmpty();
+    }
+
+    @Test
+    void SYSTEM_메시지가_조회_결과에_섞여_들어오면_IllegalStateException_으로_즉시_드러난다() {
+        // repository.findRecentForContextWindow 가 USER/ASSISTANT 만 거른다는 사전 조건이 깨진 케이스.
+        // (저장 경로 또는 조회 필터의 회귀) HistoryMessage.from 의 가드가 이를 fail-fast 로 잡는다.
+        Long sessionId = 7L;
+        AiChatMessage systemLeak = AiChatMessage.of(
+                1L,
+                sessionId,
+                AiChatMessage.Role.SYSTEM,
+                "system prompt",
+                null, null, null, null,
+                AiChatMessage.Status.COMPLETED,
+                LocalDateTime.now()
+        );
+        given(aiChatMessageRepository.findRecentForContextWindow(sessionId, PageRequest.of(0, 40)))
+                .willReturn(List.of(systemLeak));
+
+        assertThatThrownBy(() -> service.findPreviousHistory(sessionId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SYSTEM");
     }
 }
