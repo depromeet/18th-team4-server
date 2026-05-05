@@ -43,6 +43,11 @@ public class AiChatMessagePersistService {
      * 호출 순서 주의: 이전 이력 조회를 USER 메시지 save 전에 수행한다.
      * Hibernate auto-flush 로 인해 save 후에 조회하면 방금 저장한 USER 메시지가
      * 결과에 포함되어 LLM 컨텍스트에 중복으로 들어가게 된다.
+     * 동시성 가정: 같은 세션에 sequential 호출만 들어온다고 본다 (UI 의 전송 중 비활성 +
+     * application.yml 의 ai-chat.rate-limit 으로 1차 방어). 따라서 session 의
+     * userMessageCount read-modify-write 와 isFirstUserMessage() 분기에 락을 걸지 않는다.
+     * 동시 호출이 겹치면 카운트 1회 유실 / 제목 생성 1회 중복이 가능하나 비즈니스 결정에
+     * 영향이 없어 허용. 트래픽 패턴이 바뀌면 @Version 최적화 락 도입을 검토.
      */
     @Transactional
     public List<HistoryMessage> loadHistoryAndRecordUserMessage(
