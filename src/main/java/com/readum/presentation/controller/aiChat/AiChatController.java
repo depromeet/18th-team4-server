@@ -28,7 +28,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -63,10 +63,10 @@ public class AiChatController {
     })
     @PostMapping("/sessions")
     public ResponseEntity<GlobalApiResponse<AiChatSessionCreateResponse>> createSession(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @Valid @RequestBody AiChatSessionCreateRequest request
     ) {
-        AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userId));
+        AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userSessionId));
         return GlobalApiResponse.created(AiChatSessionCreateResponse.from(result));
     }
 
@@ -143,12 +143,12 @@ public class AiChatController {
     })
     @PostMapping(value = "/sessions/{sessionId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<Flux<ServerSentEvent<String>>> sendMessage(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
         Flux<ServerSentEvent<String>> stream = aiChatMessageSendService
-                .execute(request.toCommand(userId, sessionId))
+                .execute(request.toCommand(userSessionId, sessionId))
                 .map(messageStreamSseSerializer::toServerSentEvent);
         return ResponseEntity.ok(stream);
     }
@@ -165,11 +165,11 @@ public class AiChatController {
     })
     @GetMapping("/sessions/{sessionId}/messages")
     public ResponseEntity<GlobalApiResponse<MessageListResponse>> getMessages(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId,
             @Valid @ModelAttribute MessageListRequest request
     ) {
-        MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userId, sessionId));
+        MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userSessionId, sessionId));
         return GlobalApiResponse.ok(MessageListResponse.from(result));
     }
 
@@ -193,10 +193,10 @@ public class AiChatController {
     })
     @GetMapping("/sessions/{sessionId}/summary")
     public ResponseEntity<GlobalApiResponse<SummaryResponse>> getSummary(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId
     ) {
-        SummaryResult result = summarySearchService.findBySessionId(sessionId, userId);
+        SummaryResult result = summarySearchService.findBySessionId(sessionId, userSessionId);
         return GlobalApiResponse.ok(SummaryResponse.from(result));
     }
 
@@ -214,10 +214,10 @@ public class AiChatController {
     })
     @PostMapping("/sessions/{sessionId}/summary-draft")
     public ResponseEntity<GlobalApiResponse<SummaryDraftResponse>> createSummaryDraft(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId
     ) {
-        SummaryDraftResult result = summaryDraftService.execute(sessionId, userId);
+        SummaryDraftResult result = summaryDraftService.execute(sessionId, userSessionId);
         return GlobalApiResponse.ok(SummaryDraftResponse.from(result));
     }
 }
