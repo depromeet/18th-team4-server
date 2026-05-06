@@ -91,6 +91,26 @@ class SummaryDraftPolicyTest {
         assertThat(result.reason()).isEqualTo(IneligibleReason.SESSION_ALREADY_CLOSED);
     }
 
+    @Test
+    void 요약중인_세션이면_SESSION_ALREADY_SUMMARIZING_사유로_evaluate된다() {
+        AiChatSession session = summarizingSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS + 100);
+
+        SummaryDraftEligibility result = summaryDraftPolicy.evaluate(session);
+
+        assertThat(result.eligible()).isFalse();
+        assertThat(result.reason()).isEqualTo(IneligibleReason.SESSION_ALREADY_SUMMARIZING);
+    }
+
+    @Test
+    void 요약중인_세션에_assertEligible하면_ConflictException이_발생한다() {
+        AiChatSession session = summarizingSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS + 100);
+
+        assertThatThrownBy(() -> summaryDraftPolicy.assertEligible(session))
+                .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
+                .extracting(ConflictException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SESSION_ALREADY_SUMMARIZING);
+    }
+
     private AiChatSession activeSession(int accumulatedTokens) {
         return AiChatSession.of(
                 SESSION_ID, USER_BOOK_ID, AiChatSession.Status.ACTIVE,
@@ -101,6 +121,13 @@ class SummaryDraftPolicyTest {
     private AiChatSession closedSession(int accumulatedTokens) {
         return AiChatSession.of(
                 SESSION_ID, USER_BOOK_ID, AiChatSession.Status.CLOSED,
+                0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
+        );
+    }
+
+    private AiChatSession summarizingSession(int accumulatedTokens) {
+        return AiChatSession.of(
+                SESSION_ID, USER_BOOK_ID, AiChatSession.Status.SUMMARIZING,
                 0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
         );
     }

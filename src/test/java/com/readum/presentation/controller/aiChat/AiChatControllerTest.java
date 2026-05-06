@@ -1,6 +1,8 @@
 package com.readum.presentation.controller.aiChat;
 
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
+import com.readum.domain.aiChat.dto.AiChatSessionListResult;
+import com.readum.domain.aiChat.dto.AiChatSessionResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.MessageResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
@@ -8,11 +10,13 @@ import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
-import com.readum.domain.aiChat.service.AiChatMessageSearchService;
+import com.readum.domain.aiChat.service.AiChatMessageGetService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
+import com.readum.domain.aiChat.service.AiChatSessionGetService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
+import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
@@ -58,10 +62,13 @@ class AiChatControllerTest {
     private AiChatSessionCreateService aiChatSessionCreateService;
 
     @Mock
+    private AiChatSessionGetService aiChatSessionGetService;
+
+    @Mock
     private AiChatMessageSendService aiChatMessageSendService;
 
     @Mock
-    private AiChatMessageSearchService aiChatMessageSearchService;
+    private AiChatMessageGetService aiChatMessageGetService;
 
     @Mock
     private SummaryDraftService summaryDraftService;
@@ -80,8 +87,9 @@ class AiChatControllerTest {
     void setUp() {
         AiChatController controller = new AiChatController(
                 aiChatSessionCreateService,
+                aiChatSessionGetService,
                 aiChatMessageSendService,
-                aiChatMessageSearchService,
+                aiChatMessageGetService,
                 summaryDraftService,
                 summaryDraftSearchService,
                 new MessageStreamSseSerializer(objectMapper)
@@ -131,6 +139,95 @@ class AiChatControllerTest {
         mockMvc.perform(post("/api/v1/ai-chat/sessions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AiChatSessionCreateRequest(999_999L))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.message").value("해당 도서를 찾을 수 없습니다."));
+    }
+
+    // ── 세션 목록 조회 ──────────────────────────────────────────────────────
+
+    @Test
+    void 세션_목록_조회_정상_응답() throws Exception {
+        LocalDateTime base = LocalDateTime.of(2026, 5, 7, 12, 0, 0);
+        given(aiChatSessionGetService.findByUserBookId(any()))
+                .willReturn(new AiChatSessionListResult(
+                        List.of(
+                                new AiChatSessionResult(3L, "최근 세션", AiChatSession.Status.SUMMARIZING, base.plusMinutes(2)),
+                                new AiChatSessionResult(2L, "두 번째", AiChatSession.Status.ACTIVE, base.plusMinutes(1)),
+                                new AiChatSessionResult(1L, "오래된", AiChatSession.Status.CLOSED, base)
+                        ),
+                        1,
+                        20,
+                        false
+                ));
+
+        mockMvc.perform(get("/api/v1/ai-chat/sessions")
+                        .param("userBookId", "100")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sessions.length()").value(3))
+                .andExpect(jsonPath("$.data.sessions[0].sessionId").value(3))
+                .andExpect(jsonPath("$.data.sessions[0].title").value("최근 세션"))
+                .andExpect(jsonPath("$.data.sessions[0].status").value("SUMMARIZING"))
+                .andExpect(jsonPath("$.data.sessions[1].status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.sessions[2].status").value("CLOSED"))
+                .andExpect(jsonPath("$.data.page").value(1))
+                .andExpect(jsonPath("$.data.size").value(20))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+    }
+
+    @Test
+    void 세션_목록_조회_세션이_없으면_빈_배열을_반환한다() throws Exception {
+        given(aiChatSessionGetService.findByUserBookId(any()))
+                .willReturn(new AiChatSessionListResult(List.of(), 1, 20, false));
+
+        mockMvc.perform(get("/api/v1/ai-chat/sessions")
+                        .param("userBookId", "100")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sessions.length()").value(0))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+    }
+
+    @Test
+    void 세션_목록_조회_userBookId_누락시_400() throws Exception {
+        mockMvc.perform(get("/api/v1/ai-chat/sessions")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", containsString("userBookId는 필수")));
+    }
+
+    @Test
+    void 세션_목록_조회_userBookId_가_음수면_400() throws Exception {
+        mockMvc.perform(get("/api/v1/ai-chat/sessions")
+                        .param("userBookId", "-1")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", containsString("양수")));
+    }
+
+    @Test
+    void 세션_목록_조회_size_가_101이면_400() throws Exception {
+        mockMvc.perform(get("/api/v1/ai-chat/sessions")
+                        .param("userBookId", "100")
+                        .param("page", "1")
+                        .param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", containsString("size는 100 이하")));
+    }
+
+    @Test
+    void 세션_목록_조회_소유권_없는_userBookId_는_404() throws Exception {
+        given(aiChatSessionGetService.findByUserBookId(any()))
+                .willThrow(new NotFoundException(AiChatErrorCode.USER_BOOK_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/ai-chat/sessions")
+                        .param("userBookId", "999999")
+                        .param("page", "1")
+                        .param("size", "20"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.message").value("해당 도서를 찾을 수 없습니다."));
     }
@@ -264,7 +361,7 @@ class AiChatControllerTest {
 
     @Test
     void 메시지_조회_정상_응답() throws Exception {
-        given(aiChatMessageSearchService.findBySessionId(any()))
+        given(aiChatMessageGetService.findBySessionId(any()))
                 .willReturn(new MessageListResult(
                         List.of(
                                 new MessageResult(

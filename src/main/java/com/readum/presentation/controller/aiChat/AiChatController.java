@@ -1,17 +1,21 @@
 package com.readum.presentation.controller.aiChat;
 
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
+import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
-import com.readum.domain.aiChat.service.AiChatMessageSearchService;
+import com.readum.domain.aiChat.service.AiChatMessageGetService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
+import com.readum.domain.aiChat.service.AiChatSessionGetService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateResponse;
+import com.readum.presentation.controller.aiChat.dto.AiChatSessionListRequest;
+import com.readum.presentation.controller.aiChat.dto.AiChatSessionListResponse;
 import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
@@ -45,8 +49,9 @@ import reactor.core.publisher.Flux;
 public class AiChatController {
 
     private final AiChatSessionCreateService aiChatSessionCreateService;
+    private final AiChatSessionGetService aiChatSessionGetService;
     private final AiChatMessageSendService aiChatMessageSendService;
-    private final AiChatMessageSearchService aiChatMessageSearchService;
+    private final AiChatMessageGetService aiChatMessageGetService;
     private final SummaryDraftService summaryDraftService;
     private final SummaryDraftSearchService summaryDraftSearchService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
@@ -68,6 +73,27 @@ public class AiChatController {
     ) {
         AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userId));
         return GlobalApiResponse.created(AiChatSessionCreateResponse.from(result));
+    }
+
+    @Operation(
+            summary = "AI 채팅 세션 목록 조회",
+            description = "선택한 도서(userBookId)에 대한 채팅 세션을 최근 채팅 일시 내림차순으로 페이지네이션 조회한다. " +
+                    "각 세션은 ACTIVE / SUMMARIZING / CLOSED 상태로 구분되며, SUMMARIZING 은 감상문 초안 생성 중인 세션을 의미한다. " +
+                    "세션이 없으면 빈 배열로 200 응답한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "조회 성공"),
+            @ApiResponse(responseCode = "400", description = "userBookId / page / size 검증 실패"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "해당 도서 없음 또는 소유권 없음")
+    })
+    @GetMapping("/sessions")
+    public ResponseEntity<GlobalApiResponse<AiChatSessionListResponse>> getSessions(
+            @AuthenticationPrincipal Long userId,
+            @Valid @ModelAttribute AiChatSessionListRequest request
+    ) {
+        AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(request.toCommand(userId));
+        return GlobalApiResponse.ok(AiChatSessionListResponse.from(result));
     }
 
     @Operation(
@@ -155,7 +181,8 @@ public class AiChatController {
 
     @Operation(
             summary = "세션의 메시지 이력 조회 (페이지네이션)",
-            description = "createdAt 내림차순으로 메시지 이력을 페이지네이션 조회한다."
+            description = "createdAt 내림차순으로 메시지 이력을 페이지네이션 조회한다. " +
+                    "SYSTEM 프롬프트와 스트림 중단된 FAILED 부분 응답은 응답에서 제외된다."
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공"),
@@ -169,7 +196,7 @@ public class AiChatController {
             @PathVariable Long sessionId,
             @Valid @ModelAttribute MessageListRequest request
     ) {
-        MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userId, sessionId));
+        MessageListResult result = aiChatMessageGetService.findBySessionId(request.toCommand(userId, sessionId));
         return GlobalApiResponse.ok(MessageListResponse.from(result));
     }
 

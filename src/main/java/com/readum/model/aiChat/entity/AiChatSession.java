@@ -21,7 +21,8 @@ import java.time.LocalDateTime;
 @Table(
         name = "ai_chat_session",
         indexes = {
-                @Index(name = "idx_ai_chat_session_user_book", columnList = "user_book_id")
+                @Index(name = "idx_ai_chat_session_user_book", columnList = "user_book_id"),
+                @Index(name = "idx_ai_chat_session_user_book_updated_at", columnList = "user_book_id, updated_at")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -29,7 +30,7 @@ import java.time.LocalDateTime;
 public class AiChatSession {
 
     public enum Status {
-        ACTIVE, CLOSED
+        ACTIVE, SUMMARIZING, CLOSED
     }
 
     private static final int TITLE_MAX_LENGTH = 100;
@@ -65,9 +66,27 @@ public class AiChatSession {
         return new AiChatSession(null, userBookId, Status.ACTIVE, 0, 0, null, now, now);
     }
 
+    public void markSummarizing() {
+        this.status = Status.SUMMARIZING;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void revertToActive() {
+        this.status = Status.ACTIVE;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     public void close() {
         this.status = Status.CLOSED;
         this.updatedAt = LocalDateTime.now();
+    }
+
+    public boolean isActive() {
+        return this.status == Status.ACTIVE;
+    }
+
+    public boolean isSummarizing() {
+        return this.status == Status.SUMMARIZING;
     }
 
     public static AiChatSession of(

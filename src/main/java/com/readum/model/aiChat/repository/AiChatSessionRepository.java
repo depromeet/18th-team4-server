@@ -1,7 +1,10 @@
 package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -43,4 +46,33 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
              where aiChatSession.id = :id
             """)
     Optional<AiChatSession> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * 특정 userBook 의 채팅 세션 목록을 최근 활동 (updatedAt) 내림차순으로 페이지 조회.
+     * lastChattedAt 은 entity 의 updatedAt 으로 근사 — appendUserMessage / addAssistantTokens /
+     * markSummarizing / close 모두에서 갱신되므로 마지막 채팅 활동 시각과 초 단위 격차 이내로 일치한다.
+     * userBook 소유권은 EXISTS 서브쿼리로 검증해 다른 사용자의 세션이 노출되지 않도록 한다.
+     */
+    @Query("""
+            select new com.readum.model.aiChat.repository.projection.AiChatSessionListProjection(
+                       aiChatSession.id
+                     , aiChatSession.title
+                     , aiChatSession.status
+                     , aiChatSession.updatedAt
+                   )
+              from AiChatSession aiChatSession
+             where aiChatSession.userBookId = :userBookId
+               and exists (
+                     select 1
+                       from UserBook userBook
+                      where userBook.id = aiChatSession.userBookId
+                        and userBook.userId = :userId
+                   )
+             order by aiChatSession.updatedAt desc, aiChatSession.id desc
+            """)
+    Slice<AiChatSessionListProjection> findSessionsByUserBookIdAndOwner(
+            @Param("userBookId") Long userBookId,
+            @Param("userId") Long userId,
+            Pageable pageable
+    );
 }
