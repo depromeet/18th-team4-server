@@ -5,14 +5,18 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiSummaryClient;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.exception.UnprocessableEntityException;
+import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.repository.SummaryRepository;
+import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.user.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -27,6 +31,7 @@ public class SummaryDraftService {
     // TODO: 정책 확정 후 상수값 조정 필요
     private static final int MIN_ACCUMULATED_TOKENS = 500;
 
+    private final UserRepository userRepository;
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final AiSummaryClient aiSummaryClient;
@@ -35,6 +40,7 @@ public class SummaryDraftService {
     private final TransactionTemplate transactionTemplate;
 
     public SummaryDraftService(
+            UserRepository userRepository,
             AiChatSessionRepository aiChatSessionRepository,
             AiChatMessageRepository aiChatMessageRepository,
             AiSummaryClient aiSummaryClient,
@@ -42,6 +48,7 @@ public class SummaryDraftService {
             SummaryRepository summaryRepository,
             PlatformTransactionManager transactionManager
     ) {
+        this.userRepository = userRepository;
         this.aiChatSessionRepository = aiChatSessionRepository;
         this.aiChatMessageRepository = aiChatMessageRepository;
         this.aiSummaryClient = aiSummaryClient;
@@ -58,13 +65,16 @@ public class SummaryDraftService {
      * TX2 (짧게, 성공)   : Summary content 채우고 COMPLETED
      * TX3 (짧게, 실패)   : Summary → FAILED
      */
-    public SummaryDraftResult execute(Long sessionId, Long userId) {
+    public SummaryDraftResult execute(Long sessionId, String userSessionId) {
+        User user = userRepository.findBySessionId(userSessionId)
+                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
+
         // TX1: 검증 + 세션 종료 + Summary(IN_PROGRESS) 선점
         PreparedContext ctx = transactionTemplate.execute(status -> {
             AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-            userBookRepository.findByIdAndUserId(session.getUserBookId(), userId)
+            userBookRepository.findByIdAndUserId(session.getUserBookId(), user.getId())
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
             if (session.isClosed()) {
