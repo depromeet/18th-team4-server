@@ -3,10 +3,9 @@ package com.readum.domain.aiChat.service;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiSummaryClient;
-import com.readum.domain.exception.ConflictException;
+import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.exception.UnprocessableEntityException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
@@ -28,15 +27,13 @@ import java.util.List;
 @Service
 public class SummaryDraftService {
 
-    // TODO: 정책 확정 후 상수값 조정 필요
-    private static final int MIN_ACCUMULATED_TOKENS = 500;
-
     private final UserRepository userRepository;
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final AiSummaryClient aiSummaryClient;
     private final UserBookRepository userBookRepository;
     private final SummaryRepository summaryRepository;
+    private final SummaryDraftPolicy summaryDraftPolicy;
     private final TransactionTemplate transactionTemplate;
 
     public SummaryDraftService(
@@ -46,6 +43,7 @@ public class SummaryDraftService {
             AiSummaryClient aiSummaryClient,
             UserBookRepository userBookRepository,
             SummaryRepository summaryRepository,
+            SummaryDraftPolicy summaryDraftPolicy,
             PlatformTransactionManager transactionManager
     ) {
         this.userRepository = userRepository;
@@ -54,6 +52,7 @@ public class SummaryDraftService {
         this.aiSummaryClient = aiSummaryClient;
         this.userBookRepository = userBookRepository;
         this.summaryRepository = summaryRepository;
+        this.summaryDraftPolicy = summaryDraftPolicy;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -77,13 +76,7 @@ public class SummaryDraftService {
             userBookRepository.findByIdAndUserId(session.getUserBookId(), user.getId())
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-            if (session.isClosed()) {
-                throw new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED);
-            }
-
-            if (session.getAccumulatedTokens() < MIN_ACCUMULATED_TOKENS) {
-                throw new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
-            }
+            summaryDraftPolicy.assertEligible(session);
 
             List<AiChatMessage> messages =
                     aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);

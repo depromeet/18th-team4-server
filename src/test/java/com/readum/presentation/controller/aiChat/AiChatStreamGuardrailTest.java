@@ -64,6 +64,7 @@ class AiChatStreamGuardrailTest {
                 aiChatMessageSendService,
                 aiChatMessageSearchService,
                 summaryDraftService,
+                null,
                 new MessageStreamSseSerializer(objectMapper)
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)

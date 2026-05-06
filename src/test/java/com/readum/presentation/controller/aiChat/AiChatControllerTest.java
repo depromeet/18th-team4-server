@@ -4,11 +4,14 @@ import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.MessageResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
+import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
+import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
+import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.ConflictException;
@@ -26,8 +29,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -43,9 +46,9 @@ import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
@@ -63,6 +66,9 @@ class AiChatControllerTest {
     @Mock
     private SummaryDraftService summaryDraftService;
 
+    @Mock
+    private SummaryDraftSearchService summaryDraftSearchService;
+
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = JsonMapper.builder()
             .findAndAddModules()
@@ -77,13 +83,13 @@ class AiChatControllerTest {
                 aiChatMessageSendService,
                 aiChatMessageSearchService,
                 summaryDraftService,
+                summaryDraftSearchService,
                 new MessageStreamSseSerializer(objectMapper)
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
-
     }
 
     // ── 세션 생성 ──────────────────────────────────────────────────────
@@ -128,6 +134,8 @@ class AiChatControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.message").value("해당 도서를 찾을 수 없습니다."));
     }
+
+    // ── 메시지 전송 ──────────────────────────────────────────────────────
 
     @Test
     void 메시지_전송_본문_누락시_400() throws Exception {
@@ -252,6 +260,8 @@ class AiChatControllerTest {
                 .contains("\"code\":\"AI_STREAM_INTERRUPTED\"");
     }
 
+    // ── 메시지 조회 ──────────────────────────────────────────────────────
+
     @Test
     void 메시지_조회_정상_응답() throws Exception {
         given(aiChatMessageSearchService.findBySessionId(any()))
@@ -308,6 +318,60 @@ class AiChatControllerTest {
                         .param("size", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message", containsString("size는 100 이하")));
+    }
+
+    // ── 감상문 초안 생성 가능 여부 조회 ──────────────────────────────────────────────
+
+    @Test
+    void eligibility_정상_요청시_200과_eligible_true를_반환한다() throws Exception {
+        given(summaryDraftSearchService.findEligibility(eq(1L), any()))
+                .willReturn(new SummaryDraftEligibilityResult(true, null, null));
+
+        mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eligible").value(true));
+    }
+
+    @Test
+    void eligibility_종료된_세션이면_200과_SESSION_ALREADY_CLOSED를_반환한다() throws Exception {
+        given(summaryDraftSearchService.findEligibility(eq(1L), any()))
+                .willReturn(new SummaryDraftEligibilityResult(
+                        false,
+                        IneligibleReason.SESSION_ALREADY_CLOSED.name(),
+                        AiChatErrorCode.SESSION_ALREADY_CLOSED.getMessage()
+                ));
+
+        mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eligible").value(false))
+                .andExpect(jsonPath("$.data.reason").value("SESSION_ALREADY_CLOSED"))
+                .andExpect(jsonPath("$.data.message").value("이미 감상문이 작성된 세션입니다."));
+    }
+
+    @Test
+    void eligibility_토큰_부족이면_200과_CHAT_VOLUME_NOT_ENOUGH를_반환한다() throws Exception {
+        given(summaryDraftSearchService.findEligibility(eq(1L), any()))
+                .willReturn(new SummaryDraftEligibilityResult(
+                        false,
+                        IneligibleReason.CHAT_VOLUME_NOT_ENOUGH.name(),
+                        AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH.getMessage()
+                ));
+
+        mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eligible").value(false))
+                .andExpect(jsonPath("$.data.reason").value("CHAT_VOLUME_NOT_ENOUGH"))
+                .andExpect(jsonPath("$.data.message").value("감상문 초안을 생성하기에 대화량이 부족합니다."));
+    }
+
+    @Test
+    void eligibility_세션이_없으면_404를_반환한다() throws Exception {
+        given(summaryDraftSearchService.findEligibility(eq(1L), any()))
+                .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.message").value("세션을 찾을 수 없습니다."));
     }
 
     // ── 감상문 초안 생성 ──────────────────────────────────────────────────────

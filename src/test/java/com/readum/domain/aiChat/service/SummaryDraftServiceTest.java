@@ -3,6 +3,7 @@ package com.readum.domain.aiChat.service;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiSummaryClient;
+import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnprocessableEntityException;
@@ -12,14 +13,16 @@ import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.repository.SummaryRepository;
+import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -44,9 +47,13 @@ class SummaryDraftServiceTest {
     private static final Long SESSION_ID = 1L;
     private static final Long SUMMARY_ID = 100L;
     private static final Long USER_ID = 10L;
+    private static final String USER_SESSION_ID = "test-session-id";
     private static final Long USER_BOOK_ID = 1L;
     private static final int SUFFICIENT_TOKENS = 600;
     private static final int INSUFFICIENT_TOKENS = 100;
+
+    @Mock
+    private UserRepository userRepository;
 
     @Mock
     private AiChatSessionRepository aiChatSessionRepository;
@@ -63,16 +70,24 @@ class SummaryDraftServiceTest {
     @Mock
     private SummaryRepository summaryRepository;
 
+    @Spy
+    private SummaryDraftPolicy summaryDraftPolicy = new SummaryDraftPolicy();
+
     private SummaryDraftService summaryDraftService;
 
     @BeforeEach
     void setUp() {
+        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+                java.time.LocalDateTime.now(), java.time.LocalDateTime.now());
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(java.util.Optional.of(testUser));
         summaryDraftService = new SummaryDraftService(
+                userRepository,
                 aiChatSessionRepository,
                 aiChatMessageRepository,
                 aiSummaryClient,
                 userBookRepository,
                 summaryRepository,
+                summaryDraftPolicy,
                 new NoopTransactionManager()
         );
     }
@@ -98,7 +113,7 @@ class SummaryDraftServiceTest {
         given(aiSummaryClient.generate(messages)).willReturn(expected);
 
         // when
-        SummaryDraftResult result = summaryDraftService.execute(SESSION_ID, USER_ID);
+        SummaryDraftResult result = summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
         // then
         assertThat(result).isEqualTo(expected);
@@ -125,7 +140,7 @@ class SummaryDraftServiceTest {
         given(aiSummaryClient.generate(any())).willThrow(new RuntimeException("AI 오류"));
 
         // when & then
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(RuntimeException.class);
 
         assertThat(inProgressSummary.getStatus()).isEqualTo(Summary.Status.FAILED);
@@ -135,7 +150,7 @@ class SummaryDraftServiceTest {
     void 세션이_없으면_NotFoundException이_발생한다() {
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(NotFoundException.class)
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND));
@@ -150,7 +165,7 @@ class SummaryDraftServiceTest {
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(NotFoundException.class)
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND));
@@ -168,7 +183,7 @@ class SummaryDraftServiceTest {
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(closedSession));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(ConflictException.class)
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.SESSION_ALREADY_CLOSED));
@@ -183,7 +198,7 @@ class SummaryDraftServiceTest {
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(UnprocessableEntityException.class)
                 .asInstanceOf(InstanceOfAssertFactories.type(UnprocessableEntityException.class))
                 .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH));
