@@ -3,10 +3,12 @@ package com.readum.presentation.controller.aiChat;
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
+import com.readum.domain.aiChat.dto.SummaryResult;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
+import com.readum.domain.aiChat.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateResponse;
@@ -14,6 +16,7 @@ import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
 import com.readum.presentation.controller.aiChat.dto.SummaryDraftResponse;
+import com.readum.presentation.controller.aiChat.dto.SummaryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -45,6 +48,7 @@ public class AiChatController {
     private final AiChatMessageSendService aiChatMessageSendService;
     private final AiChatMessageSearchService aiChatMessageSearchService;
     private final SummaryDraftService summaryDraftService;
+    private final SummarySearchService summarySearchService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
 
     @Operation(
@@ -167,6 +171,33 @@ public class AiChatController {
     ) {
         MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userId, sessionId));
         return GlobalApiResponse.ok(MessageListResponse.from(result));
+    }
+
+    @Operation(
+            summary = "감상문 조회",
+            description = """
+                    세션에 저장된 감상문(제목·본문·인상 깊은 구절)을 조회한다.
+
+                    감상문 status 별 응답:
+                    - **COMPLETED**: 200 — 감상문 정상 반환
+                    - **IN_PROGRESS**: 409 — AI 생성 중. 잠시 후 재시도 필요
+                    - **FAILED**: 409 — AI 생성 실패
+                    - 감상문 초안 생성 API 미호출 상태: 404
+                    """
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "감상문 조회 성공"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "세션 없음, 소유권 없음, 또는 감상문 생성 요청 전"),
+            @ApiResponse(responseCode = "409", description = "감상문 생성 중(IN_PROGRESS) 또는 생성 실패(FAILED)")
+    })
+    @GetMapping("/sessions/{sessionId}/summary")
+    public ResponseEntity<GlobalApiResponse<SummaryResponse>> getSummary(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId
+    ) {
+        SummaryResult result = summarySearchService.findBySessionId(sessionId, userId);
+        return GlobalApiResponse.ok(SummaryResponse.from(result));
     }
 
     @Operation(
