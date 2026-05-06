@@ -86,7 +86,7 @@ class AiChatMessageSendServiceTest {
     void NBSP_등_유니코드_공백만_있으면_BadRequest_MESSAGE_CONTENT_BLANK() {
         // Character.isWhitespace() 가 빠뜨리는 NBSP(U+00A0) / Narrow NBSP(U+202F) /
         // Figure Space(U+2007) 만 들어와도 빈 본문으로 거절되어야 한다.
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "    ");
+        SendMessageCommand command = new SendMessageCommand(1L, 7L, "    ");
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))

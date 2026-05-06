@@ -156,6 +156,7 @@ class AiChatControllerTest {
 
     @Test
     void 메시지_전송_whitespace_본문이면_400_변환된다() throws Exception {
+        // @NotBlank 가 trim 후 빈 문자열을 거절
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new SendMessageRequest("   "))))
@@ -199,6 +200,7 @@ class AiChatControllerTest {
     @Test
     void 메시지_전송_정상_스트림이면_token_과_done_이벤트가_방출된다() throws Exception {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
+        // ASCII payload — MockHttpServletResponse 의 기본 charset 이 SSE 에서 UTF-8 가 아니어서 한글은 mojibake 가능
         given(aiChatMessageSendService.execute(any())).willReturn(Flux.just(
                 new MessageStreamEvent.Token("alpha"),
                 new MessageStreamEvent.Token(" beta"),

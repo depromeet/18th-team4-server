@@ -11,7 +11,8 @@ RuntimeException
      ├─ UnauthorizedException    → 401
      ├─ ForbiddenException       → 403
      ├─ NotFoundException        → 404
-     └─ ConflictException        → 409
+     ├─ ConflictException        → 409
+     └─ TooManyRequestsException → 429
 ```
 
 - `BusinessException` 은 `ErrorCode` 하나만 필드로 들고 있음
@@ -127,19 +128,181 @@ void REUSE_DETECTED_결과면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한�
 3. 서비스/어댑터에서 `throw new {HttpStatus}Exception({Feature}ErrorCode.XXX)` 로 던짐
 4. 테스트에서 위 assertion 패턴으로 검증
 
-> `GlobalExceptionHandler` 는 대부분의 경우 **건드릴 필요 없다**. 기존 5개 HTTP 상태 서브클래스 안에서 끝난다.
+> `GlobalExceptionHandler` 는 대부분의 경우 **건드릴 필요 없다**. 기존 6개 HTTP 상태 서브클래스 안에서 끝난다.
 
 ## 신규 HTTP 상태 추가 (드문 경우)
 
-기존 5개(400/401/403/404/409)로 표현 불가능한 상태가 필요할 때만:
+기존 6개(400/401/403/404/409/429)로 표현 불가능한 상태가 필요할 때만:
 
 1. `domain/exception/{Status}Exception.java` 추가 (`extends BusinessException`)
 2. `GlobalExceptionHandler` 에 `@ExceptionHandler({Status}Exception.class)` 핸들러 추가
 3. 해당 ErrorCode 추가
+4. `CLAUDE.md` 의 "Exception Convention" 표에 행 추가
 
-429(Too Many Requests), 503(Service Unavailable, DB 장애 외) 등이 후보. 추가 전에 기존 분류로 표현 가능한지 먼저 검토.
+> 참고로 `TooManyRequestsException(429)` 는 외부 LLM rate limit 매핑을 위해 도입됐다 (`AiChatErrorCode.AI_RATE_LIMIT_BURST` / `AI_QUOTA_EXHAUSTED`). 503(Service Unavailable, DB 장애 외) 등이 다음 후보. 추가 전에 기존 분류로 표현 가능한지 먼저 검토.
 
 ## DB 계층 예외
 
 - `DataAccessException` 는 `GlobalExceptionHandler` 에서 **503 Service Unavailable** 로 매핑 (이미 처리됨)
 - JPA 제약 위반 등을 비즈니스 에러로 다시 던지고 싶을 때는 서비스 레이어에서 catch → `ConflictException` 등으로 rethrow
+
+## 예외 발생 지점의 로그 레벨
+
+CLAUDE.md 의 일반 로그 레벨 표에서 한 단계 더 들어가, **예외를 잡거나 던지는 지점** 에서 어느 레벨로 남길지의 결정 기준.
+
+핵심 원칙: **"누가, 어느 시급도로 봐야 하는 로그인가"** 로 정한다.
+
+| 레벨 | 책임 주체 | 대응 시간 | HTTP/예외 매핑 |
+|------|---------|---------|---------|
+| ERROR | 운영자 (즉시 대응) | 분~시간 단위 | 5xx 미예상 장애, DB 연결 실패, 미분류 RuntimeException, **외부 시스템 한도/장애로 기능이 죽음** |
+| WARN | 운영자/개발자 (모니터링) | 일 단위 | retry/fallback 후 회복, 보안 신호(토큰 재사용 감지 등), 명시적 폴백으로 사용자 영향 차단 |
+| INFO | 비즈니스 흐름 | - | 주요 도메인 이벤트, 정상 처리 (예외 자체는 INFO 안 씀) |
+| DEBUG | 개발 디버깅 | - | 4xx 사용자 입력 오류 (운영 시 비활성화) |
+
+### 4xx 예외 (사용자 입력 / 인증 / 권한)
+
+**원칙: 무로그 또는 DEBUG.** 이미 access log 에 기록되고, 사용자 측 문제라 운영자 대응이 불필요.
+
+- 400/404/409: 무로그 또는 DEBUG. 컨트롤러 레벨 검증 실패는 굳이 별도 로그 안 남김
+- 401/403: 무로그 또는 DEBUG. 단 **보안 모니터링이 필요한 케이스** (예: refresh token 재사용 감지) 는 WARN 한 번
+- 429: 외부 시스템 한도 초과 → 아래 별도 항목
+
+### 429 (TooManyRequestsException)
+
+**원칙: ERROR.** 외부 LLM 한도 초과는 그 시점부터 해당 기능이 사용자에게 사실상 죽어 있는 상태이므로 즉시 인지가 필요.
+
+> 보통 성숙한 시스템은 *단일 occurrence = WARN, 알람 시스템에서 빈도 기반으로 ERROR 승격* 으로 처리하지만, 우리는 메트릭/알람 인프라 도입 전이라 보수적으로 ERROR 통일.
+
+세분화된 분기는 ErrorCode 에 둔다 (`AI_RATE_LIMIT_BURST` vs `AI_QUOTA_EXHAUSTED`). 알람 인프라 도입 후 BURST 만 WARN 으로 내릴지 재논의.
+
+### 5xx (서버/외부 시스템 실패)
+
+기본 ERROR. 단 **자체 회복 (retry 성공) / 명시적 폴백 (사용자 영향 차단)** 한 경우 WARN.
+
+```java
+// O — 외부 API 호출 실패 (분류되지 않은 모든 케이스)
+log.error("[Stream] OpenAI API 호출 실패", error);
+
+// O — retry 후 성공
+log.warn("OpenAI 호출 재시도 성공 (시도 {}회)", attempts);
+```
+
+### IllegalStateException (프로그램 버그)
+
+**ERROR.** 도달 불가 분기에 도달했거나 데이터 정합성이 깨진 상태. 프로덕션에서 발생하면 즉시 조사.
+
+### 메시지 형식
+
+- 한글 + 영문 기술 용어 (Token Pair / Rate Limit / Stream 등 영문 유지, 억지 번역 X)
+- ERROR/WARN 은 원인 추적 가능하도록 컨텍스트 (외부 응답, ID, ErrorCode 이름 등) 포함
+- ERROR 는 가능하면 throwable 동반 (`log.error("...", error)`) 으로 stack trace 보존
+
+## 외부 시스템 응답 → 도메인 예외 분류
+
+외부 API (OpenAI, 알라딘 등) 의 HTTP 응답을 도메인 예외로 변환할 때의 규칙.
+
+### 메시지 문자열 키워드 매칭 금지
+
+```java
+// X — fragile. 외부 시스템의 메시지 포맷 변경에 깨지고, 분류 해상도가 낮음
+String lower = error.getMessage().toLowerCase();
+if (lower.contains("429") || lower.contains("quota")) {
+    throw new TooManyRequestsException(...);
+}
+```
+
+문제:
+- 메시지 포맷은 라이브러리 버전 / 응답 본문에 의존 → 깨지기 쉬움
+- "rate limit" / "quota exhausted" 가 같은 분기에 묶여 회복 시간이 다른 케이스 구분 못함
+- HTTP status / 응답 헤더 / 본문 JSON 의 정보를 모두 잃음
+
+### 가장 낮은 계층 (`ResponseErrorHandler`) 에서 typed 분기
+
+Spring AI / RestClient 의 `ResponseErrorHandler` 를 직접 구현해 status code / headers / body JSON 을 typed 하게 본 후 도메인 예외로 변환한다. 어댑터(`infrastructure/{feature}/{provider}/`) 에 위치.
+
+```java
+// O — infrastructure/ai/openai/OpenAiResponseErrorHandler 의 패턴
+@Override
+public void handleError(URI url, HttpMethod method, ClientHttpResponse response) {
+    HttpStatusCode statusCode = response.getStatusCode();
+    HttpHeaders headers = response.getHeaders();
+    String body = StreamUtils.copyToString(response.getBody(), UTF_8);
+
+    if (statusCode.value() == 429) {
+        // body 의 error.type 으로 BURST vs QUOTA_EXHAUSTED 구분
+        // headers 의 retry-after / x-ratelimit-* 를 RateLimitInfo 로 추출
+        throw classifyRateLimit(body, headers);
+    }
+    // ...
+}
+```
+
+`OpenAiApi.Builder` 가 `ResponseErrorHandler` 를 받아주는 것처럼, 외부 API 클라이언트 라이브러리가 error handler 를 받아주면 그 자리에 주입. 안 받아주면 어댑터 메서드 안에서 status code 직접 분기.
+
+## 429 의 RateLimitInfo 운반 패턴
+
+429 응답은 단순 status code 만이 아니라 **언제 다시 시도해야 하는지** 를 함께 운반해야 클라이언트가 합리적으로 행동할 수 있다 (Issue #30 인수조건).
+
+### 핵심 원칙
+
+> **GlobalExceptionHandler 는 default 값을 갖지 않는다. 정책은 정보의 출처가 결정한다.**
+
+각 외부 시스템마다 한도 종류 (RPM/TPM/quota/시간별 등) 와 회복 시간이 다르므로, "Retry-After: 30" 같은 전역 default 를 박으면 거의 항상 거짓말이 된다. **던지는 쪽 (외부 시스템 어댑터) 이 자기 응답에서 직접 추출한 값** 만 운반한다.
+
+### 데이터 흐름
+
+```
+OpenAI 응답 (status 429 + headers)
+        │
+        ▼
+OpenAiResponseErrorHandler (어댑터)
+  - body 의 error.type 으로 BURST vs QUOTA_EXHAUSTED 분류
+  - headers 의 retry-after / x-ratelimit-* 를 RateLimitInfo 로 추출
+        │
+        ▼
+TooManyRequestsException(errorCode, rateLimitInfo) 생성 후 throw
+        │
+        ├─→ pre-stream 경로: GlobalExceptionHandler
+        │     - HTTP 429 상태로 응답
+        │     - rateLimitInfo.toHttpHeaders() 를 응답 헤더에 그대로 매핑
+        │
+        └─→ mid-stream 경로 (SSE): AiChatMessageSendService
+              - 응답이 이미 commit (status 200) 이라 헤더 사용 불가
+              - rateLimitInfo 를 SSE error event 의 payload 로 운반
+```
+
+### `RateLimitInfo` 의 책임
+
+- 모든 필드는 nullable. 외부 시스템마다 채워지는 필드가 다르므로 **채워진 것만** 응답에 반영, 누락 필드는 헤더/payload 키 자체가 생략된다.
+- 캐논화된 필드 ↔ 헤더명 / payload 키 매핑은 `RateLimitInfo` 내부 enum 한 곳에서 정의 (`toHttpHeaders()` / `toPayloadMap()`). consumer 는 1라인으로 호출.
+
+### `GlobalExceptionHandler` 의 역할 (운반자)
+
+```java
+@ExceptionHandler(TooManyRequestsException.class)
+public ResponseEntity<...> handleTooManyRequests(TooManyRequestsException ex) {
+    ResponseEntity.BodyBuilder builder = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS);
+    RateLimitInfo info = ex.getRateLimitInfo();
+    if (info != null) {
+        info.toHttpHeaders().forEach(builder::header);   // ← 운반만, 정책 모름
+    }
+    return builder.body(...);
+}
+```
+
+미래에 다른 외부 시스템 (예: 알라딘) 이 429 를 던질 때도 GlobalExceptionHandler 는 변경하지 않는다. 새 어댑터가 자기 응답을 보고 다른 RateLimitInfo 를 채워 던지면 끝.
+
+## SSE mid-stream 에러 처리
+
+SSE 엔드포인트에서 OpenAI 호출은 **Flux subscribe 시점** = 응답이 이미 commit (status 200, Content-Type: text/event-stream) 된 후에 발생한다. 이 시점에 던져진 예외는:
+
+- `@ExceptionHandler` 가 잡지 못함 (응답이 이미 나가는 중)
+- HTTP status / 헤더 변경 불가
+- 대신 SSE error event 로 변환되어 stream 안에서 흘러감
+
+**규칙**:
+- pre-stream 단계 (검증/DB/사용자메시지 영속화) 의 예외 → `GlobalExceptionHandler` 정상 경로 (4xx/5xx + 헤더)
+- mid-stream 단계의 예외 → `onErrorResume` 으로 잡아 `MessageStreamEvent.Error` 로 변환, 직렬화기가 `event: error` 로 emit
+- 429 의 RateLimitInfo 도 mid-stream 이면 헤더 대신 SSE error payload 의 `rateLimit` 키로 운반 (정보 손실 방지)
+
+미들웨어 (Spring 의 reactive return type handler) 는 두 단계를 자동으로 분리해 주므로 서비스/컨트롤러에서 명시적으로 분기할 필요 없음.
