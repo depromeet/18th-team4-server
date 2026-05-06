@@ -2,6 +2,8 @@ package com.readum.model.summary.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -30,6 +32,10 @@ import java.time.LocalDateTime;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class Summary {
 
+    public enum Status {
+        IN_PROGRESS, COMPLETED, FAILED
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -39,6 +45,10 @@ public class Summary {
 
     @Column(name = "ai_chat_session_id", nullable = false)
     private Long aiChatSessionId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private Status status;
 
     @Column(name = "quote", columnDefinition = "TEXT")
     private String quote;
@@ -55,27 +65,43 @@ public class Summary {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    public static Summary create(
-            Long userBookId,
-            Long aiChatSessionId,
-            String quote,
-            String title,
-            String body
-    ) {
+    /**
+     * 감상문 생성 시작 시점에 IN_PROGRESS 상태로 레코드를 먼저 생성한다.
+     * content(title/body/quote)는 AI 응답 후 complete() 로 채운다.
+     */
+    public static Summary createInProgress(Long userBookId, Long aiChatSessionId) {
         LocalDateTime now = LocalDateTime.now();
-        return new Summary(null, userBookId, aiChatSessionId, quote, title, body, now, now);
+        return new Summary(null, userBookId, aiChatSessionId, Status.IN_PROGRESS, null, null, null, now, now);
     }
 
     public static Summary of(
             Long id,
             Long userBookId,
             Long aiChatSessionId,
+            Status status,
             String quote,
             String title,
             String body,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {
-        return new Summary(id, userBookId, aiChatSessionId, quote, title, body, createdAt, updatedAt);
+        return new Summary(id, userBookId, aiChatSessionId, status, quote, title, body, createdAt, updatedAt);
+    }
+
+    public void complete(String title, String body, String quote) {
+        this.title = title;
+        this.body = body;
+        this.quote = quote;
+        this.status = Status.COMPLETED;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void fail() {
+        this.status = Status.FAILED;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public boolean isCompleted() {
+        return this.status == Status.COMPLETED;
     }
 }
