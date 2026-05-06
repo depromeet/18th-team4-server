@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class AiChatMessageSearchService {
+public class AiChatMessageGetService {
 
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
@@ -25,7 +25,7 @@ public class AiChatMessageSearchService {
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         int pageIndex = Math.max(0, command.page() - 1);
-        Slice<AiChatMessage> slice = aiChatMessageRepository.findBySessionIdOrderByCreatedAtDescIdDesc(
+        Slice<AiChatMessage> slice = aiChatMessageRepository.findVisibleHistory(
                 command.sessionId(),
                 PageRequest.of(pageIndex, command.size())
         );

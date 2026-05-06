@@ -28,20 +28,54 @@ class AiChatMessageRepositoryTest {
     }
 
     @Test
-    @DisplayName("페이지 조회는 createdAt DESC, id DESC 정렬을 유지한다")
-    void 페이지_조회_정렬() {
+    @DisplayName("findVisibleHistory 는 USER + ASSISTANT 의 COMPLETED 만 createdAt DESC, id DESC 로 반환한다")
+    void findVisibleHistory_필터링과_정렬() {
         Long sessionId = nextSessionId();
-        for (int i = 1; i <= 5; i++) {
-            aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "메시지 " + i));
-        }
+        // SYSTEM(노출 금지), FAILED(부분 응답) 와 정상 메시지를 인터리빙
+        aiChatMessageRepository.save(AiChatMessage.create(
+                sessionId, AiChatMessage.Role.SYSTEM, AiChatMessage.Status.COMPLETED,
+                "system prompt", null, null, null, null
+        ));
+        aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "u1"));
+        aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(sessionId, "a1", 1, 1, 2));
+        aiChatMessageRepository.save(AiChatMessage.createAssistantFailed(sessionId, "partial", 1, 0, 1));
+        aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "u2"));
+        aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(sessionId, "a2", 1, 1, 2));
 
         Slice<AiChatMessage> slice = aiChatMessageRepository
-                .findBySessionIdOrderByCreatedAtDescIdDesc(sessionId, PageRequest.of(0, 10));
+                .findVisibleHistory(sessionId, PageRequest.of(0, 10));
 
-        assertThat(slice.getContent()).hasSize(5);
+        // SYSTEM 1개 + FAILED 1개 제외 → 4개
+        assertThat(slice.getContent()).hasSize(4);
         assertThat(slice.hasNext()).isFalse();
-        assertThat(slice.getContent().get(0).getContent()).isEqualTo("메시지 5");
-        assertThat(slice.getContent().get(4).getContent()).isEqualTo("메시지 1");
+        // 최신순 (DESC) 이므로 가장 마지막에 저장된 a2 가 첫 요소, u1 이 마지막
+        assertThat(slice.getContent().get(0).getContent()).isEqualTo("a2");
+        assertThat(slice.getContent().get(3).getContent()).isEqualTo("u1");
+        assertThat(slice.getContent())
+                .extracting(AiChatMessage::getRole)
+                .containsOnly(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT);
+        assertThat(slice.getContent())
+                .extracting(AiChatMessage::getStatus)
+                .containsOnly(AiChatMessage.Status.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("findVisibleHistory 는 Slice 의 hasNext 를 페이지 size 와 비교해 반환한다")
+    void findVisibleHistory_hasNext() {
+        Long sessionId = nextSessionId();
+        for (int i = 1; i <= 5; i++) {
+            aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "u" + i));
+        }
+
+        Slice<AiChatMessage> firstPage = aiChatMessageRepository
+                .findVisibleHistory(sessionId, PageRequest.of(0, 3));
+        assertThat(firstPage.getContent()).hasSize(3);
+        assertThat(firstPage.hasNext()).isTrue();
+
+        Slice<AiChatMessage> secondPage = aiChatMessageRepository
+                .findVisibleHistory(sessionId, PageRequest.of(1, 3));
+        assertThat(secondPage.getContent()).hasSize(2);
+        assertThat(secondPage.hasNext()).isFalse();
     }
 
     @Test

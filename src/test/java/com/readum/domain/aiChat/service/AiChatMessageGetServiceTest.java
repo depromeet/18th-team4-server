@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
 @ExtendWith(MockitoExtension.class)
-class AiChatMessageSearchServiceTest {
+class AiChatMessageGetServiceTest {
 
     @Mock
     private AiChatSessionRepository aiChatSessionRepository;
@@ -35,7 +35,7 @@ class AiChatMessageSearchServiceTest {
     private AiChatMessageRepository aiChatMessageRepository;
 
     @InjectMocks
-    private AiChatMessageSearchService aiChatMessageSearchService;
+    private AiChatMessageGetService aiChatMessageGetService;
 
     @Test
     void 소유권_없는_세션이면_NotFoundException() {
@@ -43,7 +43,7 @@ class AiChatMessageSearchServiceTest {
         Long sessionId = 7L;
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> aiChatMessageSearchService.findBySessionId(
+        assertThatThrownBy(() -> aiChatMessageGetService.findBySessionId(
                 new MessageListCommand(userId, sessionId, 1, 20)
         ))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
@@ -73,11 +73,11 @@ class AiChatMessageSearchServiceTest {
                         AiChatMessage.Status.COMPLETED, LocalDateTime.now().minusSeconds(1)
                 )
         );
-        given(aiChatMessageRepository.findBySessionIdOrderByCreatedAtDescIdDesc(
+        given(aiChatMessageRepository.findVisibleHistory(
                 sessionId, PageRequest.of(0, 20)
         )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 20), false));
 
-        MessageListResult result = aiChatMessageSearchService.findBySessionId(
+        MessageListResult result = aiChatMessageGetService.findBySessionId(
                 new MessageListCommand(userId, sessionId, 1, 20)
         );
 

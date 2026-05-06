@@ -13,7 +13,26 @@ import java.util.List;
 
 public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Long> {
 
-    Slice<AiChatMessage> findBySessionIdOrderByCreatedAtDescIdDesc(Long sessionId, Pageable pageable);
+    /**
+     * 사용자에게 노출할 메시지 이력 조회.
+     * status=COMPLETED 인 USER/ASSISTANT 메시지만 최신순(createdAt DESC, id DESC) 페이지네이션.
+     * SYSTEM 프롬프트와 스트림 중단된 FAILED 부분 응답은 제외된다.
+     */
+    default Slice<AiChatMessage> findVisibleHistory(Long sessionId, Pageable pageable) {
+        return findSliceBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+                sessionId,
+                AiChatMessage.Status.COMPLETED,
+                List.of(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT),
+                pageable
+        );
+    }
+
+    Slice<AiChatMessage> findSliceBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+            Long sessionId,
+            AiChatMessage.Status status,
+            Collection<AiChatMessage.Role> roles,
+            Pageable pageable
+    );
 
     /**
      * 컨텍스트 윈도우용 최근 메시지 조회.
