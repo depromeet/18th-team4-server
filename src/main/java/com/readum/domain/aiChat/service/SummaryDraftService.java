@@ -17,6 +17,7 @@ import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -57,18 +58,14 @@ public class SummaryDraftService {
     }
 
     /**
-     * LLM 호출 동안 DB 커넥션과 비관적 락을 점유하지 않도록 트랜잭션을 세 단계로 분리한다.
-     *
-     * TX1 (비관적 락, 짧게): 검증 → 세션 종료 → Summary(IN_PROGRESS) 생성 → 커밋 (락 해제)
-     * TX 밖              : LLM 호출
-     * TX2 (짧게, 성공)   : Summary content 채우고 COMPLETED
-     * TX3 (짧게, 실패)   : Summary → FAILED
+     * TX1(검증 + IN_PROGRESS 저장)을 동기로 완료한 뒤 즉시 반환한다.
+     * LLM 호출과 상태 업데이트(TX2/TX3)는 @Async 메서드에서 백그라운드로 처리된다.
      */
-    public SummaryDraftResult execute(Long sessionId, String userSessionId) {
+    public void execute(Long sessionId, String userSessionId) {
         User user = userRepository.findBySessionId(userSessionId)
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
 
-        // TX1: 검증 + 세션 종료 + Summary(IN_PROGRESS) 선점
+        // TX1: 검증 + 세션 종료 + Summary(IN_PROGRESS) 선점 — 커밋 후 즉시 반환
         PreparedContext ctx = transactionTemplate.execute(status -> {
             AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
@@ -89,7 +86,19 @@ public class SummaryDraftService {
             return new PreparedContext(summary.getId(), messages);
         });
 
-        // TX 밖: LLM 호출 (커넥션·락 미점유)
+        // 백그라운드에서 LLM 호출 + 상태 업데이트
+        generateAsync(sessionId, ctx);
+    }
+
+    /**
+     * TX 밖에서 LLM을 호출하고 결과를 DB에 반영한다.
+     * @Async 로 별도 스레드에서 실행되므로 호출자는 즉시 반환된다.
+     *
+     * TX2 (성공): Summary → COMPLETED
+     * TX3 (실패): Summary → FAILED
+     */
+    @Async
+    public void generateAsync(Long sessionId, PreparedContext ctx) {
         SummaryDraftResult result;
         try {
             result = aiSummaryClient.generate(ctx.messages());
@@ -99,16 +108,14 @@ public class SummaryDraftService {
                     summaryRepository.findById(ctx.summaryId())
                             .ifPresent(Summary::fail));
             log.error("감상문 생성 실패 sessionId={}", sessionId, e);
-            throw e;
+            return;
         }
 
         // TX2: AI 성공 → content 채우고 COMPLETED
         transactionTemplate.executeWithoutResult(status ->
                 summaryRepository.findById(ctx.summaryId())
                         .ifPresent(summary -> summary.complete(result.title(), result.body(), result.quote())));
-
-        return result;
     }
 
-    private record PreparedContext(Long summaryId, List<AiChatMessage> messages) {}
+    public record PreparedContext(Long summaryId, List<AiChatMessage> messages) {}
 }

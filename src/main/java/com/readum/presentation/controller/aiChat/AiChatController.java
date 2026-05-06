@@ -3,7 +3,6 @@ package com.readum.presentation.controller.aiChat;
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
-import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.dto.SummaryResult;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
@@ -18,7 +17,6 @@ import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
 import com.readum.presentation.controller.aiChat.dto.SummaryDraftEligibilityResponse;
-import com.readum.presentation.controller.aiChat.dto.SummaryDraftResponse;
 import com.readum.presentation.controller.aiChat.dto.SummaryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.headers.Header;
@@ -225,23 +223,27 @@ public class AiChatController {
     }
 
     @Operation(
-            summary = "감상문 초안 생성",
-            description = "AI 채팅 세션의 대화 내용을 바탕으로 감상문 초안(제목·본문·인상 깊은 구절)을 생성하고 세션을 종료한다. " +
-                    "누적 토큰이 임계값에 미치지 못하면 422 를 반환한다."
+            summary = "감상문 초안 생성 요청",
+            description = """
+                    AI 채팅 세션의 대화 내용을 바탕으로 감상문 초안 생성을 요청한다.
+                    세션 검증 후 즉시 202를 반환하며, 실제 생성은 백그라운드에서 진행된다.
+                    생성 결과는 GET /sessions/{sessionId}/summary 로 폴링하여 확인한다.
+                    누적 토큰이 임계값에 미치지 못하면 422 를 반환한다.
+                    """
     )
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "감상문 초안 생성 성공"),
+            @ApiResponse(responseCode = "202", description = "생성 요청 접수. 백그라운드에서 진행 중"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
             @ApiResponse(responseCode = "409", description = "이미 감상문이 작성된 세션"),
             @ApiResponse(responseCode = "422", description = "누적 토큰 부족으로 초안 생성 불가")
     })
     @PostMapping("/sessions/{sessionId}/summary-draft")
-    public ResponseEntity<GlobalApiResponse<SummaryDraftResponse>> createSummaryDraft(
+    public ResponseEntity<Void> createSummaryDraft(
             @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId
     ) {
-        SummaryDraftResult result = summaryDraftService.execute(sessionId, userSessionId);
-        return GlobalApiResponse.ok(SummaryDraftResponse.from(result));
+        summaryDraftService.execute(sessionId, userSessionId);
+        return ResponseEntity.accepted().build();
     }
 }
