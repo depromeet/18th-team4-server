@@ -2,10 +2,12 @@ package com.readum.presentation.controller.aiChat;
 
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
+import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
+import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
@@ -13,6 +15,7 @@ import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateResponse
 import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
+import com.readum.presentation.controller.aiChat.dto.SummaryDraftEligibilityResponse;
 import com.readum.presentation.controller.aiChat.dto.SummaryDraftResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.headers.Header;
@@ -45,6 +48,7 @@ public class AiChatController {
     private final AiChatMessageSendService aiChatMessageSendService;
     private final AiChatMessageSearchService aiChatMessageSearchService;
     private final SummaryDraftService summaryDraftService;
+    private final SummaryDraftSearchService summaryDraftSearchService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
 
     @Operation(
@@ -167,6 +171,26 @@ public class AiChatController {
     ) {
         MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userId, sessionId));
         return GlobalApiResponse.ok(MessageListResponse.from(result));
+    }
+
+    @Operation(
+            summary = "감상문 초안 생성 가능 여부 조회",
+            description = "AI 채팅 세션이 감상문 초안 생성 조건(미종료 + 누적 토큰 충족)을 만족하는지 검사한다. " +
+                    "부수 효과 없이 가능 여부와 사유만 반환한다. " +
+                    "세션 미존재 또는 본인 소유가 아닌 세션은 404로 응답한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "가능 여부 조회 성공 (eligible=false 일 수 있음)"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "세션을 찾을 수 없음 또는 본인 소유가 아님")
+    })
+    @GetMapping("/sessions/{sessionId}/summary-draft/eligibility")
+    public ResponseEntity<GlobalApiResponse<SummaryDraftEligibilityResponse>> getSummaryDraftEligibility(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long sessionId
+    ) {
+        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(sessionId, userId);
+        return GlobalApiResponse.ok(SummaryDraftEligibilityResponse.from(result));
     }
 
     @Operation(
