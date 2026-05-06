@@ -5,9 +5,13 @@ import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.MessageResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.user.entity.User;
+import com.readum.model.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
@@ -17,11 +21,15 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AiChatMessageSearchService {
 
+    private final UserRepository userRepository;
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
 
     public MessageListResult findBySessionId(MessageListCommand command) {
-        aiChatSessionRepository.findByIdAndOwner(command.sessionId(), command.userId())
+        User user = userRepository.findBySessionId(command.userSessionId())
+                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
+
+        aiChatSessionRepository.findByIdAndOwner(command.sessionId(), user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         int pageIndex = Math.max(0, command.page() - 1);

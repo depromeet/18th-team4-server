@@ -1,7 +1,7 @@
 package com.readum.domain.aiChat.dto;
 
 public record SendMessageCommand(
-        Long userId,
+        String userSessionId,
         Long sessionId,
         String content
 ) {

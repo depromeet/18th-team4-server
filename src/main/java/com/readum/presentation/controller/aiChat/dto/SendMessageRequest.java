@@ -13,7 +13,7 @@ public record SendMessageRequest(
         String content
 ) {
 
-    public SendMessageCommand toCommand(Long userId, Long sessionId) {
-        return new SendMessageCommand(userId, sessionId, content);
+    public SendMessageCommand toCommand(String userSessionId, Long sessionId) {
+        return new SendMessageCommand(userSessionId, sessionId, content);
     }
 }

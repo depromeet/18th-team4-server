@@ -1,7 +1,5 @@
 package com.readum.presentation.controller.user;
 
-import com.readum.domain.auth.exception.AuthErrorCode;
-import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.userbook.dto.UserBookCreateResult;
 import com.readum.domain.user.userbook.service.UserBookCreateService;
 import com.readum.presentation.common.GlobalApiResponse;
@@ -15,7 +13,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -43,12 +41,9 @@ public class UserBookController {
     })
     @PostMapping
     public ResponseEntity<GlobalApiResponse<UserBookResponse>> create(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @Valid @RequestBody UserBookCreateRequest request) {
-        if (userId == null) {
-            throw new UnauthorizedException(AuthErrorCode.INVALID_TOKEN);
-        }
-        UserBookCreateResult result = userBookCreateService.execute(request.toCommand(userId));
+        UserBookCreateResult result = userBookCreateService.execute(request.toCommand(userSessionId));
         UserBookResponse response = UserBookResponse.from(result);
 
         return ResponseEntity
