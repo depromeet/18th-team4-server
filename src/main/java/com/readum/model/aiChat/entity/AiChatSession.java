@@ -21,8 +21,7 @@ import java.time.LocalDateTime;
 @Table(
         name = "ai_chat_session",
         indexes = {
-                @Index(name = "idx_ai_chat_session_user_book", columnList = "user_book_id"),
-                @Index(name = "idx_ai_chat_session_user_book_updated_at", columnList = "user_book_id, updated_at")
+                @Index(name = "idx_ai_chat_session_user_book", columnList = "user_book_id")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
