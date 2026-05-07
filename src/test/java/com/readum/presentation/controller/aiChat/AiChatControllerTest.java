@@ -150,7 +150,7 @@ class AiChatControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AiChatSessionCreateRequest(999_999L))))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error.message").value("해당 도서를 찾을 수 없습니다."));
+                .andExpect(jsonPath("$.error.message").value("등록된 도서가 아닙니다."));
     }
 
     // ── 세션 목록 조회 ──────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ class AiChatControllerTest {
                         .param("page", "1")
                         .param("size", "20"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error.message").value("해당 도서를 찾을 수 없습니다."));
+                .andExpect(jsonPath("$.error.message").value("등록된 도서가 아닙니다."));
     }
 
     // ── 메시지 전송 ──────────────────────────────────────────────────────

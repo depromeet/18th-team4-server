@@ -4,7 +4,7 @@ import com.readum.domain.exception.ErrorCode;
 
 public enum AiChatErrorCode implements ErrorCode {
 
-    USER_BOOK_NOT_FOUND("해당 도서를 찾을 수 없습니다."),
+    USER_BOOK_NOT_FOUND("등록된 도서가 아닙니다."),
     SESSION_NOT_FOUND("세션을 찾을 수 없습니다."),
     SESSION_CLOSED("종료된 세션에는 메시지를 보낼 수 없습니다."),
     SESSION_ALREADY_CLOSED("이미 감상문이 작성된 세션입니다."),
