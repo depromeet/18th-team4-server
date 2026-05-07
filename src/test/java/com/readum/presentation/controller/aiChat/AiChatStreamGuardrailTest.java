@@ -7,6 +7,7 @@ import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.presentation.common.GlobalExceptionHandler;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
-import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import reactor.core.publisher.Flux;
@@ -40,6 +40,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class AiChatStreamGuardrailTest {
 
+    private static final Cookie USER_SESSION_COOKIE = new Cookie("user_session", "test-session-id");
+
     @Mock
     private AiChatSessionCreateService aiChatSessionCreateService;
 
@@ -61,15 +63,16 @@ class AiChatStreamGuardrailTest {
     void setUp() {
         AiChatController controller = new AiChatController(
                 aiChatSessionCreateService,
+                null,
                 aiChatMessageSendService,
                 aiChatMessageSearchService,
                 summaryDraftService,
+                null,
                 null,
                 new MessageStreamSseSerializer(objectMapper)
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
-                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .build();
     }
 
@@ -79,6 +82,7 @@ class AiChatStreamGuardrailTest {
         SendMessageRequest body = new SendMessageRequest(tooLong);
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
+                        .cookie(USER_SESSION_COOKIE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isBadRequest())
@@ -90,6 +94,7 @@ class AiChatStreamGuardrailTest {
         SendMessageRequest body = new SendMessageRequest("   ");
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
+                        .cookie(USER_SESSION_COOKIE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isBadRequest())
@@ -110,6 +115,7 @@ class AiChatStreamGuardrailTest {
         SendMessageRequest body = new SendMessageRequest("이 책의 줄거리를 요약해줘");
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
+                        .cookie(USER_SESSION_COOKIE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.TEXT_EVENT_STREAM)
                         .content(objectMapper.writeValueAsString(body)))

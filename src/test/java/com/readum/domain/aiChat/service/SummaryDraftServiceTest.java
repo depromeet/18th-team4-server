@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -78,8 +79,8 @@ class SummaryDraftServiceTest {
     @BeforeEach
     void setUp() {
         User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
-                java.time.LocalDateTime.now(), java.time.LocalDateTime.now());
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(java.util.Optional.of(testUser));
+                LocalDateTime.now(), LocalDateTime.now());
+        lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
         summaryDraftService = new SummaryDraftService(
                 userRepository,
                 aiChatSessionRepository,
@@ -93,8 +94,7 @@ class SummaryDraftServiceTest {
     }
 
     @Test
-    void 정상_요청시_감상문_초안을_반환하고_세션을_닫고_Summary를_COMPLETED로_저장한다() {
-        // given
+    void 정상_요청시_세션을_닫고_Summary를_COMPLETED로_저장한다() {
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
         List<AiChatMessage> messages = List.of(
                 userMessage(SESSION_ID, "이 책에서 가장 인상 깊은 장면은?"),
@@ -112,11 +112,8 @@ class SummaryDraftServiceTest {
         given(summaryRepository.findById(SUMMARY_ID)).willReturn(Optional.of(inProgressSummary));
         given(aiSummaryClient.generate(messages)).willReturn(expected);
 
-        // when
-        SummaryDraftResult result = summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
+        summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
-        // then
-        assertThat(result).isEqualTo(expected);
         assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.CLOSED);
         assertThat(inProgressSummary.getStatus()).isEqualTo(Summary.Status.COMPLETED);
         assertThat(inProgressSummary.getTitle()).isEqualTo("나의 독서 감상");
@@ -126,7 +123,6 @@ class SummaryDraftServiceTest {
 
     @Test
     void AI_호출_실패시_Summary가_FAILED로_마킹된다() {
-        // given
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
         Summary inProgressSummary = Summary.createInProgress(USER_BOOK_ID, SESSION_ID);
 
@@ -139,9 +135,7 @@ class SummaryDraftServiceTest {
         given(summaryRepository.findById(SUMMARY_ID)).willReturn(Optional.of(inProgressSummary));
         given(aiSummaryClient.generate(any())).willThrow(new RuntimeException("AI 오류"));
 
-        // when & then
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(RuntimeException.class);
+        summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
         assertThat(inProgressSummary.getStatus()).isEqualTo(Summary.Status.FAILED);
     }
@@ -151,9 +145,9 @@ class SummaryDraftServiceTest {
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(NotFoundException.class)
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND));
+                .extracting(NotFoundException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
 
         verify(aiSummaryClient, never()).generate(any());
         verify(summaryRepository, never()).save(any());
@@ -166,9 +160,9 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(NotFoundException.class)
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND));
+                .extracting(NotFoundException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
 
         verify(aiSummaryClient, never()).generate(any());
         verify(summaryRepository, never()).save(any());
@@ -184,9 +178,9 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(ConflictException.class)
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.SESSION_ALREADY_CLOSED));
+                .extracting(ConflictException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SESSION_ALREADY_CLOSED);
 
         verify(aiSummaryClient, never()).generate(any());
         verify(summaryRepository, never()).save(any());
@@ -199,15 +193,13 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(UnprocessableEntityException.class)
                 .asInstanceOf(InstanceOfAssertFactories.type(UnprocessableEntityException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH));
+                .extracting(UnprocessableEntityException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
 
         verify(aiSummaryClient, never()).generate(any());
         verify(summaryRepository, never()).save(any());
     }
-
-    // ── 픽스처 헬퍼 ──────────────────────────────────────────────────────────
 
     private AiChatSession activeSession(int accumulatedTokens) {
         return AiChatSession.of(
@@ -227,7 +219,7 @@ class SummaryDraftServiceTest {
     }
 
     /**
-     * TransactionTemplate 이 콜백을 그대로 실행하도록 한 테스트 전용 noop 매니저.
+     * TransactionTemplate 가 콜백을 그대로 실행하도록 한 테스트 전용 noop 매니저.
      */
     private static final class NoopTransactionManager implements PlatformTransactionManager {
         @Override

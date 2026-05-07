@@ -12,8 +12,12 @@ import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
+import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
+import com.readum.model.user.entity.User;
+import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +52,12 @@ import static org.mockito.Mockito.verify;
 @ExtendWith(MockitoExtension.class)
 class AiChatMessageSendServiceTest {
 
+    private static final Long USER_ID = 1L;
+    private static final String USER_SESSION_ID = "test-session-id";
+
+    @Mock
+    private UserRepository userRepository;
+
     @Mock
     private AiChatMessagePersistService persistService;
 
@@ -67,12 +77,16 @@ class AiChatMessageSendServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiChatMessageSendService(persistService, aiChatClient, aiChatProperties, aiChatMessageRepository);
+        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+                LocalDateTime.now(), LocalDateTime.now());
+        org.mockito.Mockito.lenient().when(userRepository.findBySessionId(USER_SESSION_ID))
+                .thenReturn(java.util.Optional.of(testUser));
+        service = new AiChatMessageSendService(userRepository, persistService, aiChatClient, aiChatProperties, aiChatMessageRepository);
     }
 
     @Test
     void 빈_본문이면_BadRequest_MESSAGE_CONTENT_BLANK() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "   ");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "   ");
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -86,7 +100,7 @@ class AiChatMessageSendServiceTest {
     void NBSP_등_유니코드_공백만_있으면_BadRequest_MESSAGE_CONTENT_BLANK() {
         // Character.isWhitespace() 가 빠뜨리는 NBSP(U+00A0) / Narrow NBSP(U+202F) /
         // Figure Space(U+2007) 만 들어와도 빈 본문으로 거절되어야 한다.
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "    ");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "    ");
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -98,7 +112,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 본문이_4001자면_BadRequest_MESSAGE_CONTENT_TOO_LONG() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "가".repeat(4001));
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "가".repeat(4001));
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -110,7 +124,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 최근_USER_메시지_카운트가_한도_미만이면_rate_limit_검사를_통과한다() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
                 .willReturn(4L);
         given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
@@ -129,7 +143,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 최근_USER_메시지_카운트가_한도_도달이면_TooManyRequestsException_을_던진다() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
                 .willReturn(5L);
 
@@ -144,7 +158,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 한도_초과_시_RateLimitInfo_에_retryAfter_와_limit_정보가_담긴다() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
                 .willReturn(7L);
 
@@ -161,7 +175,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void rate_limit_카운트_쿼리는_count_period_초만큼_과거_시점부터_조회한다() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
                 .willReturn(0L);
         given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
@@ -186,7 +200,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 사전_단계에서_NotFoundException_이_던져지면_그대로_전파된다() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
                 .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
@@ -198,7 +212,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 사전_단계에서_BadRequestException_SESSION_CLOSED_도_그대로_전파된다() {
-        SendMessageCommand command = new SendMessageCommand(1L, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
                 .willThrow(new BadRequestException(AiChatErrorCode.SESSION_CLOSED));
 
@@ -211,7 +225,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 정상_스트림이면_Token_여러개와_Done_이벤트가_방출되고_ASSISTANT_가_저장된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(1L, sessionId, "주제 요약");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "주제 요약");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "주제 요약"))
                 .willReturn(List.of());
@@ -255,7 +269,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 스트림_도중_에러가_나면_FAILED_가_저장되고_Error_이벤트가_방출된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(1L, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
                 .willReturn(List.of());
@@ -283,7 +297,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void TooManyRequestsException_BURST_이면_AI_RATE_LIMIT_BURST_코드와_RateLimitInfo_가_Error_이벤트로_운반된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(1L, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
                 .willReturn(List.of());
@@ -308,7 +322,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void TooManyRequestsException_QUOTA_EXHAUSTED_이면_AI_QUOTA_EXHAUSTED_코드의_Error_이벤트가_방출된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(1L, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
                 .willReturn(List.of());
@@ -329,7 +343,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 토큰_도중_클라이언트가_disconnect_하면_부분_응답이_FAILED_로_저장된다() throws InterruptedException {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(1L, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
                 .willReturn(List.of());
@@ -360,7 +374,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void Completion_메타까지_받은_뒤_disconnect_하면_COMPLETED_로_저장된다() throws InterruptedException {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(1L, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
                 .willReturn(List.of());
@@ -398,7 +412,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 첫_토큰도_받기_전에_disconnect_하면_ASSISTANT_메시지를_저장하지_않는다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(1L, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
                 .willReturn(List.of());
@@ -418,7 +432,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 이전_이력이_있으면_LLM_호출_시_history_와_현재_user_메시지가_함께_전달된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(1L, sessionId, "이번 질문");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "이번 질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "이번 질문"))
                 .willReturn(List.of(

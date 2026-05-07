@@ -9,8 +9,11 @@ import com.readum.domain.user.userbook.exception.UserBookErrorCode;
 import com.readum.model.book.entity.Book;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.book.repository.BookRepository;
+import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -32,6 +35,9 @@ import static org.mockito.Mockito.verify;
 class UserBookCreateServiceTest {
 
     @Mock
+    private UserRepository userRepository;
+
+    @Mock
     private BookLookupClient bookLookupClient;
 
     @Mock
@@ -47,6 +53,7 @@ class UserBookCreateServiceTest {
     private UserBookCreateService userBookCreateService;
 
     private static final Long USER_ID = 1L;
+    private static final String USER_SESSION_ID = "test-session-id";
     private static final Long BOOK_ID = 10L;
     private static final String EXTERNAL_ID = "9788965700807";
     private static final String TITLE = "테스트 책";
@@ -55,8 +62,16 @@ class UserBookCreateServiceTest {
     private static final Integer PUBLISHED_YEAR = 2024;
     private static final String COVER_URL = "http://example.com/cover.jpg";
 
+    @BeforeEach
+    void setUp() {
+        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+                LocalDateTime.now(), LocalDateTime.now());
+        org.mockito.Mockito.lenient().when(userRepository.findBySessionId(USER_SESSION_ID))
+                .thenReturn(Optional.of(testUser));
+    }
+
     private UserBookCreateCommand command() {
-        return new UserBookCreateCommand(USER_ID, EXTERNAL_ID);
+        return new UserBookCreateCommand(USER_SESSION_ID, EXTERNAL_ID);
     }
 
     private BookResult stubBookResult() {
