@@ -3,7 +3,8 @@ package com.readum.presentation.controller.user.dto;
 import com.readum.domain.user.userbook.dto.UserBookSearchItemResult;
 
 public record UserBookListItemResponse(
-        Long id,
+        Long userBookId,
+        Long bookId,
         String title,
         String publisher,
         Integer publishedYear,
@@ -12,7 +13,8 @@ public record UserBookListItemResponse(
 
     public static UserBookListItemResponse from(UserBookSearchItemResult item) {
         return new UserBookListItemResponse(
-                item.id(),
+                item.userBookId(),
+                item.bookId(),
                 item.title(),
                 item.publisher(),
                 item.publishedYear(),

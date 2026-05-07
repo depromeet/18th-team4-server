@@ -20,7 +20,8 @@ public interface UserBookRepository extends JpaRepository<UserBook, Long> {
 
     @Query("""
             select new com.readum.model.user.repository.projection.UserBookListItemProjection(
-                       book.id
+                       userBook.id
+                     , book.id
                      , book.title
                      , book.publisher
                      , book.publishedYear

@@ -127,20 +127,22 @@ class UserBookControllerTest {
     @Test
     void 유효한_user_session_쿠키로_GET_요청시_200과_등록_도서_목록을_반환한다() throws Exception {
         UserBookSearchResult searchResult = new UserBookSearchResult(List.of(
-                new UserBookSearchItemResult(2L, "최근 등록한 책", "출판사B", 2025, "http://example.com/b.jpg"),
-                new UserBookSearchItemResult(1L, "이전에 등록한 책", "출판사A", 2024, "http://example.com/a.jpg")
+                new UserBookSearchItemResult(20L, 2L, "최근 등록한 책", "출판사B", 2025, "http://example.com/b.jpg"),
+                new UserBookSearchItemResult(10L, 1L, "이전에 등록한 책", "출판사A", 2024, "http://example.com/a.jpg")
         ));
         given(userBookSearchService.findMyBooks("test-session-id")).willReturn(searchResult);
 
         mockMvc.perform(get("/api/v1/user-books").cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.books.length()").value(2))
-                .andExpect(jsonPath("$.data.books[0].id").value(2))
+                .andExpect(jsonPath("$.data.books[0].userBookId").value(20))
+                .andExpect(jsonPath("$.data.books[0].bookId").value(2))
                 .andExpect(jsonPath("$.data.books[0].title").value("최근 등록한 책"))
                 .andExpect(jsonPath("$.data.books[0].publisher").value("출판사B"))
                 .andExpect(jsonPath("$.data.books[0].publishedYear").value(2025))
                 .andExpect(jsonPath("$.data.books[0].coverUrl").value("http://example.com/b.jpg"))
-                .andExpect(jsonPath("$.data.books[1].id").value(1))
+                .andExpect(jsonPath("$.data.books[1].userBookId").value(10))
+                .andExpect(jsonPath("$.data.books[1].bookId").value(1))
                 .andExpect(jsonPath("$.data.books[1].title").value("이전에 등록한 책"))
                 .andExpect(jsonPath("$.error").doesNotExist());
     }
