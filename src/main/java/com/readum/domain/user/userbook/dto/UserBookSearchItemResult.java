@@ -3,7 +3,8 @@ package com.readum.domain.user.userbook.dto;
 import com.readum.model.user.repository.projection.UserBookListItemProjection;
 
 public record UserBookSearchItemResult(
-        Long id,
+        Long userBookId,
+        Long bookId,
         String title,
         String publisher,
         Integer publishedYear,
@@ -12,7 +13,8 @@ public record UserBookSearchItemResult(
 
     public static UserBookSearchItemResult from(UserBookListItemProjection projection) {
         return new UserBookSearchItemResult(
-                projection.id(),
+                projection.userBookId(),
+                projection.bookId(),
                 projection.title(),
                 projection.publisher(),
                 projection.publishedYear(),

@@ -94,23 +94,25 @@ class UserBookRepositoryTest {
                 uniqueExternalId(), "남의 책", "저자C", "출판사C", 2023, "http://example.com/c.jpg"));
 
         LocalDateTime baseTime = LocalDateTime.of(2025, 1, 1, 0, 0);
-        userBookRepository.save(UserBook.of(null, userId, older.getId(), baseTime));
-        userBookRepository.save(UserBook.of(null, userId, newer.getId(), baseTime.plusMinutes(1)));
+        UserBook olderUserBook = userBookRepository.save(UserBook.of(null, userId, older.getId(), baseTime));
+        UserBook newerUserBook = userBookRepository.save(UserBook.of(null, userId, newer.getId(), baseTime.plusMinutes(1)));
         userBookRepository.save(UserBook.of(null, otherUserId, otherUserBook.getId(), baseTime.plusMinutes(2)));
 
         List<UserBookListItemProjection> projections =
                 userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
 
         assertThat(projections).hasSize(2);
-        assertThat(projections.get(0).id()).isEqualTo(newer.getId());
+        assertThat(projections.get(0).userBookId()).isEqualTo(newerUserBook.getId());
+        assertThat(projections.get(0).bookId()).isEqualTo(newer.getId());
         assertThat(projections.get(0).title()).isEqualTo("최근 등록한 책");
         assertThat(projections.get(0).publisher()).isEqualTo("출판사B");
         assertThat(projections.get(0).publishedYear()).isEqualTo(2025);
         assertThat(projections.get(0).coverUrl()).isEqualTo("http://example.com/b.jpg");
-        assertThat(projections.get(1).id()).isEqualTo(older.getId());
+        assertThat(projections.get(1).userBookId()).isEqualTo(olderUserBook.getId());
+        assertThat(projections.get(1).bookId()).isEqualTo(older.getId());
         assertThat(projections.get(1).title()).isEqualTo("이전에 등록한 책");
         assertThat(projections)
-                .extracting(UserBookListItemProjection::id)
+                .extracting(UserBookListItemProjection::bookId)
                 .doesNotContain(otherUserBook.getId());
     }
 
@@ -133,8 +135,10 @@ class UserBookRepositoryTest {
 
         assertThat(projections).hasSize(2);
         assertThat(second.getId()).isGreaterThan(first.getId());
-        assertThat(projections.get(0).id()).isEqualTo(book2.getId());
-        assertThat(projections.get(1).id()).isEqualTo(book1.getId());
+        assertThat(projections.get(0).userBookId()).isEqualTo(second.getId());
+        assertThat(projections.get(0).bookId()).isEqualTo(book2.getId());
+        assertThat(projections.get(1).userBookId()).isEqualTo(first.getId());
+        assertThat(projections.get(1).bookId()).isEqualTo(book1.getId());
     }
 
     @Test
