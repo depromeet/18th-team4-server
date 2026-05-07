@@ -13,7 +13,7 @@ public record MessageListRequest(
         int size
 ) {
 
-    public MessageListCommand toCommand(Long userId, Long sessionId) {
-        return new MessageListCommand(userId, sessionId, page, size);
+    public MessageListCommand toCommand(String userSessionId, Long sessionId) {
+        return new MessageListCommand(userSessionId, sessionId, page, size);
     }
 }

@@ -5,11 +5,16 @@ import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -23,6 +28,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -33,9 +39,13 @@ class SummaryDraftSearchServiceTest {
 
     private static final Long SESSION_ID = 1L;
     private static final Long USER_ID = 10L;
+    private static final String USER_SESSION_ID = "test-session-id";
     private static final Long USER_BOOK_ID = 1L;
     private static final int SUFFICIENT_TOKENS = 600;
     private static final int INSUFFICIENT_TOKENS = 100;
+
+    @Mock
+    private UserRepository userRepository;
 
     @Mock
     private AiChatSessionRepository aiChatSessionRepository;
@@ -49,11 +59,28 @@ class SummaryDraftSearchServiceTest {
     @InjectMocks
     private SummaryDraftSearchService summaryDraftSearchService;
 
+    @BeforeEach
+    void setUp() {
+        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+                LocalDateTime.now(), LocalDateTime.now());
+        lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
+    }
+
+    @Test
+    void 유효하지_않은_세션이면_UnauthorizedException() {
+        given(userRepository.findBySessionId("invalid")).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summaryDraftSearchService.findEligibility(SESSION_ID, "invalid"))
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
+                .isEqualTo(UserErrorCode.INVALID_SESSION);
+    }
+
     @Test
     void 세션이_없으면_NotFoundException이_발생한다() {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summaryDraftSearchService.findEligibility(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftSearchService.findEligibility(SESSION_ID, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
@@ -67,7 +94,7 @@ class SummaryDraftSearchServiceTest {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summaryDraftSearchService.findEligibility(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftSearchService.findEligibility(SESSION_ID, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
@@ -79,7 +106,7 @@ class SummaryDraftSearchServiceTest {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
-        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(SESSION_ID, USER_ID);
+        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(SESSION_ID, USER_SESSION_ID);
 
         assertThat(result.eligible()).isTrue();
         assertThat(result.reason()).isNull();
@@ -92,7 +119,7 @@ class SummaryDraftSearchServiceTest {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
-        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(SESSION_ID, USER_ID);
+        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(SESSION_ID, USER_SESSION_ID);
 
         assertThat(result.eligible()).isFalse();
         assertThat(result.reason()).isEqualTo(IneligibleReason.SESSION_ALREADY_CLOSED.name());
@@ -105,7 +132,7 @@ class SummaryDraftSearchServiceTest {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
-        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(SESSION_ID, USER_ID);
+        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(SESSION_ID, USER_SESSION_ID);
 
         assertThat(result.eligible()).isFalse();
         assertThat(result.reason()).isEqualTo(IneligibleReason.CHAT_VOLUME_NOT_ENOUGH.name());
@@ -118,7 +145,7 @@ class SummaryDraftSearchServiceTest {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
-        summaryDraftSearchService.findEligibility(SESSION_ID, USER_ID);
+        summaryDraftSearchService.findEligibility(SESSION_ID, USER_SESSION_ID);
 
         verify(aiChatSessionRepository, never()).findByIdForUpdate(SESSION_ID);
         assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.ACTIVE);

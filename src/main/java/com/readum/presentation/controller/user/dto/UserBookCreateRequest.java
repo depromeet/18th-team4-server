@@ -10,7 +10,7 @@ public record UserBookCreateRequest(
         @NotBlank String bookExternalId
 ) {
 
-    public UserBookCreateCommand toCommand(Long userId) {
-        return new UserBookCreateCommand(userId, bookExternalId);
+    public UserBookCreateCommand toCommand(String userSessionId) {
+        return new UserBookCreateCommand(userSessionId, bookExternalId);
     }
 }

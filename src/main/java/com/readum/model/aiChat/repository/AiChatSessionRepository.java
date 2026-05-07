@@ -2,6 +2,7 @@ package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
+import com.readum.model.summary.entity.Summary;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
@@ -48,19 +49,51 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
     Optional<AiChatSession> findByIdForUpdate(@Param("id") Long id);
 
     /**
-     * 특정 userBook 의 채팅 세션 목록을 최근 활동 (updatedAt) 내림차순으로 페이지 조회.
-     * lastChattedAt 은 entity 의 updatedAt 으로 근사 — appendUserMessage / addAssistantTokens /
-     * markSummarizing / close 모두에서 갱신되므로 마지막 채팅 활동 시각과 초 단위 격차 이내로 일치한다.
-     * userBook 소유권은 EXISTS 서브쿼리로 검증해 다른 사용자의 세션이 노출되지 않도록 한다.
+     * 특정 userBook 의 채팅 세션 목록 페이지 조회.
+     *
+     * 정렬: updatedAt desc, id desc — appendUserMessage / addAssistantTokens / close 모두에서
+     * updatedAt 이 갱신되므로 "최근 채팅 활동 시각" 의 근사로 충분하다.
+     *
+     * status 도출: AiChatSession.status (ACTIVE/CLOSED) 와 Summary.status (IN_PROGRESS/COMPLETED/FAILED) 를
+     * CASE 로 합성해 단일 문자열로 반환한다. 매핑 규칙은 다음과 같다.
+     *  - session ACTIVE                 → "ACTIVE"
+     *  - session CLOSED + summary IN_PROGRESS → "SUMMARIZING"
+     *  - session CLOSED + summary FAILED      → "FAILED"
+     *  - session CLOSED + 그 외 (COMPLETED 또는 summary 없음) → "CLOSED"
+     *
+     * Summary 와 AiChatSession 사이에 JPA 연관관계가 없어 left join 의 on 절로 직접 매칭한다.
+     * Hibernate 6+ 의 entity-without-association join 문법.
+     *
+     * 호출자 시그니처를 단순하게 유지하기 위해 default 메서드로 감싸고, 내부 @Query 에 enum 파라미터를 바인딩한다.
      */
+    default Slice<AiChatSessionListProjection> findSessionsByUserBookIdAndOwner(
+            Long userBookId, Long userId, Pageable pageable
+    ) {
+        return findSessionsByUserBookIdAndOwnerInternal(
+                userBookId,
+                userId,
+                AiChatSession.Status.ACTIVE,
+                Summary.Status.IN_PROGRESS,
+                Summary.Status.FAILED,
+                pageable
+        );
+    }
+
     @Query("""
             select new com.readum.model.aiChat.repository.projection.AiChatSessionListProjection(
                        aiChatSession.id
                      , aiChatSession.title
-                     , aiChatSession.status
+                     , case
+                           when aiChatSession.status = :activeStatus then 'ACTIVE'
+                           when summary.status = :summaryInProgressStatus then 'SUMMARIZING'
+                           when summary.status = :summaryFailedStatus then 'FAILED'
+                           else 'CLOSED'
+                       end
                      , aiChatSession.updatedAt
                    )
               from AiChatSession aiChatSession
+              left join Summary summary
+                     on summary.aiChatSessionId = aiChatSession.id
              where aiChatSession.userBookId = :userBookId
                and exists (
                      select 1
@@ -70,9 +103,12 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                    )
              order by aiChatSession.updatedAt desc, aiChatSession.id desc
             """)
-    Slice<AiChatSessionListProjection> findSessionsByUserBookIdAndOwner(
+    Slice<AiChatSessionListProjection> findSessionsByUserBookIdAndOwnerInternal(
             @Param("userBookId") Long userBookId,
             @Param("userId") Long userId,
+            @Param("activeStatus") AiChatSession.Status activeStatus,
+            @Param("summaryInProgressStatus") Summary.Status summaryInProgressStatus,
+            @Param("summaryFailedStatus") Summary.Status summaryFailedStatus,
             Pageable pageable
     );
 }

@@ -4,12 +4,16 @@ import com.readum.domain.aiChat.dto.AiChatSessionListCommand;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.NotFoundException;
-import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
+import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -25,10 +29,18 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 class AiChatSessionGetServiceTest {
+
+    private static final String USER_SESSION_ID = "test-session-id";
+    private static final Long USER_ID = 1L;
+    private static final Long USER_BOOK_ID = 100L;
+
+    @Mock
+    private UserRepository userRepository;
 
     @Mock
     private AiChatSessionRepository aiChatSessionRepository;
@@ -39,14 +51,31 @@ class AiChatSessionGetServiceTest {
     @InjectMocks
     private AiChatSessionGetService aiChatSessionGetService;
 
+    @BeforeEach
+    void setUp() {
+        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+                LocalDateTime.now(), LocalDateTime.now());
+        lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
+    }
+
     @Test
-    void 소유권_없는_userBookId_면_NotFoundException() {
-        Long userId = 1L;
-        Long userBookId = 100L;
-        given(userBookRepository.findByIdAndUserId(userBookId, userId)).willReturn(Optional.empty());
+    void 유효하지_않은_user_session_쿠키면_UnauthorizedException() {
+        given(userRepository.findBySessionId("invalid")).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> aiChatSessionGetService.findByUserBookId(
-                new AiChatSessionListCommand(userId, userBookId, 1, 20)
+                new AiChatSessionListCommand("invalid", USER_BOOK_ID, 1, 20)
+        ))
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
+                .isEqualTo(UserErrorCode.INVALID_SESSION);
+    }
+
+    @Test
+    void 소유권_없는_userBookId_면_NotFoundException() {
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> aiChatSessionGetService.findByUserBookId(
+                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
         ))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
@@ -55,15 +84,13 @@ class AiChatSessionGetServiceTest {
 
     @Test
     void 세션이_없으면_빈_배열과_hasNext_false_를_반환한다() {
-        Long userId = 1L;
-        Long userBookId = 100L;
-        given(userBookRepository.findByIdAndUserId(userBookId, userId)).willReturn(Optional.of(mock(UserBook.class)));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
         given(aiChatSessionRepository.findSessionsByUserBookIdAndOwner(
-                userBookId, userId, PageRequest.of(0, 20)
+                USER_BOOK_ID, USER_ID, PageRequest.of(0, 20)
         )).willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, 20), false));
 
         AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(
-                new AiChatSessionListCommand(userId, userBookId, 1, 20)
+                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
         );
 
         assertThat(result.sessions()).isEmpty();
@@ -73,49 +100,44 @@ class AiChatSessionGetServiceTest {
     }
 
     @Test
-    void ACTIVE_SUMMARIZING_CLOSED_가_섞여있어도_상태_그대로_변환된다() {
-        Long userId = 1L;
-        Long userBookId = 100L;
-        given(userBookRepository.findByIdAndUserId(userBookId, userId)).willReturn(Optional.of(mock(UserBook.class)));
+    void ACTIVE_SUMMARIZING_CLOSED_FAILED_상태가_그대로_변환된다() {
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
         LocalDateTime base = LocalDateTime.of(2026, 5, 7, 12, 0, 0);
+        // Repository 가 status 를 이미 String 으로 도출해 내려보낸다 — service 는 그대로 전달만.
         List<AiChatSessionListProjection> rows = List.of(
-                new AiChatSessionListProjection(3L, "최근 세션", AiChatSession.Status.SUMMARIZING, base.plusMinutes(2)),
-                new AiChatSessionListProjection(2L, "두 번째", AiChatSession.Status.ACTIVE, base.plusMinutes(1)),
-                new AiChatSessionListProjection(1L, "오래된", AiChatSession.Status.CLOSED, base)
+                new AiChatSessionListProjection(4L, "최근", "SUMMARIZING", base.plusMinutes(3)),
+                new AiChatSessionListProjection(3L, "활성", "ACTIVE", base.plusMinutes(2)),
+                new AiChatSessionListProjection(2L, "종료", "CLOSED", base.plusMinutes(1)),
+                new AiChatSessionListProjection(1L, "실패", "FAILED", base)
         );
         given(aiChatSessionRepository.findSessionsByUserBookIdAndOwner(
-                userBookId, userId, PageRequest.of(0, 20)
+                USER_BOOK_ID, USER_ID, PageRequest.of(0, 20)
         )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 20), false));
 
         AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(
-                new AiChatSessionListCommand(userId, userBookId, 1, 20)
+                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
         );
 
-        assertThat(result.sessions()).hasSize(3);
-        assertThat(result.sessions().get(0).status()).isEqualTo(AiChatSession.Status.SUMMARIZING);
-        assertThat(result.sessions().get(1).status()).isEqualTo(AiChatSession.Status.ACTIVE);
-        assertThat(result.sessions().get(2).status()).isEqualTo(AiChatSession.Status.CLOSED);
-        assertThat(result.sessions().get(0).title()).isEqualTo("최근 세션");
-        assertThat(result.sessions().get(0).lastChattedAt()).isEqualTo(base.plusMinutes(2));
+        assertThat(result.sessions()).hasSize(4);
+        assertThat(result.sessions()).extracting("status")
+                .containsExactly("SUMMARIZING", "ACTIVE", "CLOSED", "FAILED");
     }
 
     @Test
     void 다음_페이지가_있으면_hasNext_true_를_반환한다() {
-        Long userId = 1L;
-        Long userBookId = 100L;
-        given(userBookRepository.findByIdAndUserId(userBookId, userId)).willReturn(Optional.of(mock(UserBook.class)));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
         List<AiChatSessionListProjection> rows = List.of(
-                new AiChatSessionListProjection(2L, "t2", AiChatSession.Status.ACTIVE, LocalDateTime.now()),
-                new AiChatSessionListProjection(1L, "t1", AiChatSession.Status.ACTIVE, LocalDateTime.now().minusMinutes(1))
+                new AiChatSessionListProjection(2L, "t2", "ACTIVE", LocalDateTime.now()),
+                new AiChatSessionListProjection(1L, "t1", "ACTIVE", LocalDateTime.now().minusMinutes(1))
         );
         given(aiChatSessionRepository.findSessionsByUserBookIdAndOwner(
-                userBookId, userId, PageRequest.of(0, 2)
+                USER_BOOK_ID, USER_ID, PageRequest.of(0, 2)
         )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 2), true));
 
         AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(
-                new AiChatSessionListCommand(userId, userBookId, 1, 2)
+                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 2)
         );
 
         assertThat(result.hasNext()).isTrue();
@@ -123,15 +145,13 @@ class AiChatSessionGetServiceTest {
 
     @Test
     void page_파라미터는_1_indexed_에서_0_indexed_로_변환된다() {
-        Long userId = 1L;
-        Long userBookId = 100L;
-        given(userBookRepository.findByIdAndUserId(userBookId, userId)).willReturn(Optional.of(mock(UserBook.class)));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
         given(aiChatSessionRepository.findSessionsByUserBookIdAndOwner(
-                userBookId, userId, PageRequest.of(2, 10)
+                USER_BOOK_ID, USER_ID, PageRequest.of(2, 10)
         )).willReturn(new SliceImpl<>(List.of(), PageRequest.of(2, 10), false));
 
         AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(
-                new AiChatSessionListCommand(userId, userBookId, 3, 10)
+                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 3, 10)
         );
 
         assertThat(result.page()).isEqualTo(3);

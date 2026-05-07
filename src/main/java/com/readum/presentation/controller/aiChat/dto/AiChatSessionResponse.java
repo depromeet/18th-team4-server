@@ -15,7 +15,7 @@ public record AiChatSessionResponse(
         return new AiChatSessionResponse(
                 result.sessionId(),
                 result.title(),
-                result.status().name(),
+                result.status(),
                 result.lastChattedAt()
         );
     }

@@ -12,7 +12,11 @@ import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
+import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
+import com.readum.model.user.entity.User;
+import com.readum.model.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -33,12 +37,16 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class AiChatMessageSendService {
 
+    private final UserRepository userRepository;
     private final AiChatMessagePersistService aiChatMessagePersistService;
     private final AiChatClient aiChatClient;
     private final AiChatProperties aiChatProperties;
     private final AiChatMessageRepository aiChatMessageRepository;
 
     public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
+        User user = userRepository.findBySessionId(command.userSessionId())
+                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
+
         String normalizedContent = validateAndStripContent(command.content());
         Long sessionId = command.sessionId();
 
@@ -46,9 +54,9 @@ public class AiChatMessageSendService {
         // 한도 초과를 던지면 GlobalExceptionHandler 가 HTTP 429 + Retry-After 헤더로 응답한다.
         // LLM 호출 결과와 무관하게 사용자 메시지는 보존해야 하므로(요구사항) 영속화도 스트림 시작 전에 commit.
         // 여기서 던진 예외는 SSE 이전에 GlobalExceptionHandler 가 처리해 4XX JSON 응답으로 나간다.
-        verifyUserMessageRateLimit(command.userId());
+        verifyUserMessageRateLimit(user.getId());
         List<HistoryMessage> previousHistory = aiChatMessagePersistService.loadHistoryAndRecordUserMessage(
-                sessionId, command.userId(), normalizedContent
+                sessionId, user.getId(), normalizedContent
         );
 
         List<HistoryMessage> withCurrent = new ArrayList<>(previousHistory.size() + 1);

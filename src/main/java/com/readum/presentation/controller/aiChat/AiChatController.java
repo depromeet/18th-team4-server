@@ -4,13 +4,14 @@ import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
-import com.readum.domain.aiChat.dto.SummaryDraftResult;
+import com.readum.domain.aiChat.dto.SummaryResult;
 import com.readum.domain.aiChat.service.AiChatMessageGetService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.AiChatSessionGetService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
+import com.readum.domain.aiChat.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateResponse;
@@ -20,7 +21,7 @@ import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
 import com.readum.presentation.controller.aiChat.dto.SummaryDraftEligibilityResponse;
-import com.readum.presentation.controller.aiChat.dto.SummaryDraftResponse;
+import com.readum.presentation.controller.aiChat.dto.SummaryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -32,7 +33,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -53,6 +54,7 @@ public class AiChatController {
     private final AiChatMessageSendService aiChatMessageSendService;
     private final AiChatMessageGetService aiChatMessageGetService;
     private final SummaryDraftService summaryDraftService;
+    private final SummarySearchService summarySearchService;
     private final SummaryDraftSearchService summaryDraftSearchService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
 
@@ -68,17 +70,18 @@ public class AiChatController {
     })
     @PostMapping("/sessions")
     public ResponseEntity<GlobalApiResponse<AiChatSessionCreateResponse>> createSession(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @Valid @RequestBody AiChatSessionCreateRequest request
     ) {
-        AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userId));
+        AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userSessionId));
         return GlobalApiResponse.created(AiChatSessionCreateResponse.from(result));
     }
 
     @Operation(
             summary = "AI 채팅 세션 목록 조회",
             description = "선택한 도서(userBookId)에 대한 채팅 세션을 최근 채팅 일시 내림차순으로 페이지네이션 조회한다. " +
-                    "각 세션은 ACTIVE / SUMMARIZING / CLOSED 상태로 구분되며, SUMMARIZING 은 감상문 초안 생성 중인 세션을 의미한다. " +
+                    "각 세션은 ACTIVE / SUMMARIZING / CLOSED / FAILED 상태로 구분된다 — " +
+                    "SUMMARIZING 은 감상문 초안 비동기 생성 중, FAILED 는 생성 실패 상태를 의미한다. " +
                     "세션이 없으면 빈 배열로 200 응답한다."
     )
     @ApiResponses({
@@ -89,10 +92,10 @@ public class AiChatController {
     })
     @GetMapping("/sessions")
     public ResponseEntity<GlobalApiResponse<AiChatSessionListResponse>> getSessions(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @Valid @ModelAttribute AiChatSessionListRequest request
     ) {
-        AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(request.toCommand(userId));
+        AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(request.toCommand(userSessionId));
         return GlobalApiResponse.ok(AiChatSessionListResponse.from(result));
     }
 
@@ -169,12 +172,12 @@ public class AiChatController {
     })
     @PostMapping(value = "/sessions/{sessionId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<Flux<ServerSentEvent<String>>> sendMessage(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
         Flux<ServerSentEvent<String>> stream = aiChatMessageSendService
-                .execute(request.toCommand(userId, sessionId))
+                .execute(request.toCommand(userSessionId, sessionId))
                 .map(messageStreamSseSerializer::toServerSentEvent);
         return ResponseEntity.ok(stream);
     }
@@ -192,12 +195,39 @@ public class AiChatController {
     })
     @GetMapping("/sessions/{sessionId}/messages")
     public ResponseEntity<GlobalApiResponse<MessageListResponse>> getMessages(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId,
             @Valid @ModelAttribute MessageListRequest request
     ) {
-        MessageListResult result = aiChatMessageGetService.findBySessionId(request.toCommand(userId, sessionId));
+        MessageListResult result = aiChatMessageGetService.findBySessionId(request.toCommand(userSessionId, sessionId));
         return GlobalApiResponse.ok(MessageListResponse.from(result));
+    }
+
+    @Operation(
+            summary = "감상문 조회",
+            description = """
+                    세션에 저장된 감상문(제목·본문·인상 깊은 구절)을 조회한다.
+
+                    감상문 status 별 응답:
+                    - **COMPLETED**: 200 — 감상문 정상 반환
+                    - **IN_PROGRESS**: 409 — AI 생성 중. 잠시 후 재시도 필요
+                    - **FAILED**: 409 — AI 생성 실패
+                    - 감상문 초안 생성 API 미호출 상태: 404
+                    """
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "감상문 조회 성공"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "세션 없음, 소유권 없음, 또는 감상문 생성 요청 전"),
+            @ApiResponse(responseCode = "409", description = "감상문 생성 중(IN_PROGRESS) 또는 생성 실패(FAILED)")
+    })
+    @GetMapping("/sessions/{sessionId}/summary")
+    public ResponseEntity<GlobalApiResponse<SummaryResponse>> getSummary(
+            @CookieValue(name = "user_session") String userSessionId,
+            @PathVariable Long sessionId
+    ) {
+        SummaryResult result = summarySearchService.findBySessionId(sessionId, userSessionId);
+        return GlobalApiResponse.ok(SummaryResponse.from(result));
     }
 
     @Operation(
@@ -213,31 +243,35 @@ public class AiChatController {
     })
     @GetMapping("/sessions/{sessionId}/summary-draft/eligibility")
     public ResponseEntity<GlobalApiResponse<SummaryDraftEligibilityResponse>> getSummaryDraftEligibility(
-            @AuthenticationPrincipal Long userId,
+            @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId
     ) {
-        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(sessionId, userId);
+        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(sessionId, userSessionId);
         return GlobalApiResponse.ok(SummaryDraftEligibilityResponse.from(result));
     }
 
     @Operation(
-            summary = "감상문 초안 생성",
-            description = "AI 채팅 세션의 대화 내용을 바탕으로 감상문 초안(제목·본문·인상 깊은 구절)을 생성하고 세션을 종료한다. " +
-                    "누적 토큰이 임계값에 미치지 못하면 422 를 반환한다."
+            summary = "감상문 초안 생성 요청",
+            description = """
+                    AI 채팅 세션의 대화 내용을 바탕으로 감상문 초안 생성을 요청한다.
+                    세션 검증 후 즉시 202를 반환하며, 실제 생성은 백그라운드에서 진행된다.
+                    생성 결과는 GET /sessions/{sessionId}/summary 로 폴링하여 확인한다.
+                    누적 토큰이 임계값에 미치지 못하면 422 를 반환한다.
+                    """
     )
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "감상문 초안 생성 성공"),
+            @ApiResponse(responseCode = "202", description = "생성 요청 접수. 백그라운드에서 진행 중"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
             @ApiResponse(responseCode = "409", description = "이미 감상문이 작성된 세션"),
             @ApiResponse(responseCode = "422", description = "누적 토큰 부족으로 초안 생성 불가")
     })
     @PostMapping("/sessions/{sessionId}/summary-draft")
-    public ResponseEntity<GlobalApiResponse<SummaryDraftResponse>> createSummaryDraft(
-            @AuthenticationPrincipal Long userId,
+    public ResponseEntity<Void> createSummaryDraft(
+            @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long sessionId
     ) {
-        SummaryDraftResult result = summaryDraftService.execute(sessionId, userId);
-        return GlobalApiResponse.ok(SummaryDraftResponse.from(result));
+        summaryDraftService.execute(sessionId, userSessionId);
+        return ResponseEntity.accepted().build();
     }
 }

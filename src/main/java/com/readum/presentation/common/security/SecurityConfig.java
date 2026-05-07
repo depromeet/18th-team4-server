@@ -29,6 +29,12 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
+                        // MVP: 쿠키 세션(user_session) 기반 인증 — Spring Security 레벨은 permitAll,
+                        // 실제 유저 검증은 각 서비스의 findBySessionId() 에서 수행
+                        .requestMatchers("/api/v1/ai-chat/**").permitAll()
+                        .requestMatchers("/api/v1/user-books/**").permitAll()
+                        .requestMatchers("/api/v1/users/**").permitAll()
+                        .requestMatchers("/api/v1/books/**").permitAll()
                         .requestMatchers(
                                 "/v3/api-docs",
                                 "/v3/api-docs/**",

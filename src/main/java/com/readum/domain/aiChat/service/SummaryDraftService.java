@@ -5,93 +5,117 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiSummaryClient;
 import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.entity.Summary;
+import com.readum.model.summary.repository.SummaryRepository;
+import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.user.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 
-/**
- * 감상문 초안 생성 흐름을 오케스트레이션한다.
- * 외부 LLM 호출 동안 DB 커넥션과 락을 잡지 않도록 트랜잭션을 세 단계로 쪼개고,
- * 첫 단계에서 SUMMARIZING 마커를 commit 해 polling 클라이언트가 상태 전이를 관찰할 수 있게 한다.
- *
- * 단계 1 (Tx) findByIdForUpdate → 소유권/정책 검증 → markSummarizing → 메시지 로드
- * 단계 2 (외부) aiSummaryClient.generate
- * 단계 3 (Tx) close 마킹
- * 에러 보상 (Tx) SUMMARIZING → ACTIVE 복구
- *
- * AiChatSessionTitleService 와 동일한 TransactionTemplate 패턴을 사용한다.
- */
 @Slf4j
 @Service
 public class SummaryDraftService {
 
+    private final UserRepository userRepository;
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
-    private final UserBookRepository userBookRepository;
-    private final SummaryDraftPolicy summaryDraftPolicy;
     private final AiSummaryClient aiSummaryClient;
+    private final UserBookRepository userBookRepository;
+    private final SummaryRepository summaryRepository;
+    private final SummaryDraftPolicy summaryDraftPolicy;
     private final TransactionTemplate transactionTemplate;
 
     public SummaryDraftService(
+            UserRepository userRepository,
             AiChatSessionRepository aiChatSessionRepository,
             AiChatMessageRepository aiChatMessageRepository,
-            UserBookRepository userBookRepository,
-            SummaryDraftPolicy summaryDraftPolicy,
             AiSummaryClient aiSummaryClient,
+            UserBookRepository userBookRepository,
+            SummaryRepository summaryRepository,
+            SummaryDraftPolicy summaryDraftPolicy,
             PlatformTransactionManager transactionManager
     ) {
+        this.userRepository = userRepository;
         this.aiChatSessionRepository = aiChatSessionRepository;
         this.aiChatMessageRepository = aiChatMessageRepository;
-        this.userBookRepository = userBookRepository;
-        this.summaryDraftPolicy = summaryDraftPolicy;
         this.aiSummaryClient = aiSummaryClient;
+        this.userBookRepository = userBookRepository;
+        this.summaryRepository = summaryRepository;
+        this.summaryDraftPolicy = summaryDraftPolicy;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    public SummaryDraftResult execute(Long sessionId, Long userId) {
-        List<AiChatMessage> messages = transactionTemplate.execute(status -> {
+    /**
+     * TX1(검증 + IN_PROGRESS 저장)을 동기로 완료한 뒤 즉시 반환한다.
+     * LLM 호출과 상태 업데이트(TX2/TX3)는 @Async 메서드에서 백그라운드로 처리된다.
+     */
+    public void execute(Long sessionId, String userSessionId) {
+        User user = userRepository.findBySessionId(userSessionId)
+                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
+
+        // TX1: 검증 + 세션 종료 + Summary(IN_PROGRESS) 선점 — 커밋 후 즉시 반환
+        PreparedContext ctx = transactionTemplate.execute(status -> {
             AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-            userBookRepository.findByIdAndUserId(session.getUserBookId(), userId)
+            userBookRepository.findByIdAndUserId(session.getUserBookId(), user.getId())
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
             summaryDraftPolicy.assertEligible(session);
 
-            session.markSummarizing();
+            List<AiChatMessage> messages =
+                    aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);
 
-            return aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);
+            session.close();
+
+            Summary summary = summaryRepository.save(
+                    Summary.createInProgress(session.getUserBookId(), sessionId));
+
+            return new PreparedContext(summary.getId(), messages);
         });
 
+        // 백그라운드에서 LLM 호출 + 상태 업데이트
+        generateAsync(sessionId, ctx);
+    }
+
+    /**
+     * TX 밖에서 LLM을 호출하고 결과를 DB에 반영한다.
+     * @Async 로 별도 스레드에서 실행되므로 호출자는 즉시 반환된다.
+     *
+     * TX2 (성공): Summary → COMPLETED
+     * TX3 (실패): Summary → FAILED
+     */
+    @Async
+    public void generateAsync(Long sessionId, PreparedContext ctx) {
         SummaryDraftResult result;
         try {
-            result = aiSummaryClient.generate(messages);
-        } catch (RuntimeException ex) {
-            try {
-                transactionTemplate.executeWithoutResult(status ->
-                        aiChatSessionRepository.findByIdForUpdate(sessionId)
-                                .filter(AiChatSession::isSummarizing)
-                                .ifPresent(AiChatSession::revertToActive));
-            } catch (RuntimeException revertEx) {
-                log.error("SUMMARIZING -> ACTIVE 복구 실패 sessionId={}", sessionId, revertEx);
-            }
-            throw ex;
+            result = aiSummaryClient.generate(ctx.messages());
+        } catch (Exception e) {
+            // TX3: AI 실패 → FAILED 마킹
+            transactionTemplate.executeWithoutResult(status ->
+                    summaryRepository.findById(ctx.summaryId())
+                            .ifPresent(Summary::fail));
+            log.error("감상문 생성 실패 sessionId={}", sessionId, e);
+            return;
         }
 
-        transactionTemplate.executeWithoutResult(status -> {
-            AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
-                    .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
-            session.close();
-        });
-
-        return result;
+        // TX2: AI 성공 → content 채우고 COMPLETED
+        transactionTemplate.executeWithoutResult(status ->
+                summaryRepository.findById(ctx.summaryId())
+                        .ifPresent(summary -> summary.complete(result.title(), result.body(), result.quote())));
     }
+
+    public record PreparedContext(Long summaryId, List<AiChatMessage> messages) {}
 }

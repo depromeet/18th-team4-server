@@ -29,7 +29,7 @@ import java.time.LocalDateTime;
 public class AiChatSession {
 
     public enum Status {
-        ACTIVE, SUMMARIZING, CLOSED
+        ACTIVE, CLOSED
     }
 
     private static final int TITLE_MAX_LENGTH = 100;
@@ -65,27 +65,9 @@ public class AiChatSession {
         return new AiChatSession(null, userBookId, Status.ACTIVE, 0, 0, null, now, now);
     }
 
-    public void markSummarizing() {
-        this.status = Status.SUMMARIZING;
-        this.updatedAt = LocalDateTime.now();
-    }
-
-    public void revertToActive() {
-        this.status = Status.ACTIVE;
-        this.updatedAt = LocalDateTime.now();
-    }
-
     public void close() {
         this.status = Status.CLOSED;
         this.updatedAt = LocalDateTime.now();
-    }
-
-    public boolean isActive() {
-        return this.status == Status.ACTIVE;
-    }
-
-    public boolean isSummarizing() {
-        return this.status == Status.SUMMARIZING;
     }
 
     public static AiChatSession of(

@@ -7,6 +7,7 @@ import com.readum.domain.user.userbook.dto.UserBookCreateCommand;
 import com.readum.domain.user.userbook.dto.UserBookCreateResult;
 import com.readum.domain.user.userbook.service.UserBookCreateService;
 import com.readum.model.book.repository.BookRepository;
+import com.readum.model.user.entity.User;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.UnexpectedRollbackException;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -38,23 +40,35 @@ class UserBookConcurrencyTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private UserRepository userRepository;
+
     @MockitoBean
     private BookLookupClient bookLookupClient;
 
-    private static final Long USER_ID = 999_999L;
     private static final String EXTERNAL_ID = "concurrent-race-condition-test-isbn";
+
+    private String userSessionId;
+    private Long userId;
 
     @BeforeEach
     void setUp() {
         given(bookLookupClient.execute(EXTERNAL_ID)).willReturn(
                 new BookResult("http://example.com/cover.jpg", "동시성 테스트 책", "저자", "출판사", 2024, EXTERNAL_ID)
         );
+        // 임시 cookie 인증 패턴 — UserRepository 로 User row 를 만들고 그 session_id 를 명령 인자로 쓴다.
+        // session_id unique 제약을 회피하기 위해 매 실행마다 UUID 로 다른 값을 쓴다.
+        User saved = userRepository.save(User.create(UUID.randomUUID()));
+        userSessionId = saved.getSessionId();
+        userId = saved.getId();
     }
 
-    @BeforeEach
     @AfterEach
     void cleanUpTestData() {
-        jdbcTemplate.update("DELETE FROM user_book WHERE user_id = ?", USER_ID);
+        if (userId != null) {
+            jdbcTemplate.update("DELETE FROM user_book WHERE user_id = ?", userId);
+            userRepository.deleteById(userId);
+        }
         jdbcTemplate.update("DELETE FROM book WHERE external_id = ?", EXTERNAL_ID);
     }
 
@@ -67,7 +81,7 @@ class UserBookConcurrencyTest {
 
         List<Object> results = new CopyOnWriteArrayList<>();
 
-        UserBookCreateCommand command = new UserBookCreateCommand(USER_ID, EXTERNAL_ID);
+        UserBookCreateCommand command = new UserBookCreateCommand(userSessionId, EXTERNAL_ID);
 
         for (int i = 0; i < threadCount; i++) {
             executor.submit(() -> {
@@ -102,7 +116,7 @@ class UserBookConcurrencyTest {
                     .getId();
             Long userBookCount = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM user_book WHERE user_id = ? AND book_id = ?",
-                    Long.class, USER_ID, bookId);
+                    Long.class, userId, bookId);
             assertThat(userBookCount).as("UserBook은 1건만 존재해야 한다").isEqualTo(1L);
 
             long unexpectedRollbackCount = results.stream()

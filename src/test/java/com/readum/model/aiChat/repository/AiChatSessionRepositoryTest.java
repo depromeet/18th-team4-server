@@ -2,6 +2,8 @@ package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
+import com.readum.model.summary.entity.Summary;
+import com.readum.model.summary.repository.SummaryRepository;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +28,9 @@ class AiChatSessionRepositoryTest {
     @Autowired
     private UserBookRepository userBookRepository;
 
+    @Autowired
+    private SummaryRepository summaryRepository;
+
     private static long userIdSeq = 9_100_000L;
     private static long bookIdSeq = 9_100_000L;
 
@@ -49,7 +54,6 @@ class AiChatSessionRepositoryTest {
         AiChatSession middle = save(userBook.getId(), AiChatSession.Status.ACTIVE, "middle");
         AiChatSession newer = save(userBook.getId(), AiChatSession.Status.ACTIVE, "newer");
 
-        // updatedAt 강제 설정으로 정렬 순서 결정
         forceUpdatedAt(older, LocalDateTime.now().minusMinutes(10));
         forceUpdatedAt(middle, LocalDateTime.now().minusMinutes(5));
         forceUpdatedAt(newer, LocalDateTime.now());
@@ -78,25 +82,82 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE / SUMMARIZING / CLOSED 모두 반환되며 status 가 그대로 매핑된다")
-    void 상태_매핑_검증() {
+    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE 세션은 status='ACTIVE' 로 도출된다 (Summary 없음)")
+    void status_ACTIVE_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-
-        save(userBook.getId(), AiChatSession.Status.ACTIVE, "active");
-        save(userBook.getId(), AiChatSession.Status.SUMMARIZING, "summarizing");
-        save(userBook.getId(), AiChatSession.Status.CLOSED, "closed");
+        AiChatSession active = save(userBook.getId(), AiChatSession.Status.ACTIVE, "active-session");
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
 
-        assertThat(slice.getContent())
-                .extracting(AiChatSessionListProjection::status)
-                .containsExactlyInAnyOrder(
-                        AiChatSession.Status.ACTIVE,
-                        AiChatSession.Status.SUMMARIZING,
-                        AiChatSession.Status.CLOSED
-                );
+        assertThat(slice.getContent()).hasSize(1);
+        AiChatSessionListProjection projection = slice.getContent().get(0);
+        assertThat(projection.sessionId()).isEqualTo(active.getId());
+        assertThat(projection.status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    @DisplayName("findSessionsByUserBookIdAndOwner: CLOSED + Summary IN_PROGRESS 면 'SUMMARIZING' 으로 도출")
+    void status_SUMMARIZING_도출() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        AiChatSession session = save(userBook.getId(), AiChatSession.Status.CLOSED, "summarizing-session");
+        summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
+
+        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
+                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
+
+        assertThat(slice.getContent()).hasSize(1);
+        assertThat(slice.getContent().get(0).status()).isEqualTo("SUMMARIZING");
+    }
+
+    @Test
+    @DisplayName("findSessionsByUserBookIdAndOwner: CLOSED + Summary COMPLETED 면 'CLOSED' 로 도출")
+    void status_CLOSED_with_completed_summary() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        AiChatSession session = save(userBook.getId(), AiChatSession.Status.CLOSED, "completed-session");
+        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
+        summary.complete("title", "body", "quote");
+        summaryRepository.saveAndFlush(summary);
+
+        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
+                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
+
+        assertThat(slice.getContent()).hasSize(1);
+        assertThat(slice.getContent().get(0).status()).isEqualTo("CLOSED");
+    }
+
+    @Test
+    @DisplayName("findSessionsByUserBookIdAndOwner: CLOSED + Summary FAILED 면 'FAILED' 로 도출")
+    void status_FAILED_도출() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        AiChatSession session = save(userBook.getId(), AiChatSession.Status.CLOSED, "failed-session");
+        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
+        summary.fail();
+        summaryRepository.saveAndFlush(summary);
+
+        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
+                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
+
+        assertThat(slice.getContent()).hasSize(1);
+        assertThat(slice.getContent().get(0).status()).isEqualTo("FAILED");
+    }
+
+    @Test
+    @DisplayName("findSessionsByUserBookIdAndOwner: CLOSED + Summary 없음 (엣지) 이면 'CLOSED' 로 도출")
+    void status_CLOSED_without_summary() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        save(userBook.getId(), AiChatSession.Status.CLOSED, "closed-no-summary");
+
+        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
+                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
+
+        assertThat(slice.getContent()).hasSize(1);
+        assertThat(slice.getContent().get(0).status()).isEqualTo("CLOSED");
     }
 
     @Test
@@ -151,8 +212,8 @@ class AiChatSessionRepositoryTest {
 
     private AiChatSession save(Long userBookId, AiChatSession.Status status, String title) {
         AiChatSession session = AiChatSession.create(userBookId);
-        if (status != AiChatSession.Status.ACTIVE) {
-            applyStatus(session, status);
+        if (status == AiChatSession.Status.CLOSED) {
+            session.close();
         }
         if (title != null) {
             session.updateTitle(title);
@@ -160,21 +221,11 @@ class AiChatSessionRepositoryTest {
         return aiChatSessionRepository.save(session);
     }
 
-    private void applyStatus(AiChatSession session, AiChatSession.Status status) {
-        switch (status) {
-            case SUMMARIZING -> session.markSummarizing();
-            case CLOSED -> session.close();
-            case ACTIVE -> {
-                // 기본 상태이므로 변경 불필요
-            }
-        }
-    }
-
     /**
      * SpringBootTest 의 영속성 컨텍스트 안에서 entity 의 updatedAt 을 강제 갱신.
-     * 운영 코드에서는 appendUserMessage / addAssistantTokens / markSummarizing 등이 갱신하지만,
+     * 운영 코드에서는 appendUserMessage / addAssistantTokens / close 등이 갱신하지만,
      * 테스트에서는 정렬 검증을 위해 직접 시각을 주입한다. JPA dirty-checking 을 활용하기 위해
-     * AllArgsConstructor 의 of() 로 새로 만들어 동일 id 로 save (merge) 한다.
+     * AllArgsConstructor 의 of() 로 새로 만들어 동일 id 로 saveAndFlush.
      */
     private void forceUpdatedAt(AiChatSession session, LocalDateTime updatedAt) {
         AiChatSession replaced = AiChatSession.of(
@@ -189,5 +240,4 @@ class AiChatSessionRepositoryTest {
         );
         aiChatSessionRepository.saveAndFlush(replaced);
     }
-
 }

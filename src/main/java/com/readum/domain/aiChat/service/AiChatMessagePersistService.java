@@ -58,9 +58,6 @@ public class AiChatMessagePersistService {
         if (session.isClosed()) {
             throw new BadRequestException(AiChatErrorCode.SESSION_CLOSED);
         }
-        if (session.isSummarizing()) {
-            throw new BadRequestException(AiChatErrorCode.SESSION_SUMMARIZING);
-        }
         List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);
         aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, normalizedContent));
         session.appendUserMessage();
