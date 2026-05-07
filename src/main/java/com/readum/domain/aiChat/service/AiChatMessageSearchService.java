@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class AiChatMessageGetService {
+public class AiChatMessageSearchService {
 
     private final UserRepository userRepository;
     private final AiChatSessionRepository aiChatSessionRepository;

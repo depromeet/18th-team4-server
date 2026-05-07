@@ -32,7 +32,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
-class AiChatMessageGetServiceTest {
+class AiChatMessageSearchServiceTest {
 
     private static final Long USER_ID = 1L;
     private static final String USER_SESSION_ID = "test-session-id";
@@ -47,7 +47,7 @@ class AiChatMessageGetServiceTest {
     private AiChatMessageRepository aiChatMessageRepository;
 
     @InjectMocks
-    private AiChatMessageGetService aiChatMessageGetService;
+    private AiChatMessageSearchService aiChatMessageSearchService;
 
     @BeforeEach
     void setUp() {
@@ -60,7 +60,7 @@ class AiChatMessageGetServiceTest {
     void 유효하지_않은_session_쿠키면_UnauthorizedException() {
         given(userRepository.findBySessionId("invalid")).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> aiChatMessageGetService.findBySessionId(
+        assertThatThrownBy(() -> aiChatMessageSearchService.findBySessionId(
                 new MessageListCommand("invalid", 7L, 1, 20)
         ))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
@@ -73,7 +73,7 @@ class AiChatMessageGetServiceTest {
         Long sessionId = 7L;
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, USER_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> aiChatMessageGetService.findBySessionId(
+        assertThatThrownBy(() -> aiChatMessageSearchService.findBySessionId(
                 new MessageListCommand(USER_SESSION_ID, sessionId, 1, 20)
         ))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
@@ -106,7 +106,7 @@ class AiChatMessageGetServiceTest {
                 sessionId, PageRequest.of(0, 20)
         )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 20), false));
 
-        MessageListResult result = aiChatMessageGetService.findBySessionId(
+        MessageListResult result = aiChatMessageSearchService.findBySessionId(
                 new MessageListCommand(USER_SESSION_ID, sessionId, 1, 20)
         );
 

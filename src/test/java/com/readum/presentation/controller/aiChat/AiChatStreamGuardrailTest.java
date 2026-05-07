@@ -1,7 +1,7 @@
 package com.readum.presentation.controller.aiChat;
 
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
-import com.readum.domain.aiChat.service.AiChatMessageGetService;
+import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
@@ -49,7 +49,7 @@ class AiChatStreamGuardrailTest {
     private AiChatMessageSendService aiChatMessageSendService;
 
     @Mock
-    private AiChatMessageGetService aiChatMessageGetService;
+    private AiChatMessageSearchService aiChatMessageSearchService;
 
     @Mock
     private SummaryDraftService summaryDraftService;
@@ -65,7 +65,7 @@ class AiChatStreamGuardrailTest {
                 aiChatSessionCreateService,
                 null,
                 aiChatMessageSendService,
-                aiChatMessageGetService,
+                aiChatMessageSearchService,
                 summaryDraftService,
                 null,
                 null,

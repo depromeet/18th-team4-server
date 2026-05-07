@@ -33,7 +33,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
-class AiChatSessionGetServiceTest {
+class AiChatSessionSearchServiceTest {
 
     private static final String USER_SESSION_ID = "test-session-id";
     private static final Long USER_ID = 1L;
@@ -49,7 +49,7 @@ class AiChatSessionGetServiceTest {
     private UserBookRepository userBookRepository;
 
     @InjectMocks
-    private AiChatSessionGetService aiChatSessionGetService;
+    private AiChatSessionSearchService aiChatSessionSearchService;
 
     @BeforeEach
     void setUp() {
@@ -62,7 +62,7 @@ class AiChatSessionGetServiceTest {
     void 유효하지_않은_user_session_쿠키면_UnauthorizedException() {
         given(userRepository.findBySessionId("invalid")).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> aiChatSessionGetService.findByUserBookId(
+        assertThatThrownBy(() -> aiChatSessionSearchService.findByUserBookId(
                 new AiChatSessionListCommand("invalid", USER_BOOK_ID, 1, 20)
         ))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
@@ -74,7 +74,7 @@ class AiChatSessionGetServiceTest {
     void 소유권_없는_userBookId_면_NotFoundException() {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> aiChatSessionGetService.findByUserBookId(
+        assertThatThrownBy(() -> aiChatSessionSearchService.findByUserBookId(
                 new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
         ))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
@@ -89,7 +89,7 @@ class AiChatSessionGetServiceTest {
                 USER_BOOK_ID, USER_ID, PageRequest.of(0, 20)
         )).willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, 20), false));
 
-        AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(
+        AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(
                 new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
         );
 
@@ -116,7 +116,7 @@ class AiChatSessionGetServiceTest {
                 USER_BOOK_ID, USER_ID, PageRequest.of(0, 20)
         )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 20), false));
 
-        AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(
+        AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(
                 new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
         );
 
@@ -140,7 +140,7 @@ class AiChatSessionGetServiceTest {
                 USER_BOOK_ID, USER_ID, PageRequest.of(0, 2)
         )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 2), true));
 
-        AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(
+        AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(
                 new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 2)
         );
 
@@ -154,7 +154,7 @@ class AiChatSessionGetServiceTest {
                 USER_BOOK_ID, USER_ID, PageRequest.of(2, 10)
         )).willReturn(new SliceImpl<>(List.of(), PageRequest.of(2, 10), false));
 
-        AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(
+        AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(
                 new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 3, 10)
         );
 

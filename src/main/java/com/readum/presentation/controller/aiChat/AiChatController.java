@@ -5,10 +5,10 @@ import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.dto.SummaryResult;
-import com.readum.domain.aiChat.service.AiChatMessageGetService;
+import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
-import com.readum.domain.aiChat.service.AiChatSessionGetService;
+import com.readum.domain.aiChat.service.AiChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.SummarySearchService;
@@ -50,9 +50,9 @@ import reactor.core.publisher.Flux;
 public class AiChatController {
 
     private final AiChatSessionCreateService aiChatSessionCreateService;
-    private final AiChatSessionGetService aiChatSessionGetService;
+    private final AiChatSessionSearchService aiChatSessionSearchService;
     private final AiChatMessageSendService aiChatMessageSendService;
-    private final AiChatMessageGetService aiChatMessageGetService;
+    private final AiChatMessageSearchService aiChatMessageSearchService;
     private final SummaryDraftService summaryDraftService;
     private final SummarySearchService summarySearchService;
     private final SummaryDraftSearchService summaryDraftSearchService;
@@ -97,7 +97,7 @@ public class AiChatController {
             @CookieValue(name = "user_session") String userSessionId,
             @Valid @ModelAttribute AiChatSessionListRequest request
     ) {
-        AiChatSessionListResult result = aiChatSessionGetService.findByUserBookId(request.toCommand(userSessionId));
+        AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(request.toCommand(userSessionId));
         return GlobalApiResponse.ok(AiChatSessionListResponse.from(result));
     }
 
@@ -201,7 +201,7 @@ public class AiChatController {
             @PathVariable Long sessionId,
             @Valid @ModelAttribute MessageListRequest request
     ) {
-        MessageListResult result = aiChatMessageGetService.findBySessionId(request.toCommand(userSessionId, sessionId));
+        MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userSessionId, sessionId));
         return GlobalApiResponse.ok(MessageListResponse.from(result));
     }
 

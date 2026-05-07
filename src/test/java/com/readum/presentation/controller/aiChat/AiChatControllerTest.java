@@ -10,10 +10,10 @@ import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.dto.SummaryResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
-import com.readum.domain.aiChat.service.AiChatMessageGetService;
+import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
-import com.readum.domain.aiChat.service.AiChatSessionGetService;
+import com.readum.domain.aiChat.service.AiChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.SummarySearchService;
@@ -66,13 +66,13 @@ class AiChatControllerTest {
     private AiChatSessionCreateService aiChatSessionCreateService;
 
     @Mock
-    private AiChatSessionGetService aiChatSessionGetService;
+    private AiChatSessionSearchService aiChatSessionSearchService;
 
     @Mock
     private AiChatMessageSendService aiChatMessageSendService;
 
     @Mock
-    private AiChatMessageGetService aiChatMessageGetService;
+    private AiChatMessageSearchService aiChatMessageSearchService;
 
     @Mock
     private SummaryDraftService summaryDraftService;
@@ -92,9 +92,9 @@ class AiChatControllerTest {
     void setUp() {
         AiChatController controller = new AiChatController(
                 aiChatSessionCreateService,
-                aiChatSessionGetService,
+                aiChatSessionSearchService,
                 aiChatMessageSendService,
-                aiChatMessageGetService,
+                aiChatMessageSearchService,
                 summaryDraftService,
                 summarySearchService,
                 summaryDraftSearchService,
@@ -158,7 +158,7 @@ class AiChatControllerTest {
     void 세션_목록_조회_정상_응답() throws Exception {
         LocalDate today = LocalDate.of(2026, 5, 7);
         LocalDate yesterday = today.minusDays(1);
-        given(aiChatSessionGetService.findByUserBookId(any()))
+        given(aiChatSessionSearchService.findByUserBookId(any()))
                 .willReturn(new AiChatSessionListResult(
                         List.of(
                                 new AiChatSessionResult(4L, "최근", "SUMMARIZING", today),
@@ -194,7 +194,7 @@ class AiChatControllerTest {
 
     @Test
     void 세션_목록_조회_세션이_없으면_빈_배열을_반환한다() throws Exception {
-        given(aiChatSessionGetService.findByUserBookId(any()))
+        given(aiChatSessionSearchService.findByUserBookId(any()))
                 .willReturn(new AiChatSessionListResult(List.of(), 1, 20, false));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions")
@@ -241,7 +241,7 @@ class AiChatControllerTest {
 
     @Test
     void 세션_목록_조회_소유권_없는_userBookId_는_404() throws Exception {
-        given(aiChatSessionGetService.findByUserBookId(any()))
+        given(aiChatSessionSearchService.findByUserBookId(any()))
                 .willThrow(new NotFoundException(AiChatErrorCode.USER_BOOK_NOT_FOUND));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions")
@@ -388,7 +388,7 @@ class AiChatControllerTest {
 
     @Test
     void 메시지_조회_정상_응답() throws Exception {
-        given(aiChatMessageGetService.findBySessionId(any()))
+        given(aiChatMessageSearchService.findBySessionId(any()))
                 .willReturn(new MessageListResult(
                         List.of(
                                 new MessageResult(
