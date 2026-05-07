@@ -179,6 +179,8 @@ class AiChatControllerTest {
                 .andExpect(jsonPath("$.data.sessions[0].sessionId").value(4))
                 .andExpect(jsonPath("$.data.sessions[0].title").value("최근"))
                 .andExpect(jsonPath("$.data.sessions[0].status").value("SUMMARIZING"))
+                // lastChattedAt 은 LocalDate 직렬화로 yyyy-MM-dd 만 노출 (timestamp/시간 정보 X)
+                .andExpect(jsonPath("$.data.sessions[0].lastChattedAt").value("2026-05-07"))
                 .andExpect(jsonPath("$.data.sessions[1].status").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.sessions[2].status").value("CLOSED"))
                 .andExpect(jsonPath("$.data.sessions[3].status").value("FAILED"))

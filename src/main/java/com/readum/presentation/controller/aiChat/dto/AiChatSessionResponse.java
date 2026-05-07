@@ -2,13 +2,13 @@ package com.readum.presentation.controller.aiChat.dto;
 
 import com.readum.domain.aiChat.dto.AiChatSessionResult;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 public record AiChatSessionResponse(
         Long sessionId,
         String title,
         String status,
-        LocalDateTime lastChattedAt
+        LocalDate lastChattedAt
 ) {
 
     public static AiChatSessionResponse from(AiChatSessionResult result) {
@@ -16,7 +16,7 @@ public record AiChatSessionResponse(
                 result.sessionId(),
                 result.title(),
                 result.status(),
-                result.lastChattedAt()
+                result.lastChattedAt() == null ? null : result.lastChattedAt().toLocalDate()
         );
     }
 }
