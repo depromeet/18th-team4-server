@@ -1,5 +1,6 @@
 package com.readum.model.aiChat.repository;
 
+import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
 import com.readum.model.summary.entity.Summary;
@@ -11,6 +12,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Long> {
@@ -51,12 +54,14 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
     /**
      * 특정 userBook 의 채팅 세션 목록 페이지 조회.
      *
-     * 정렬: updatedAt desc, id desc — appendUserMessage / addAssistantTokens / close 모두에서
-     * updatedAt 이 갱신되므로 "최근 채팅 활동 시각" 의 근사로 충분하다.
+     * 정렬 / lastChattedAt: 마지막으로 노출 가능한 메시지 (status COMPLETED + role IN USER/ASSISTANT) 의
+     * createdAt 을 max() 서브쿼리로 구해 사용한다. 메시지가 아직 없는 세션은 session.createdAt 으로 fallback.
+     * AiChatSession.updatedAt 을 쓰지 않는 이유 — close() / updateTitle() 같은 비-채팅 이벤트가
+     * 갱신해 "최근 채팅 시각" 의 의미가 흐려지기 때문.
      *
      * status 도출: AiChatSession.status (ACTIVE/CLOSED) 와 Summary.status (IN_PROGRESS/COMPLETED/FAILED) 를
-     * CASE 로 합성해 단일 문자열로 반환한다. 매핑 규칙은 다음과 같다.
-     *  - session ACTIVE                 → "ACTIVE"
+     * CASE 로 합성해 단일 문자열로 반환한다. 매핑 규칙:
+     *  - session ACTIVE                       → "ACTIVE"
      *  - session CLOSED + summary IN_PROGRESS → "SUMMARIZING"
      *  - session CLOSED + summary FAILED      → "FAILED"
      *  - session CLOSED + 그 외 (COMPLETED 또는 summary 없음) → "CLOSED"
@@ -75,6 +80,8 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                 AiChatSession.Status.ACTIVE,
                 Summary.Status.IN_PROGRESS,
                 Summary.Status.FAILED,
+                AiChatMessage.Status.COMPLETED,
+                List.of(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT),
                 pageable
         );
     }
@@ -89,7 +96,14 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                            when summary.status = :summaryFailedStatus then 'FAILED'
                            else 'CLOSED'
                        end
-                     , aiChatSession.updatedAt
+                     , coalesce(
+                           (select max(aiChatMessage.createdAt)
+                              from AiChatMessage aiChatMessage
+                             where aiChatMessage.sessionId = aiChatSession.id
+                               and aiChatMessage.status = :messageCompletedStatus
+                               and aiChatMessage.role in :messageVisibleRoles),
+                           aiChatSession.createdAt
+                       )
                    )
               from AiChatSession aiChatSession
               left join Summary summary
@@ -101,7 +115,16 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                       where userBook.id = aiChatSession.userBookId
                         and userBook.userId = :userId
                    )
-             order by aiChatSession.updatedAt desc, aiChatSession.id desc
+             order by
+                coalesce(
+                    (select max(aiChatMessage.createdAt)
+                       from AiChatMessage aiChatMessage
+                      where aiChatMessage.sessionId = aiChatSession.id
+                        and aiChatMessage.status = :messageCompletedStatus
+                        and aiChatMessage.role in :messageVisibleRoles),
+                    aiChatSession.createdAt
+                ) desc,
+                aiChatSession.id desc
             """)
     Slice<AiChatSessionListProjection> findSessionsByUserBookIdAndOwnerInternal(
             @Param("userBookId") Long userBookId,
@@ -109,6 +132,8 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
             @Param("activeStatus") AiChatSession.Status activeStatus,
             @Param("summaryInProgressStatus") Summary.Status summaryInProgressStatus,
             @Param("summaryFailedStatus") Summary.Status summaryFailedStatus,
+            @Param("messageCompletedStatus") AiChatMessage.Status messageCompletedStatus,
+            @Param("messageVisibleRoles") Collection<AiChatMessage.Role> messageVisibleRoles,
             Pageable pageable
     );
 }

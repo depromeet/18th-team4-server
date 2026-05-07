@@ -40,6 +40,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -155,14 +156,15 @@ class AiChatControllerTest {
 
     @Test
     void 세션_목록_조회_정상_응답() throws Exception {
-        LocalDateTime base = LocalDateTime.of(2026, 5, 7, 12, 0, 0);
+        LocalDate today = LocalDate.of(2026, 5, 7);
+        LocalDate yesterday = today.minusDays(1);
         given(aiChatSessionGetService.findByUserBookId(any()))
                 .willReturn(new AiChatSessionListResult(
                         List.of(
-                                new AiChatSessionResult(4L, "최근", "SUMMARIZING", base.plusMinutes(3)),
-                                new AiChatSessionResult(3L, "활성", "ACTIVE", base.plusMinutes(2)),
-                                new AiChatSessionResult(2L, "종료", "CLOSED", base.plusMinutes(1)),
-                                new AiChatSessionResult(1L, "실패", "FAILED", base)
+                                new AiChatSessionResult(4L, "최근", "SUMMARIZING", today),
+                                new AiChatSessionResult(3L, "활성", "ACTIVE", today),
+                                new AiChatSessionResult(2L, "종료", "CLOSED", yesterday),
+                                new AiChatSessionResult(1L, "실패", "FAILED", yesterday)
                         ),
                         1,
                         20,
@@ -179,8 +181,9 @@ class AiChatControllerTest {
                 .andExpect(jsonPath("$.data.sessions[0].sessionId").value(4))
                 .andExpect(jsonPath("$.data.sessions[0].title").value("최근"))
                 .andExpect(jsonPath("$.data.sessions[0].status").value("SUMMARIZING"))
-                // lastChattedAt 은 LocalDate 직렬화로 yyyy-MM-dd 만 노출 (timestamp/시간 정보 X)
-                .andExpect(jsonPath("$.data.sessions[0].lastChattedAt").value("2026-05-07"))
+                // lastChattedDate 는 LocalDate 직렬화로 yyyy-MM-dd 만 노출 (timestamp/시간 정보 X)
+                .andExpect(jsonPath("$.data.sessions[0].lastChattedDate").value("2026-05-07"))
+                .andExpect(jsonPath("$.data.sessions[3].lastChattedDate").value("2026-05-06"))
                 .andExpect(jsonPath("$.data.sessions[1].status").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.sessions[2].status").value("CLOSED"))
                 .andExpect(jsonPath("$.data.sessions[3].status").value("FAILED"))

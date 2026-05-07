@@ -2,13 +2,13 @@ package com.readum.domain.aiChat.dto;
 
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 public record AiChatSessionResult(
         Long sessionId,
         String title,
         String status,
-        LocalDateTime lastChattedAt
+        LocalDate lastChattedDate
 ) {
 
     public static AiChatSessionResult from(AiChatSessionListProjection projection) {
@@ -16,7 +16,7 @@ public record AiChatSessionResult(
                 projection.sessionId(),
                 projection.title(),
                 projection.status(),
-                projection.lastChattedAt()
+                projection.lastChattedAt() == null ? null : projection.lastChattedAt().toLocalDate()
         );
     }
 }

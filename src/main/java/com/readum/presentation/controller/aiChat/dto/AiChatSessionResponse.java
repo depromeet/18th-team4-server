@@ -8,7 +8,7 @@ public record AiChatSessionResponse(
         Long sessionId,
         String title,
         String status,
-        LocalDate lastChattedAt
+        LocalDate lastChattedDate
 ) {
 
     public static AiChatSessionResponse from(AiChatSessionResult result) {
@@ -16,7 +16,7 @@ public record AiChatSessionResponse(
                 result.sessionId(),
                 result.title(),
                 result.status(),
-                result.lastChattedAt() == null ? null : result.lastChattedAt().toLocalDate()
+                result.lastChattedDate()
         );
     }
 }

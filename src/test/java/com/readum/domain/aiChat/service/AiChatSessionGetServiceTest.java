@@ -104,12 +104,13 @@ class AiChatSessionGetServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
         LocalDateTime base = LocalDateTime.of(2026, 5, 7, 12, 0, 0);
-        // Repository 가 status 를 이미 String 으로 도출해 내려보낸다 — service 는 그대로 전달만.
+        // Repository 가 status 를 이미 String 으로, lastChattedAt 을 LocalDateTime 으로 내려보내고
+        // service 는 변환 없이 Result 로 전달. Result 단계에서 LocalDate 로 narrow.
         List<AiChatSessionListProjection> rows = List.of(
                 new AiChatSessionListProjection(4L, "최근", "SUMMARIZING", base.plusMinutes(3)),
                 new AiChatSessionListProjection(3L, "활성", "ACTIVE", base.plusMinutes(2)),
-                new AiChatSessionListProjection(2L, "종료", "CLOSED", base.plusMinutes(1)),
-                new AiChatSessionListProjection(1L, "실패", "FAILED", base)
+                new AiChatSessionListProjection(2L, "종료", "CLOSED", base.minusDays(1)),
+                new AiChatSessionListProjection(1L, "실패", "FAILED", base.minusDays(2))
         );
         given(aiChatSessionRepository.findSessionsByUserBookIdAndOwner(
                 USER_BOOK_ID, USER_ID, PageRequest.of(0, 20)
@@ -122,6 +123,9 @@ class AiChatSessionGetServiceTest {
         assertThat(result.sessions()).hasSize(4);
         assertThat(result.sessions()).extracting("status")
                 .containsExactly("SUMMARIZING", "ACTIVE", "CLOSED", "FAILED");
+        assertThat(result.sessions().get(0).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 7));
+        assertThat(result.sessions().get(2).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 6));
+        assertThat(result.sessions().get(3).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 5));
     }
 
     @Test

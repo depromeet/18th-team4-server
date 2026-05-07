@@ -1,5 +1,6 @@
 package com.readum.model.aiChat.repository;
 
+import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
 import com.readum.model.summary.entity.Summary;
@@ -26,6 +27,9 @@ class AiChatSessionRepositoryTest {
     private AiChatSessionRepository aiChatSessionRepository;
 
     @Autowired
+    private AiChatMessageRepository aiChatMessageRepository;
+
+    @Autowired
     private UserBookRepository userBookRepository;
 
     @Autowired
@@ -45,18 +49,20 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: updatedAt DESC, id DESC 로 정렬되어 반환된다")
+    @DisplayName("findSessionsByUserBookIdAndOwner: 메시지 max(createdAt) DESC 로 정렬되어 반환된다")
     void 정렬_검증() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
 
-        AiChatSession older = save(userBook.getId(), AiChatSession.Status.ACTIVE, "older");
-        AiChatSession middle = save(userBook.getId(), AiChatSession.Status.ACTIVE, "middle");
-        AiChatSession newer = save(userBook.getId(), AiChatSession.Status.ACTIVE, "newer");
+        AiChatSession older = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "older");
+        AiChatSession middle = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "middle");
+        AiChatSession newer = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "newer");
 
-        forceUpdatedAt(older, LocalDateTime.now().minusMinutes(10));
-        forceUpdatedAt(middle, LocalDateTime.now().minusMinutes(5));
-        forceUpdatedAt(newer, LocalDateTime.now());
+        // 정렬 기준은 max(message.createdAt) — 메시지에 명시 시각을 박아 순서를 결정한다.
+        LocalDateTime now = LocalDateTime.now();
+        saveCompletedUserMessage(older.getId(), now.minusMinutes(10));
+        saveCompletedUserMessage(middle.getId(), now.minusMinutes(5));
+        saveCompletedUserMessage(newer.getId(), now);
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -68,12 +74,58 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
+    @DisplayName("findSessionsByUserBookIdAndOwner: 메시지가 없으면 lastChattedAt 은 session.createdAt 으로 fallback")
+    void lastChattedAt_fallback() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "no-messages");
+
+        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
+                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
+
+        assertThat(slice.getContent()).hasSize(1);
+        // 메시지가 0 개이므로 session.createdAt 으로 fallback. 정확한 시각 비교는 흔들리니 날짜만 검증.
+        assertThat(slice.getContent().get(0).lastChattedAt().toLocalDate())
+                .isEqualTo(session.getCreatedAt().toLocalDate());
+    }
+
+    @Test
+    @DisplayName("findSessionsByUserBookIdAndOwner: SYSTEM 메시지 / FAILED 부분 응답은 lastChattedAt 계산에서 제외된다")
+    void lastChattedAt_은_노출_가능_메시지만() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "filtered");
+
+        LocalDateTime now = LocalDateTime.now();
+        // 노출 대상 — USER, COMPLETED — 비교적 과거
+        saveCompletedUserMessage(session.getId(), now.minusHours(1));
+        // 제외 대상들 — 더 최근에 만들어졌어도 lastChattedAt 에 잡히면 안 된다.
+        aiChatMessageRepository.save(AiChatMessage.of(
+                null, session.getId(), AiChatMessage.Role.SYSTEM, "system prompt", null,
+                null, null, null, AiChatMessage.Status.COMPLETED, now
+        ));
+        aiChatMessageRepository.save(AiChatMessage.of(
+                null, session.getId(), AiChatMessage.Role.ASSISTANT, "partial", null,
+                1, 0, 1, AiChatMessage.Status.FAILED, now
+        ));
+
+        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
+                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
+
+        assertThat(slice.getContent()).hasSize(1);
+        // lastChattedAt 은 1시간 전 USER 메시지 시각이어야 한다 — SYSTEM/FAILED 가 더 최근이지만 무시.
+        assertThat(slice.getContent().get(0).lastChattedAt().toLocalDate())
+                .isEqualTo(now.minusHours(1).toLocalDate());
+    }
+
+    @Test
     @DisplayName("findSessionsByUserBookIdAndOwner: 다른 사용자 소유의 userBook 으로 조회하면 빈 결과")
     void 소유권_검증() {
         Long owner = nextUserId();
         Long other = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(owner, nextBookId()));
-        save(userBook.getId(), AiChatSession.Status.ACTIVE, "owned");
+        saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "owned");
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), other, PageRequest.of(0, 10));
@@ -86,7 +138,7 @@ class AiChatSessionRepositoryTest {
     void status_ACTIVE_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession active = save(userBook.getId(), AiChatSession.Status.ACTIVE, "active-session");
+        AiChatSession active = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "active-session");
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -102,7 +154,7 @@ class AiChatSessionRepositoryTest {
     void status_SUMMARIZING_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = save(userBook.getId(), AiChatSession.Status.CLOSED, "summarizing-session");
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "summarizing-session");
         summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
@@ -117,7 +169,7 @@ class AiChatSessionRepositoryTest {
     void status_CLOSED_with_completed_summary() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = save(userBook.getId(), AiChatSession.Status.CLOSED, "completed-session");
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "completed-session");
         Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
         summary.complete("title", "body", "quote");
         summaryRepository.saveAndFlush(summary);
@@ -134,7 +186,7 @@ class AiChatSessionRepositoryTest {
     void status_FAILED_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = save(userBook.getId(), AiChatSession.Status.CLOSED, "failed-session");
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "failed-session");
         Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
         summary.fail();
         summaryRepository.saveAndFlush(summary);
@@ -151,7 +203,7 @@ class AiChatSessionRepositoryTest {
     void status_CLOSED_without_summary() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        save(userBook.getId(), AiChatSession.Status.CLOSED, "closed-no-summary");
+        saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "closed-no-summary");
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -167,8 +219,8 @@ class AiChatSessionRepositoryTest {
         UserBook bookA = userBookRepository.save(UserBook.create(userId, nextBookId()));
         UserBook bookB = userBookRepository.save(UserBook.create(userId, nextBookId()));
 
-        save(bookA.getId(), AiChatSession.Status.ACTIVE, "a-session");
-        save(bookB.getId(), AiChatSession.Status.ACTIVE, "b-session");
+        saveSession(bookA.getId(), AiChatSession.Status.ACTIVE, "a-session");
+        saveSession(bookB.getId(), AiChatSession.Status.ACTIVE, "b-session");
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(bookA.getId(), userId, PageRequest.of(0, 10));
@@ -183,7 +235,7 @@ class AiChatSessionRepositoryTest {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         for (int i = 0; i < 5; i++) {
-            save(userBook.getId(), AiChatSession.Status.ACTIVE, "s" + i);
+            saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "s" + i);
         }
 
         Slice<AiChatSessionListProjection> firstPage = aiChatSessionRepository
@@ -210,7 +262,7 @@ class AiChatSessionRepositoryTest {
         assertThat(slice.hasNext()).isFalse();
     }
 
-    private AiChatSession save(Long userBookId, AiChatSession.Status status, String title) {
+    private AiChatSession saveSession(Long userBookId, AiChatSession.Status status, String title) {
         AiChatSession session = AiChatSession.create(userBookId);
         if (status == AiChatSession.Status.CLOSED) {
             session.close();
@@ -221,23 +273,10 @@ class AiChatSessionRepositoryTest {
         return aiChatSessionRepository.save(session);
     }
 
-    /**
-     * SpringBootTest 의 영속성 컨텍스트 안에서 entity 의 updatedAt 을 강제 갱신.
-     * 운영 코드에서는 appendUserMessage / addAssistantTokens / close 등이 갱신하지만,
-     * 테스트에서는 정렬 검증을 위해 직접 시각을 주입한다. JPA dirty-checking 을 활용하기 위해
-     * AllArgsConstructor 의 of() 로 새로 만들어 동일 id 로 saveAndFlush.
-     */
-    private void forceUpdatedAt(AiChatSession session, LocalDateTime updatedAt) {
-        AiChatSession replaced = AiChatSession.of(
-                session.getId(),
-                session.getUserBookId(),
-                session.getStatus(),
-                session.getUserMessageCount(),
-                session.getAccumulatedTokens(),
-                session.getTitle(),
-                session.getCreatedAt(),
-                updatedAt
-        );
-        aiChatSessionRepository.saveAndFlush(replaced);
+    private void saveCompletedUserMessage(Long sessionId, LocalDateTime createdAt) {
+        aiChatMessageRepository.save(AiChatMessage.of(
+                null, sessionId, AiChatMessage.Role.USER, "msg", null,
+                10, null, 10, AiChatMessage.Status.COMPLETED, createdAt
+        ));
     }
 }
