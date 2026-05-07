@@ -1,13 +1,19 @@
 package com.readum.model.user.repository;
 
+import com.readum.model.book.entity.Book;
+import com.readum.model.book.repository.BookRepository;
 import com.readum.model.user.entity.UserBook;
+import com.readum.model.user.repository.projection.UserBookListItemProjection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -17,6 +23,9 @@ class UserBookRepositoryTest {
 
     @Autowired
     private UserBookRepository userBookRepository;
+
+    @Autowired
+    private BookRepository bookRepository;
 
     @Test
     @DisplayName("등록된 도서가 있으면 existsByUserId 가 true 를 반환한다")
@@ -71,6 +80,74 @@ class UserBookRepositoryTest {
         assertThat(found).isEmpty();
     }
 
+    @Test
+    @DisplayName("findAllByUserIdOrderByCreatedAtDescIdDesc 는 본인이 등록한 도서만 createdAt DESC, id DESC 순으로 Book 정보와 조인해 반환한다")
+    void 등록도서_목록_조회_정렬과_조인() {
+        Long userId = nextUserId();
+        Long otherUserId = nextUserId();
+
+        Book older = bookRepository.save(Book.create(
+                uniqueExternalId(), "이전에 등록한 책", "저자A", "출판사A", 2024, "http://example.com/a.jpg"));
+        Book newer = bookRepository.save(Book.create(
+                uniqueExternalId(), "최근 등록한 책", "저자B", "출판사B", 2025, "http://example.com/b.jpg"));
+        Book otherUserBook = bookRepository.save(Book.create(
+                uniqueExternalId(), "남의 책", "저자C", "출판사C", 2023, "http://example.com/c.jpg"));
+
+        LocalDateTime baseTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+        userBookRepository.save(UserBook.of(null, userId, older.getId(), baseTime));
+        userBookRepository.save(UserBook.of(null, userId, newer.getId(), baseTime.plusMinutes(1)));
+        userBookRepository.save(UserBook.of(null, otherUserId, otherUserBook.getId(), baseTime.plusMinutes(2)));
+
+        List<UserBookListItemProjection> projections =
+                userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
+
+        assertThat(projections).hasSize(2);
+        assertThat(projections.get(0).id()).isEqualTo(newer.getId());
+        assertThat(projections.get(0).title()).isEqualTo("최근 등록한 책");
+        assertThat(projections.get(0).publisher()).isEqualTo("출판사B");
+        assertThat(projections.get(0).publishedYear()).isEqualTo(2025);
+        assertThat(projections.get(0).coverUrl()).isEqualTo("http://example.com/b.jpg");
+        assertThat(projections.get(1).id()).isEqualTo(older.getId());
+        assertThat(projections.get(1).title()).isEqualTo("이전에 등록한 책");
+        assertThat(projections)
+                .extracting(UserBookListItemProjection::id)
+                .doesNotContain(otherUserBook.getId());
+    }
+
+    @Test
+    @DisplayName("findAllByUserIdOrderByCreatedAtDescIdDesc 는 createdAt 이 동일하면 user_book.id DESC 로 정렬한다")
+    void 등록도서_목록_조회_createdAt_동일시_id_DESC() {
+        Long userId = nextUserId();
+
+        Book book1 = bookRepository.save(Book.create(
+                uniqueExternalId(), "책1", "저자1", "출판사1", 2024, "http://example.com/1.jpg"));
+        Book book2 = bookRepository.save(Book.create(
+                uniqueExternalId(), "책2", "저자2", "출판사2", 2024, "http://example.com/2.jpg"));
+
+        LocalDateTime sameTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+        UserBook first = userBookRepository.save(UserBook.of(null, userId, book1.getId(), sameTime));
+        UserBook second = userBookRepository.save(UserBook.of(null, userId, book2.getId(), sameTime));
+
+        List<UserBookListItemProjection> projections =
+                userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
+
+        assertThat(projections).hasSize(2);
+        assertThat(second.getId()).isGreaterThan(first.getId());
+        assertThat(projections.get(0).id()).isEqualTo(book2.getId());
+        assertThat(projections.get(1).id()).isEqualTo(book1.getId());
+    }
+
+    @Test
+    @DisplayName("등록한 도서가 없으면 빈 리스트를 반환한다")
+    void 등록도서_없으면_빈_리스트() {
+        Long userId = nextUserId();
+
+        List<UserBookListItemProjection> projections =
+                userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
+
+        assertThat(projections).isEmpty();
+    }
+
     private static synchronized Long nextUserId() {
         userIdSeq += 1;
         return userIdSeq;
@@ -79,5 +156,9 @@ class UserBookRepositoryTest {
     private static synchronized Long nextBookId() {
         bookIdSeq += 1;
         return bookIdSeq;
+    }
+
+    private static String uniqueExternalId() {
+        return "ext-" + UUID.randomUUID();
     }
 }
