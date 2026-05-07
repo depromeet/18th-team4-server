@@ -1,7 +1,9 @@
 package com.readum.domain.aiChat.service;
 
+import com.readum.domain.aiChat.dto.AiChatSessionDisplayStatus;
 import com.readum.domain.aiChat.dto.AiChatSessionListCommand;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
+import com.readum.domain.aiChat.dto.AiChatSessionResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
@@ -121,8 +123,13 @@ class AiChatSessionSearchServiceTest {
         );
 
         assertThat(result.sessions()).hasSize(4);
-        assertThat(result.sessions()).extracting("status")
-                .containsExactly("SUMMARIZING", "ACTIVE", "CLOSED", "FAILED");
+        assertThat(result.sessions()).extracting(AiChatSessionResult::status)
+                .containsExactly(
+                        AiChatSessionDisplayStatus.SUMMARIZING,
+                        AiChatSessionDisplayStatus.ACTIVE,
+                        AiChatSessionDisplayStatus.CLOSED,
+                        AiChatSessionDisplayStatus.FAILED
+                );
         assertThat(result.sessions().get(0).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 7));
         assertThat(result.sessions().get(2).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 6));
         assertThat(result.sessions().get(3).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 5));

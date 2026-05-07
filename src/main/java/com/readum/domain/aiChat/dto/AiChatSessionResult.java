@@ -7,7 +7,7 @@ import java.time.LocalDate;
 public record AiChatSessionResult(
         Long sessionId,
         String title,
-        String status,
+        AiChatSessionDisplayStatus status,
         LocalDate lastChattedDate
 ) {
 
@@ -15,7 +15,7 @@ public record AiChatSessionResult(
         return new AiChatSessionResult(
                 projection.sessionId(),
                 projection.title(),
-                projection.status(),
+                AiChatSessionDisplayStatus.valueOf(projection.status()),
                 projection.lastChattedAt() == null ? null : projection.lastChattedAt().toLocalDate()
         );
     }

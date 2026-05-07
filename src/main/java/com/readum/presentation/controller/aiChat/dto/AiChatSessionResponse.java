@@ -1,5 +1,6 @@
 package com.readum.presentation.controller.aiChat.dto;
 
+import com.readum.domain.aiChat.dto.AiChatSessionDisplayStatus;
 import com.readum.domain.aiChat.dto.AiChatSessionResult;
 
 import java.time.LocalDate;
@@ -7,7 +8,7 @@ import java.time.LocalDate;
 public record AiChatSessionResponse(
         Long sessionId,
         String title,
-        String status,
+        AiChatSessionDisplayStatus status,
         LocalDate lastChattedDate
 ) {
 

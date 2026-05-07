@@ -1,6 +1,7 @@
 package com.readum.presentation.controller.aiChat;
 
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
+import com.readum.domain.aiChat.dto.AiChatSessionDisplayStatus;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.AiChatSessionResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
@@ -161,10 +162,10 @@ class AiChatControllerTest {
         given(aiChatSessionSearchService.findByUserBookId(any()))
                 .willReturn(new AiChatSessionListResult(
                         List.of(
-                                new AiChatSessionResult(4L, "최근", "SUMMARIZING", today),
-                                new AiChatSessionResult(3L, "활성", "ACTIVE", today),
-                                new AiChatSessionResult(2L, "종료", "CLOSED", yesterday),
-                                new AiChatSessionResult(1L, "실패", "FAILED", yesterday)
+                                new AiChatSessionResult(4L, "최근", AiChatSessionDisplayStatus.SUMMARIZING, today),
+                                new AiChatSessionResult(3L, "활성", AiChatSessionDisplayStatus.ACTIVE, today),
+                                new AiChatSessionResult(2L, "종료", AiChatSessionDisplayStatus.CLOSED, yesterday),
+                                new AiChatSessionResult(1L, "실패", AiChatSessionDisplayStatus.FAILED, yesterday)
                         ),
                         1,
                         20,
