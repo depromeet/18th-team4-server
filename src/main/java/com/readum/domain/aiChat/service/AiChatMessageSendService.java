@@ -15,7 +15,9 @@ import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
+import com.readum.model.book.repository.BookRepository;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +44,8 @@ public class AiChatMessageSendService {
     private final AiChatClient aiChatClient;
     private final AiChatProperties aiChatProperties;
     private final AiChatMessageRepository aiChatMessageRepository;
+    private final UserBookRepository userBookRepository;
+    private final BookRepository bookRepository;
 
     public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
         User user = userRepository.findBySessionId(command.userSessionId())
@@ -55,18 +59,19 @@ public class AiChatMessageSendService {
         // LLM 호출 결과와 무관하게 사용자 메시지는 보존해야 하므로(요구사항) 영속화도 스트림 시작 전에 commit.
         // 여기서 던진 예외는 SSE 이전에 GlobalExceptionHandler 가 처리해 4XX JSON 응답으로 나간다.
         verifyUserMessageRateLimit(user.getId());
-        List<HistoryMessage> previousHistory = aiChatMessagePersistService.loadHistoryAndRecordUserMessage(
-                sessionId, user.getId(), normalizedContent
-        );
+        AiChatMessagePersistService.MessageLoadResult loaded = aiChatMessagePersistService
+                .loadHistoryAndRecordUserMessage(sessionId, user.getId(), normalizedContent);
 
-        List<HistoryMessage> withCurrent = new ArrayList<>(previousHistory.size() + 1);
-        withCurrent.addAll(previousHistory);
+        List<HistoryMessage> withCurrent = new ArrayList<>(loaded.history().size() + 1);
+        withCurrent.addAll(loaded.history());
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
+
+        AiChatStreamCommand.BookContext bookContext = resolveBookContext(loaded.userBookId());
 
         StringBuilder contentBuffer = new StringBuilder();
         AtomicReference<AiChatChunk.Completion> completionRef = new AtomicReference<>();
 
-        return aiChatClient.stream(new AiChatStreamCommand(withCurrent))
+        return aiChatClient.stream(new AiChatStreamCommand(withCurrent, bookContext))
                 .concatMap(chunk -> bufferAndConvertChunk(chunk, contentBuffer, completionRef))
                 // doOnCancel 위치 주의: concatMap 직후, concatWith 앞.
                 // Phase 1 (LLM 스트리밍 중) 에 클라이언트가 끊기면 여기로 cancel 이 전파돼 fire.
@@ -211,6 +216,17 @@ public class AiChatMessageSendService {
             throw new BadRequestException(AiChatErrorCode.MESSAGE_CONTENT_TOO_LONG);
         }
         return normalized;
+    }
+
+    private AiChatStreamCommand.BookContext resolveBookContext(Long userBookId) {
+        return userBookRepository.findById(userBookId)
+                .flatMap(userBook -> bookRepository.findById(userBook.getBookId()))
+                .map(book -> new AiChatStreamCommand.BookContext(
+                        book.getTitle(),
+                        book.getAuthors(),
+                        book.getPublisher()
+                ))
+                .orElse(null);
     }
 
     /**

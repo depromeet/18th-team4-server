@@ -5,6 +5,7 @@ import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.exception.BusinessException;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -15,9 +16,13 @@ import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.RateLimit;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,6 +33,18 @@ public class AiChatClientImpl implements AiChatClient {
 
     private final ChatClient chatClient;
 
+    @Value("classpath:prompts/reading-assistant-system.st")
+    private Resource systemPromptResource;
+
+    private String baseSystemPrompt;
+
+    @PostConstruct
+    void init() throws IOException {
+        // ChatClient bean 의 defaultSystem 과 동일한 파일이지만,
+        // 책 정보를 동적으로 덧붙이기 위해 직접 로드해서 .system() 오버라이드에 사용한다.
+        this.baseSystemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
+    }
+
     @Override
     public Flux<AiChatChunk> stream(AiChatStreamCommand command) {
         List<Message> messages = command.history().stream()
@@ -35,11 +52,28 @@ public class AiChatClientImpl implements AiChatClient {
                 .toList();
 
         return chatClient.prompt()
+                .system(buildSystemPrompt(command.bookContext()))
                 .messages(messages)
                 .stream()
                 .chatResponse()
                 .concatMap(this::toChunks)
                 .doOnError(this::logUnexpectedError);
+    }
+
+    private String buildSystemPrompt(AiChatStreamCommand.BookContext ctx) {
+        if (ctx == null) {
+            return baseSystemPrompt;
+        }
+        StringBuilder sb = new StringBuilder(baseSystemPrompt);
+        sb.append("\n\n# 대화 대상 도서\n");
+        sb.append("제목: ").append(ctx.title()).append("\n");
+        if (ctx.authors() != null && !ctx.authors().isBlank()) {
+            sb.append("저자: ").append(ctx.authors()).append("\n");
+        }
+        if (ctx.publisher() != null && !ctx.publisher().isBlank()) {
+            sb.append("출판사: ").append(ctx.publisher()).append("\n");
+        }
+        return sb.toString();
     }
 
     private Message toSpringMessage(HistoryMessage history) {

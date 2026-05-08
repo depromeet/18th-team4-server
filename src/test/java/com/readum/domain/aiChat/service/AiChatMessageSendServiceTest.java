@@ -16,7 +16,9 @@ import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
+import com.readum.model.book.repository.BookRepository;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +69,12 @@ class AiChatMessageSendServiceTest {
     @Mock
     private AiChatMessageRepository aiChatMessageRepository;
 
+    @Mock
+    private UserBookRepository userBookRepository;
+
+    @Mock
+    private BookRepository bookRepository;
+
     private final AiChatProperties aiChatProperties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
             new AiChatProperties.MessageRule(4000),
@@ -81,7 +89,10 @@ class AiChatMessageSendServiceTest {
                 LocalDateTime.now(), LocalDateTime.now());
         org.mockito.Mockito.lenient().when(userRepository.findBySessionId(USER_SESSION_ID))
                 .thenReturn(java.util.Optional.of(testUser));
-        service = new AiChatMessageSendService(userRepository, persistService, aiChatClient, aiChatProperties, aiChatMessageRepository);
+        service = new AiChatMessageSendService(
+                userRepository, persistService, aiChatClient, aiChatProperties,
+                aiChatMessageRepository, userBookRepository, bookRepository
+        );
     }
 
     @Test
@@ -128,7 +139,7 @@ class AiChatMessageSendServiceTest {
         given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
                 .willReturn(4L);
         given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));
@@ -179,7 +190,7 @@ class AiChatMessageSendServiceTest {
         given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
                 .willReturn(0L);
         given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));
@@ -228,7 +239,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "주제 요약");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "주제 요약"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
 
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
                 new AiChatChunk.Token("이 책은"),
@@ -272,7 +283,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
 
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.concat(
                 Flux.just(new AiChatChunk.Token("부분 응답")),
@@ -300,7 +311,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
         RateLimitInfo info = new RateLimitInfo(
                 java.time.Duration.ofSeconds(13), null, null, null, null,
                 java.time.Duration.ofSeconds(12), null
@@ -325,7 +336,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.error(
                 new TooManyRequestsException(AiChatErrorCode.AI_QUOTA_EXHAUSTED)
         ));
@@ -346,7 +357,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
         // 청크 emit 시점을 테스트가 직접 제어하기 위한 sink (wall-clock race 회피).
         Sinks.Many<AiChatChunk> sink = Sinks.many().unicast().onBackpressureBuffer();
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(sink.asFlux());
@@ -377,7 +388,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
         Sinks.Many<AiChatChunk> sink = Sinks.many().unicast().onBackpressureBuffer();
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(sink.asFlux());
 
@@ -415,7 +426,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(List.of());
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.never());
 
         // 어떤 청크도 emit 되지 않은 상태에서 cancel.
@@ -435,10 +446,10 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "이번 질문");
 
         given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "이번 질문"))
-                .willReturn(List.of(
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(
                         new HistoryMessage(HistoryMessage.Role.USER, "이전 질문"),
                         new HistoryMessage(HistoryMessage.Role.ASSISTANT, "이전 응답")
-                ));
+                ), 100L));
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));

@@ -50,7 +50,7 @@ public class AiChatMessagePersistService {
      * 트래픽 패턴이 바뀌면 @Version 최적화 락 도입을 검토.
      */
     @Transactional
-    public List<HistoryMessage> loadHistoryAndRecordUserMessage(
+    public MessageLoadResult loadHistoryAndRecordUserMessage(
             Long sessionId, Long userId, String normalizedContent
     ) {
         AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, userId)
@@ -61,8 +61,10 @@ public class AiChatMessagePersistService {
         List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);
         aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, normalizedContent));
         session.appendUserMessage();
-        return previousHistory;
+        return new MessageLoadResult(previousHistory, session.getUserBookId());
     }
+
+    public record MessageLoadResult(List<HistoryMessage> history, Long userBookId) {}
 
     /**
      * 첫 ASSISTANT 응답 commit 직후 대화 이력 기반으로 세션 제목을 비동기로 생성한다.

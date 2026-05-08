@@ -103,12 +103,14 @@ class AiChatMessagePersistServiceTest {
                 new HistoryMessage(HistoryMessage.Role.ASSISTANT, "이전 응답")
         ));
 
-        List<HistoryMessage> result = persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "이번 질문");
+        AiChatMessagePersistService.MessageLoadResult result =
+                persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "이번 질문");
 
         // 결과는 이전 이력만 (현재 메시지는 SendService 가 직접 append)
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).content()).isEqualTo("이전 질문");
-        assertThat(result.get(1).content()).isEqualTo("이전 응답");
+        assertThat(result.history()).hasSize(2);
+        assertThat(result.history().get(0).content()).isEqualTo("이전 질문");
+        assertThat(result.history().get(1).content()).isEqualTo("이전 응답");
+        assertThat(result.userBookId()).isEqualTo(100L);
 
         // history 조회 후 USER 메시지 저장 — 순서 검증 (Hibernate auto-flush 회피)
         org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(aiChatHistorySearchService, aiChatMessageRepository);
