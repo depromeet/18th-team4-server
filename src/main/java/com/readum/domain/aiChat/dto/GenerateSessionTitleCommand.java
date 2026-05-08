@@ -1,7 +1,11 @@
 package com.readum.domain.aiChat.dto;
 
+import com.readum.model.aiChat.entity.AiChatMessage;
+
+import java.util.List;
+
 public record GenerateSessionTitleCommand(
         Long sessionId,
-        String firstUserMessage
+        List<AiChatMessage> messages
 ) {
 }

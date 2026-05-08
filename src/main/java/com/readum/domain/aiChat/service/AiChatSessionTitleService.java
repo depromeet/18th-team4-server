@@ -45,7 +45,7 @@ public class AiChatSessionTitleService {
             throw new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND);
         }
 
-        String generated = aiChatTitleClient.generate(command.firstUserMessage());
+        String generated = aiChatTitleClient.generate(command.messages());
         if (generated == null || generated.isBlank()) {
             log.warn("세션 제목 생성 결과가 비어 있어 갱신을 skip 한다 sessionId={}", command.sessionId());
             return;

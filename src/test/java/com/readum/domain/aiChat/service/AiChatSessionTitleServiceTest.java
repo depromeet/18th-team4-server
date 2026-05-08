@@ -4,8 +4,11 @@ import com.readum.domain.aiChat.dto.GenerateSessionTitleCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatTitleClient;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+
+import java.util.List;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,12 +56,17 @@ class AiChatSessionTitleServiceTest {
                 sessionId, 100L, AiChatSession.Status.ACTIVE,
                 1, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
+        List<AiChatMessage> messages = List.of(
+                AiChatMessage.of(1L, sessionId, AiChatMessage.Role.USER, "작가의 의도가 뭐야",
+                        null, null, null, null, AiChatMessage.Status.COMPLETED, LocalDateTime.now()),
+                AiChatMessage.of(2L, sessionId, AiChatMessage.Role.ASSISTANT, "작가는 ...",
+                        null, null, null, null, AiChatMessage.Status.COMPLETED, LocalDateTime.now())
+        );
         given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
-        given(aiChatTitleClient.generate("작가의 의도가 뭐야"))
-                .willReturn("작가의 의도 분석");
+        given(aiChatTitleClient.generate(messages)).willReturn("작가의 의도 분석");
 
-        titleService.execute(new GenerateSessionTitleCommand(sessionId, "작가의 의도가 뭐야"));
+        titleService.execute(new GenerateSessionTitleCommand(sessionId, messages));
 
         assertThat(session.getTitle()).isEqualTo("작가의 의도 분석");
     }
@@ -68,12 +76,12 @@ class AiChatSessionTitleServiceTest {
         Long sessionId = 7L;
         given(aiChatSessionRepository.existsById(sessionId)).willReturn(false);
 
-        assertThatThrownBy(() -> titleService.execute(new GenerateSessionTitleCommand(sessionId, "질문")))
+        assertThatThrownBy(() -> titleService.execute(new GenerateSessionTitleCommand(sessionId, List.of())))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
 
-        verify(aiChatTitleClient, never()).generate(org.mockito.ArgumentMatchers.anyString());
+        verify(aiChatTitleClient, never()).generate(org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test
@@ -83,10 +91,11 @@ class AiChatSessionTitleServiceTest {
                 sessionId, 100L, AiChatSession.Status.ACTIVE,
                 1, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
+        List<AiChatMessage> messages = List.of();
         given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
-        given(aiChatTitleClient.generate("질문")).willReturn("   ");
+        given(aiChatTitleClient.generate(messages)).willReturn("   ");
 
-        titleService.execute(new GenerateSessionTitleCommand(sessionId, "질문"));
+        titleService.execute(new GenerateSessionTitleCommand(sessionId, messages));
 
         assertThat(session.getTitle()).isNull();
     }
@@ -98,12 +107,13 @@ class AiChatSessionTitleServiceTest {
                 sessionId, 100L, AiChatSession.Status.ACTIVE,
                 1, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
+        List<AiChatMessage> messages = List.of();
         given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
         String longTitle = "가".repeat(150);
-        given(aiChatTitleClient.generate("질문")).willReturn(longTitle);
+        given(aiChatTitleClient.generate(messages)).willReturn(longTitle);
 
-        titleService.execute(new GenerateSessionTitleCommand(sessionId, "질문"));
+        titleService.execute(new GenerateSessionTitleCommand(sessionId, messages));
 
         assertThat(session.getTitle()).hasSize(100);
     }

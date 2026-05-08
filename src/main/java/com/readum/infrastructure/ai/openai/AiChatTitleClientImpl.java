@@ -1,6 +1,7 @@
 package com.readum.infrastructure.ai.openai;
 
 import com.readum.domain.aiChat.out.AiChatTitleClient;
+import com.readum.model.aiChat.entity.AiChatMessage;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 @Slf4j
 @Component
@@ -33,12 +35,29 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
     }
 
     @Override
-    public String generate(String firstUserMessage) {
+    public String generate(List<AiChatMessage> messages) {
+        String chatHistory = formatChatHistory(messages);
         String raw = chatClient.prompt()
                 .system(systemPrompt)
-                .user(firstUserMessage)
+                .user(chatHistory)
                 .call()
                 .content();
         return raw == null ? "" : raw.strip();
+    }
+
+    private String formatChatHistory(List<AiChatMessage> messages) {
+        StringBuilder sb = new StringBuilder();
+        for (AiChatMessage message : messages) {
+            String prefix = switch (message.getRole()) {
+                case USER -> "User: ";
+                case ASSISTANT -> "Assistant: ";
+                case SYSTEM -> null;
+            };
+            if (prefix == null) {
+                continue;
+            }
+            sb.append(prefix).append(message.getContent()).append("\n");
+        }
+        return sb.toString().trim();
     }
 }
