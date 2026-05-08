@@ -120,23 +120,26 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void 첫_USER_메시지면_제목_생성_트리거가_afterCommit_로_등록된다() {
-        Long userId = 1L;
+    void 첫_ASSISTANT_응답_완료_시_제목_생성_트리거가_afterCommit_로_등록된다() {
         Long sessionId = 7L;
-        AiChatSession freshSession = AiChatSession.of(
+        AiChatSession firstExchangeSession = AiChatSession.of(
                 sessionId, 100L, AiChatSession.Status.ACTIVE,
-                0, 0, null, LocalDateTime.now(), LocalDateTime.now()
+                1, 0, null, LocalDateTime.now(), LocalDateTime.now()
         );
-        given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(freshSession));
-        given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of());
+        given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(firstExchangeSession));
+        given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId))
+                .willReturn(List.of());
+
+        AiChatChunk.Completion meta = new AiChatChunk.Completion(100, 50, 150, null);
 
         TransactionSynchronizationManager.initSynchronization();
         try {
-            persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "첫 질문");
+            persistService.saveAssistantSuccess(sessionId, "첫 응답", meta);
 
             List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
             assertThat(synchronizations)
-                    .as("첫 USER 메시지 commit 후 제목 생성을 트리거할 synchronization 이 등록되어야 한다")
+                    .as("첫 교환 완료 후 제목 생성을 트리거할 synchronization 이 등록되어야 한다")
                     .hasSize(1);
         } finally {
             TransactionSynchronizationManager.clear();
@@ -144,22 +147,23 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void 두번째_이후_USER_메시지면_제목_생성_트리거가_등록되지_않는다() {
-        Long userId = 1L;
+    void 두번째_이후_ASSISTANT_응답이면_제목_생성_트리거가_등록되지_않는다() {
         Long sessionId = 7L;
-        AiChatSession existingSession = AiChatSession.of(
+        AiChatSession laterSession = AiChatSession.of(
                 sessionId, 100L, AiChatSession.Status.ACTIVE,
                 3, 100, "이미 있는 제목", LocalDateTime.now(), LocalDateTime.now()
         );
-        given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(existingSession));
-        given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of());
+        given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(laterSession));
+        given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        AiChatChunk.Completion meta = new AiChatChunk.Completion(100, 50, 150, null);
 
         TransactionSynchronizationManager.initSynchronization();
         try {
-            persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "후속 질문");
+            persistService.saveAssistantSuccess(sessionId, "후속 응답", meta);
 
             assertThat(TransactionSynchronizationManager.getSynchronizations())
-                    .as("이미 메시지가 있던 세션은 제목 생성 트리거를 등록하지 않아야 한다")
+                    .as("첫 교환이 아닌 세션은 제목 생성 트리거를 등록하지 않아야 한다")
                     .isEmpty();
         } finally {
             TransactionSynchronizationManager.clear();
@@ -232,6 +236,11 @@ class AiChatMessagePersistServiceTest {
     @Test
     void saveAssistant_시_meta_가_null_이면_세션_토큰은_누적되지_않는다() {
         Long sessionId = 7L;
+        AiChatSession session = AiChatSession.of(
+                sessionId, 100L, AiChatSession.Status.ACTIVE,
+                2, 100, "기존 제목", LocalDateTime.now(), LocalDateTime.now()
+        );
+        given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> {
             AiChatMessage incoming = invocation.getArgument(0);
             return AiChatMessage.of(
@@ -243,6 +252,6 @@ class AiChatMessagePersistServiceTest {
 
         persistService.saveAssistantSuccess(sessionId, "본문", null);
 
-        verify(aiChatSessionRepository, never()).findById(sessionId);
+        assertThat(session.getAccumulatedTokens()).isEqualTo(100);
     }
 }

@@ -1,5 +1,9 @@
 package com.readum.domain.aiChat.out;
 
+import com.readum.model.aiChat.entity.AiChatMessage;
+
+import java.util.List;
+
 /**
  * 채팅 세션 제목 생성을 위한 LLM 호출 port.
  * streaming 이 아니라 단발 비동기 호출이며, 메인 채팅용 {@link AiChatClient} 와는
@@ -7,5 +11,5 @@ package com.readum.domain.aiChat.out;
  */
 public interface AiChatTitleClient {
 
-    String generate(String firstUserMessage);
+    String generate(List<AiChatMessage> messages);
 }

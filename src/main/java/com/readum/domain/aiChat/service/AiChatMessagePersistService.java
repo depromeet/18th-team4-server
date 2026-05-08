@@ -45,9 +45,9 @@ public class AiChatMessagePersistService {
      * 결과에 포함되어 LLM 컨텍스트에 중복으로 들어가게 된다.
      * 동시성 가정: 같은 세션에 sequential 호출만 들어온다고 본다 (UI 의 전송 중 비활성 +
      * application.yml 의 ai-chat.rate-limit 으로 1차 방어). 따라서 session 의
-     * userMessageCount read-modify-write 와 isFirstUserMessage() 분기에 락을 걸지 않는다.
-     * 동시 호출이 겹치면 카운트 1회 유실 / 제목 생성 1회 중복이 가능하나 비즈니스 결정에
-     * 영향이 없어 허용. 트래픽 패턴이 바뀌면 @Version 최적화 락 도입을 검토.
+     * userMessageCount read-modify-write 에 락을 걸지 않는다.
+     * 동시 호출이 겹치면 카운트 1회 유실이 가능하나 비즈니스 결정에 영향이 없어 허용.
+     * 트래픽 패턴이 바뀌면 @Version 최적화 락 도입을 검토.
      */
     @Transactional
     public List<HistoryMessage> loadHistoryAndRecordUserMessage(
@@ -61,23 +61,20 @@ public class AiChatMessagePersistService {
         List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);
         aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, normalizedContent));
         session.appendUserMessage();
-        if (session.isFirstUserMessage()) {
-            scheduleTitleGenerationAfterCommit(sessionId, normalizedContent);
-        }
         return previousHistory;
     }
 
     /**
-     * 첫 USER 메시지 commit 직후 세션 제목을 비동기로 생성한다.
+     * 첫 ASSISTANT 응답 commit 직후 대화 이력 기반으로 세션 제목을 비동기로 생성한다.
      * 설계 의도:
-     * - commit 전에 호출하면 LLM 실패가 USER 메시지 영속화까지 롤백시킨다 — afterCommit 으로 분리.
+     * - commit 전에 호출하면 LLM 실패가 ASSISTANT 메시지 영속화까지 롤백시킨다 — afterCommit 으로 분리.
      * - afterCommit 콜백은 호출 스레드(보통 servlet 요청 스레드) 에서 실행되므로,
      *   LLM blocking 호출은 boundedElastic 으로 즉시 던져 응답 latency 에 영향을 주지 않게 한다.
      * - 제목 생성이 실패해도 사용자 흐름과 무관하므로 예외는 위로 던지지 않고 로그만 남긴다.
-     * - 확장성: 향후 N턴 재생성·수동 재명명 트리거가 추가되어도 동일한
+     * - 확장성: 향후 수동 재명명 트리거가 추가되어도 동일한
      * {@link AiChatSessionTitleService#execute(GenerateSessionTitleCommand)} 진입점만 호출하면 된다.
      */
-    private void scheduleTitleGenerationAfterCommit(Long sessionId, String firstUserMessage) {
+    private void scheduleTitleGenerationAfterCommit(Long sessionId, List<AiChatMessage> messages) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             // 트랜잭션 밖에서 직접 호출되는 경우(테스트/배치) 는 skip — 호출자가 직접 titleService 호출.
             return;
@@ -86,7 +83,7 @@ public class AiChatMessagePersistService {
             @Override
             public void afterCommit() {
                 Mono.fromRunnable(() -> aiChatSessionTitleService.execute(
-                                new GenerateSessionTitleCommand(sessionId, firstUserMessage)))
+                                new GenerateSessionTitleCommand(sessionId, messages)))
                         .subscribeOn(Schedulers.boundedElastic())
                         .subscribe(
                                 null,
@@ -110,10 +107,17 @@ public class AiChatMessagePersistService {
         // 세션 누적치는 ASSISTANT 가 생성한 토큰만 합산한다.
         // totalTokens 는 입력 프롬프트(이전 대화 + 시스템 프롬프트) 까지 포함하므로 누적에 쓰면
         // 같은 컨텍스트가 매 턴 중복 집계되어 실제 생성량보다 부풀려진다.
-        if (outputTokens != null && outputTokens > 0) {
-            aiChatSessionRepository.findById(sessionId)
-                    .ifPresent(session -> session.addAssistantTokens(outputTokens));
-        }
+        // 첫 ASSISTANT 응답 완료(첫 교환) 시점에 대화 이력 기반으로 세션 제목을 생성한다.
+        aiChatSessionRepository.findById(sessionId).ifPresent(session -> {
+            if (outputTokens != null && outputTokens > 0) {
+                session.addAssistantTokens(outputTokens);
+            }
+            if (session.isFirstUserMessage()) {
+                List<AiChatMessage> messages =
+                        aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);
+                scheduleTitleGenerationAfterCommit(sessionId, messages);
+            }
+        });
         return saved;
     }
 
