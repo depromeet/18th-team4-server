@@ -2,6 +2,7 @@ package com.readum.domain.user.service;
 
 import com.readum.domain.user.dto.CreateUserSessionResult;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +32,7 @@ class CreateUserSessionServiceTest {
         given(userRepository.save(org.mockito.ArgumentMatchers.any(User.class))).willAnswer(invocation -> {
             User input = invocation.getArgument(0);
             LocalDateTime now = LocalDateTime.now();
-            return User.of(
+            return UserFixture.of(
                     1L,
                     null,
                     input.getSessionId(),

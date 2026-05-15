@@ -4,6 +4,7 @@ import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.user.userbook.dto.UserBookSearchResult;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import com.readum.model.user.repository.projection.UserBookListItemProjection;
@@ -38,7 +39,7 @@ class UserBookSearchServiceTest {
     private static final String USER_SESSION_ID = "test-session-id";
 
     private User stubUser() {
-        return User.of(USER_ID, null, USER_SESSION_ID, null, false,
+        return UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
                 LocalDateTime.now(), LocalDateTime.now());
     }
 

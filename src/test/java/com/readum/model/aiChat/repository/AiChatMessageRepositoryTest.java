@@ -1,6 +1,7 @@
 package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,7 +33,7 @@ class AiChatMessageRepositoryTest {
     void findVisibleHistory_필터링과_정렬() {
         Long sessionId = nextSessionId();
         // SYSTEM(노출 금지), FAILED(부분 응답) 와 정상 메시지를 인터리빙
-        aiChatMessageRepository.save(AiChatMessage.create(
+        aiChatMessageRepository.save(AiChatMessageFixture.create(
                 sessionId, AiChatMessage.Role.SYSTEM, AiChatMessage.Status.COMPLETED,
                 "system prompt", null, null, null, null
         ));

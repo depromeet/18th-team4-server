@@ -7,9 +7,12 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.entity.UserBook;
+import com.readum.model.user.entity.UserBookFixture;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
@@ -51,7 +54,7 @@ class AiChatSessionCreateServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+        User testUser = UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
                 LocalDateTime.now(), LocalDateTime.now());
         lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
     }
@@ -61,11 +64,11 @@ class AiChatSessionCreateServiceTest {
         Long userBookId = 10L;
         AiChatSessionCreateCommand command = new AiChatSessionCreateCommand(USER_SESSION_ID, userBookId);
 
-        UserBook userBook = UserBook.of(userBookId, USER_ID, 100L, LocalDateTime.now());
+        UserBook userBook = UserBookFixture.of(userBookId, USER_ID, 100L, LocalDateTime.now());
         given(userBookRepository.findByIdAndUserId(userBookId, USER_ID)).willReturn(Optional.of(userBook));
 
         LocalDateTime now = LocalDateTime.now();
-        AiChatSession persisted = AiChatSession.of(
+        AiChatSession persisted = AiChatSessionFixture.of(
                 42L, userBookId, AiChatSession.Status.ACTIVE, 0, 0, null, now, now
         );
         given(aiChatSessionRepository.save(any(AiChatSession.class))).willReturn(persisted);

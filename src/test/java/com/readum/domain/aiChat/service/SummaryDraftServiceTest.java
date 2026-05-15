@@ -8,12 +8,16 @@ import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnprocessableEntityException;
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.entity.Summary;
+import com.readum.model.summary.entity.SummaryFixture;
 import com.readum.model.summary.repository.SummaryRepository;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
@@ -78,7 +82,7 @@ class SummaryDraftServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+        User testUser = UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
                 LocalDateTime.now(), LocalDateTime.now());
         lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
         summaryDraftService = new SummaryDraftService(
@@ -107,7 +111,7 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
         given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(SESSION_ID)).willReturn(messages);
         given(summaryRepository.save(any(Summary.class))).willReturn(
-                Summary.of(SUMMARY_ID, USER_BOOK_ID, SESSION_ID, Summary.Status.IN_PROGRESS,
+                SummaryFixture.of(SUMMARY_ID, USER_BOOK_ID, SESSION_ID, Summary.Status.IN_PROGRESS,
                         null, null, null, LocalDateTime.now(), LocalDateTime.now()));
         given(summaryRepository.findById(SUMMARY_ID)).willReturn(Optional.of(inProgressSummary));
         given(aiSummaryClient.generate(messages)).willReturn(expected);
@@ -130,7 +134,7 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
         given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(SESSION_ID)).willReturn(List.of());
         given(summaryRepository.save(any(Summary.class))).willReturn(
-                Summary.of(SUMMARY_ID, USER_BOOK_ID, SESSION_ID, Summary.Status.IN_PROGRESS,
+                SummaryFixture.of(SUMMARY_ID, USER_BOOK_ID, SESSION_ID, Summary.Status.IN_PROGRESS,
                         null, null, null, LocalDateTime.now(), LocalDateTime.now()));
         given(summaryRepository.findById(SUMMARY_ID)).willReturn(Optional.of(inProgressSummary));
         given(aiSummaryClient.generate(any())).willThrow(new RuntimeException("AI 오류"));
@@ -170,7 +174,7 @@ class SummaryDraftServiceTest {
 
     @Test
     void 이미_닫힌_세션이면_ConflictException이_발생한다() {
-        AiChatSession closedSession = AiChatSession.of(
+        AiChatSession closedSession = AiChatSessionFixture.of(
                 SESSION_ID, USER_BOOK_ID, AiChatSession.Status.CLOSED,
                 10, SUFFICIENT_TOKENS, "마지막 메시지", LocalDateTime.now(), LocalDateTime.now()
         );
@@ -202,19 +206,19 @@ class SummaryDraftServiceTest {
     }
 
     private AiChatSession activeSession(int accumulatedTokens) {
-        return AiChatSession.of(
+        return AiChatSessionFixture.of(
                 SESSION_ID, USER_BOOK_ID, AiChatSession.Status.ACTIVE,
                 0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
         );
     }
 
     private AiChatMessage userMessage(Long sessionId, String content) {
-        return AiChatMessage.create(sessionId, AiChatMessage.Role.USER, AiChatMessage.Status.COMPLETED,
+        return AiChatMessageFixture.create(sessionId, AiChatMessage.Role.USER, AiChatMessage.Status.COMPLETED,
                 content, null, 10, null, 10);
     }
 
     private AiChatMessage assistantMessage(Long sessionId, String content) {
-        return AiChatMessage.create(sessionId, AiChatMessage.Role.ASSISTANT, AiChatMessage.Status.COMPLETED,
+        return AiChatMessageFixture.create(sessionId, AiChatMessage.Role.ASSISTANT, AiChatMessage.Status.COMPLETED,
                 content, null, null, 40, 40);
     }
 

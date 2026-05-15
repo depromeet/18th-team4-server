@@ -3,6 +3,7 @@ package com.readum.domain.aiChat.service;
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ class AiChatHistorySearchServiceTest {
         List<AiChatMessage> recentDesc = new ArrayList<>();
         for (int i = 40; i >= 1; i--) {
             AiChatMessage.Role role = (i % 2 == 0) ? AiChatMessage.Role.ASSISTANT : AiChatMessage.Role.USER;
-            recentDesc.add(AiChatMessage.of(
+            recentDesc.add(AiChatMessageFixture.of(
                     (long) i,
                     sessionId,
                     role,
@@ -72,7 +73,7 @@ class AiChatHistorySearchServiceTest {
     @Test
     void 메시지가_적으면_있는_만큼만_history_에_포함된다() {
         Long sessionId = 7L;
-        AiChatMessage onlyOne = AiChatMessage.of(
+        AiChatMessage onlyOne = AiChatMessageFixture.of(
                 1L,
                 sessionId,
                 AiChatMessage.Role.USER,
@@ -106,7 +107,7 @@ class AiChatHistorySearchServiceTest {
         // repository.findRecentForContextWindow 가 USER/ASSISTANT 만 거른다는 사전 조건이 깨진 케이스.
         // (저장 경로 또는 조회 필터의 회귀) HistoryMessage.from 의 가드가 이를 fail-fast 로 잡는다.
         Long sessionId = 7L;
-        AiChatMessage systemLeak = AiChatMessage.of(
+        AiChatMessage systemLeak = AiChatMessageFixture.of(
                 1L,
                 sessionId,
                 AiChatMessage.Role.SYSTEM,

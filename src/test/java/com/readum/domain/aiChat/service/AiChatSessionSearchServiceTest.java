@@ -11,6 +11,7 @@ import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
@@ -55,7 +56,7 @@ class AiChatSessionSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+        User testUser = UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
                 LocalDateTime.now(), LocalDateTime.now());
         lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
     }

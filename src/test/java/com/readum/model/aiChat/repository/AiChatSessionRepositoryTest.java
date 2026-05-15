@@ -1,6 +1,7 @@
 package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
 import com.readum.model.summary.entity.Summary;
@@ -101,11 +102,11 @@ class AiChatSessionRepositoryTest {
         // 노출 대상 — USER, COMPLETED — 비교적 과거
         saveCompletedUserMessage(session.getId(), now.minusHours(1));
         // 제외 대상들 — 더 최근에 만들어졌어도 lastChattedAt 에 잡히면 안 된다.
-        aiChatMessageRepository.save(AiChatMessage.of(
+        aiChatMessageRepository.save(AiChatMessageFixture.of(
                 null, session.getId(), AiChatMessage.Role.SYSTEM, "system prompt", null,
                 null, null, null, AiChatMessage.Status.COMPLETED, now
         ));
-        aiChatMessageRepository.save(AiChatMessage.of(
+        aiChatMessageRepository.save(AiChatMessageFixture.of(
                 null, session.getId(), AiChatMessage.Role.ASSISTANT, "partial", null,
                 1, 0, 1, AiChatMessage.Status.FAILED, now
         ));
@@ -274,7 +275,7 @@ class AiChatSessionRepositoryTest {
     }
 
     private void saveCompletedUserMessage(Long sessionId, LocalDateTime createdAt) {
-        aiChatMessageRepository.save(AiChatMessage.of(
+        aiChatMessageRepository.save(AiChatMessageFixture.of(
                 null, sessionId, AiChatMessage.Role.USER, "msg", null,
                 10, null, 10, AiChatMessage.Status.COMPLETED, createdAt
         ));

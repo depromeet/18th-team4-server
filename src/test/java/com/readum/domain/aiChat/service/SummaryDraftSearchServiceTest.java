@@ -8,8 +8,10 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
@@ -61,7 +63,7 @@ class SummaryDraftSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
+        User testUser = UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
                 LocalDateTime.now(), LocalDateTime.now());
         lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
     }
@@ -152,14 +154,14 @@ class SummaryDraftSearchServiceTest {
     }
 
     private AiChatSession activeSession(int accumulatedTokens) {
-        return AiChatSession.of(
+        return AiChatSessionFixture.of(
                 SESSION_ID, USER_BOOK_ID, AiChatSession.Status.ACTIVE,
                 0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
         );
     }
 
     private AiChatSession closedSession(int accumulatedTokens) {
-        return AiChatSession.of(
+        return AiChatSessionFixture.of(
                 SESSION_ID, USER_BOOK_ID, AiChatSession.Status.CLOSED,
                 10, accumulatedTokens, "마지막 메시지", LocalDateTime.now(), LocalDateTime.now()
         );

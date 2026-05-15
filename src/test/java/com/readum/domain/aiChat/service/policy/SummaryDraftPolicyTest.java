@@ -6,6 +6,7 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.UnprocessableEntityException;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 
@@ -92,14 +93,14 @@ class SummaryDraftPolicyTest {
     }
 
     private AiChatSession activeSession(int accumulatedTokens) {
-        return AiChatSession.of(
+        return AiChatSessionFixture.of(
                 SESSION_ID, USER_BOOK_ID, AiChatSession.Status.ACTIVE,
                 0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
         );
     }
 
     private AiChatSession closedSession(int accumulatedTokens) {
-        return AiChatSession.of(
+        return AiChatSessionFixture.of(
                 SESSION_ID, USER_BOOK_ID, AiChatSession.Status.CLOSED,
                 0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
         );

@@ -10,6 +10,7 @@ import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.model.auth.entity.RefreshToken;
+import com.readum.model.auth.entity.RefreshTokenFixture;
 import com.readum.model.auth.repository.RefreshTokenRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
@@ -66,7 +67,7 @@ class TokenRefreshServiceTest {
 
     private RefreshToken activeRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
+        return RefreshTokenFixture.of(
                 100L, USER_ID, OLD_JWT_ID, null,
                 now.minusSeconds(60), now.plus(RT_TTL),
                 null, null, null,
@@ -76,7 +77,7 @@ class TokenRefreshServiceTest {
 
     private RefreshToken revokedRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
+        return RefreshTokenFixture.of(
                 100L, USER_ID, OLD_JWT_ID, null,
                 now.minusSeconds(3600), now.plus(RT_TTL),
                 null, null, now.minusSeconds(30),
@@ -86,7 +87,7 @@ class TokenRefreshServiceTest {
 
     private RefreshToken expiredRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
+        return RefreshTokenFixture.of(
                 100L, USER_ID, OLD_JWT_ID, null,
                 now.minusSeconds(3600), now.minusSeconds(10),
                 null, null, null,
@@ -96,7 +97,7 @@ class TokenRefreshServiceTest {
 
     private RefreshToken inGraceRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
+        return RefreshTokenFixture.of(
                 100L, USER_ID, OLD_JWT_ID, null,
                 now.minusSeconds(120), now.plus(RT_TTL),
                 now.minusSeconds(1), now.plusSeconds(2), null,
@@ -106,7 +107,7 @@ class TokenRefreshServiceTest {
 
     private RefreshToken postGraceRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
+        return RefreshTokenFixture.of(
                 100L, USER_ID, OLD_JWT_ID, null,
                 now.minusSeconds(120), now.plus(RT_TTL),
                 now.minusSeconds(60), now.minusSeconds(30), null,
@@ -145,7 +146,7 @@ class TokenRefreshServiceTest {
         String childJwtId = "child-jti";
         Instant childIssuedAt = Instant.now().minusSeconds(1);
         Instant childExpiresAt = childIssuedAt.plus(RT_TTL);
-        RefreshToken child = RefreshToken.of(
+        RefreshToken child = RefreshTokenFixture.of(
                 200L, USER_ID, childJwtId, OLD_JWT_ID,
                 childIssuedAt, childExpiresAt,
                 null, null, null,
