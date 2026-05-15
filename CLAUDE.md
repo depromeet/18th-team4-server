@@ -8,6 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 작업 지시에 명시된 파일만 생성/수정할 것. 범위 외 파일은 건드리지 말 것.
 - 기존 소스 파일을 "불필요하다"고 판단해 삭제하지 말 것. 삭제는 명시적으로 요청받은 경우에만 수행할 것.
 
+## 어휘 / 용어 작성 규칙 (문서·코드·대화 공통, 매우 중요)
+
+- **그 단어만 따로 봤을 때 무엇을 가리키는지 바로 이해되지 않는 용어는 쓰지 않는다.** 쉽게 이해되는 우리말로 풀어 말하거나 쓴다. 추상 영어 jargon 뿐 아니라 `Tier`, `production` 처럼 영어가 아니어도 맥락 없이는 모호한 약칭·번호 라벨도 포함된다.
+  - 예: "Tier 1 / Tier 2" → 그 대상을 풀어 서술한다. "production 호출 0" → "실제 서비스 코드(테스트가 아닌 코드)에서 호출하는 곳이 한 군데도 없음".
+- **예외 — 그대로 써도 되는 것**: 널리 통용되는 보편 전문 용어(예: `Trade-off`), 코드 식별자·클래스/메서드 이름, 표준 스펙(`GET`, `400`, `JWT`, `JPA`), 정착된 약어. 처음 등장하는 기술 용어는 짧은 풀이를 한 번 덧붙인다.
+- 판단 기준: **그 단어만 따로 봤을 때 팀원이 바로 이해하는가?** 아니면 풀어 쓴다.
+- 피할 표현 → 한국어 대체의 상세 표는 [`.claude/skills/pr/SKILL.md`](.claude/skills/pr/SKILL.md) 의 "어휘 가이드" 절을 따른다 (PR·이슈·주석·커밋 메시지 공통 적용).
+
 ## Project Overview
 
 **readum** — a Spring Boot 4.0.5 web application using Java 25, Gradle 9.4.1, and Lombok.
@@ -282,7 +290,7 @@ public ResponseEntity<GlobalApiResponse<XxxResponse>> handler(...) {
 | `TooManyRequestsException` | 429 | 외부 API 호출 한도 초과 (LLM rate limit 등) |
 
 - **도메인 ErrorCode**: `domain/{feature}/exception/{Feature}ErrorCode.java` 에 enum 으로 배치, `implements ErrorCode`, 메시지는 한글 (API 응답에 그대로 노출)
-- **예외 던지기**: 서브클래스 타입(HTTP 상태) + ErrorCode(세부 분기) 조합 사용. raw `RuntimeException` / `IllegalArgumentException` 금지. `IllegalStateException` 은 프로그램 버그에만 fail-fast 용으로 사용
+- **예외 던지기**: 서브클래스 타입(HTTP 상태) + ErrorCode(세부 분기) 조합 사용. raw `RuntimeException` / `IllegalArgumentException` 금지. `IllegalStateException` 은 프로그램 버그를 즉시 드러내 멈추는 용도로만 사용 (정상 흐름의 예외 처리에는 쓰지 않음)
 - **핸들러 일원화**: `presentation/common/GlobalExceptionHandler` 한 곳에만 매핑. 컨트롤러 개별 `@ExceptionHandler` 금지
 - **예외 검증 테스트**: `extracting("errorCode")` 같은 리플렉션 문자열 키 금지. `asInstanceOf(InstanceOfAssertFactories.type(...))` + 메서드 레퍼런스로 타입 안전하게 검증
 
