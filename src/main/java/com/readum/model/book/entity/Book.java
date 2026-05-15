@@ -55,17 +55,4 @@ public class Book {
     ) {
         return new Book(null, externalId, title, authors, publisher, publishedYear, coverUrl, LocalDateTime.now());
     }
-
-    public static Book of(
-            Long id,
-            String externalId,
-            String title,
-            String authors,
-            String publisher,
-            Integer publishedYear,
-            String coverUrl,
-            LocalDateTime createdAt
-    ) {
-        return new Book(id, externalId, title, authors, publisher, publishedYear, coverUrl, createdAt);
-    }
 }

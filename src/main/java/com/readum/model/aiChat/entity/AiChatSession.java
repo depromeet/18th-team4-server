@@ -70,19 +70,6 @@ public class AiChatSession {
         this.updatedAt = LocalDateTime.now();
     }
 
-    public static AiChatSession of(
-            Long id,
-            Long userBookId,
-            Status status,
-            int userMessageCount,
-            int accumulatedTokens,
-            String title,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
-    ) {
-        return new AiChatSession(id, userBookId, status, userMessageCount, accumulatedTokens, title, createdAt, updatedAt);
-    }
-
     public void appendUserMessage() {
         this.userMessageCount += 1;
         this.updatedAt = LocalDateTime.now();

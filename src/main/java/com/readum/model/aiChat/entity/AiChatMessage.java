@@ -130,35 +130,4 @@ public class AiChatMessage {
                 LocalDateTime.now()
         );
     }
-
-    public static AiChatMessage create(
-            Long sessionId,
-            Role role,
-            Status status,
-            String content,
-            String quoteText,
-            Integer inputTokens,
-            Integer outputTokens,
-            Integer totalTokens
-    ) {
-        return new AiChatMessage(
-                null, sessionId, role, content, quoteText,
-                inputTokens, outputTokens, totalTokens, status, LocalDateTime.now()
-        );
-    }
-
-    public static AiChatMessage of(
-            Long id,
-            Long sessionId,
-            Role role,
-            String content,
-            String quoteText,
-            Integer inputTokens,
-            Integer outputTokens,
-            Integer totalTokens,
-            Status status,
-            LocalDateTime createdAt
-    ) {
-        return new AiChatMessage(id, sessionId, role, content, quoteText, inputTokens, outputTokens, totalTokens, status, createdAt);
-    }
 }

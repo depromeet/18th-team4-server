@@ -48,18 +48,6 @@ public class User {
         return new User(null, null, sessionId.toString(), null, false, now, now);
     }
 
-    public static User of(
-            Long id,
-            String deviceId,
-            String sessionId,
-            Long lastSelectedUserBookId,
-            boolean onboardingCompleted,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
-    ) {
-        return new User(id, deviceId, sessionId, lastSelectedUserBookId, onboardingCompleted, createdAt, updatedAt);
-    }
-
     public void completeOnboarding() {
         this.onboardingCompleted = true;
         this.updatedAt = LocalDateTime.now();

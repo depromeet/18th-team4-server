@@ -76,23 +76,6 @@ public class RefreshToken {
         );
     }
 
-    public static RefreshToken of(
-            Long id,
-            Long userId,
-            String jwtId,
-            String parentJwtId,
-            Instant issuedAt,
-            Instant expiresAt,
-            Instant rotatedAt,
-            Instant graceExpiresAt,
-            Instant revokedAt,
-            LocalDateTime createdAt
-    ) {
-        return new RefreshToken(
-                id, userId, jwtId, parentJwtId, issuedAt, expiresAt, rotatedAt, graceExpiresAt, revokedAt, createdAt
-        );
-    }
-
     public boolean isRevoked() {
         return revokedAt != null;
     }

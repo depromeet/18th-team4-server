@@ -74,20 +74,6 @@ public class Summary {
         return new Summary(null, userBookId, aiChatSessionId, Status.IN_PROGRESS, null, null, null, now, now);
     }
 
-    public static Summary of(
-            Long id,
-            Long userBookId,
-            Long aiChatSessionId,
-            Status status,
-            String quote,
-            String title,
-            String body,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
-    ) {
-        return new Summary(id, userBookId, aiChatSessionId, status, quote, title, body, createdAt, updatedAt);
-    }
-
     public void complete(String title, String body, String quote) {
         this.title = title;
         this.body = body;
