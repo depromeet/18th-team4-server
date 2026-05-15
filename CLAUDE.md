@@ -163,7 +163,7 @@ return new UserBookCreateResult(saved.getId(), saved.getUserId(), ...);
 ## Entity Convention
 
 - Lombok: `@Getter`, `@NoArgsConstructor(access = PROTECTED)`, `@AllArgsConstructor(access = PRIVATE)`
-- 정적 팩토리 메서드: `create()` (신규 생성), `of()` (모든 필드 지정)
+- 정적 팩토리 메서드: 엔티티는 불변식을 강제하는 도메인 팩토리(`create()` 계열 — `create()`/`createInProgress()`/`createChild()` 등)만 노출한다. 특정 id 지정·임의 상태(모든 필드 지정) 객체 생성은 **테스트 전용 책임**이며, 엔티티가 아니라 그 엔티티와 같은 패키지의 `src/test` `{Entity}Fixture` 헬퍼가 리플렉션으로 수행한다 (`@com.readum.support.TestOnly` 표식). 운영 엔티티에 `of()` (전체 필드 지정 생성) 를 두지 않는다.
 - setter 없이 불변 지향
 
 ## JPQL/Query Convention
