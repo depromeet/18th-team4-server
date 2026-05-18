@@ -18,7 +18,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -49,8 +48,7 @@ class AuthControllerLogoutTest {
 
     @BeforeEach
     void setUp() {
-        AuthController controller = new AuthController(tokenRefreshService, logoutService);
-        ReflectionTestUtils.setField(controller, "refreshCookieSecure", true);
+        AuthController controller = new AuthController(tokenRefreshService, logoutService, true);
 
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
