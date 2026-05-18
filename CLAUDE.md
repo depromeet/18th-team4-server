@@ -325,6 +325,8 @@ public ResponseEntity<GlobalApiResponse<XxxResponse>> handler(...) {
   void 존재하지_않는_사용자를_조회하면_예외가_발생한다() { ... }
   ```
 
+> 테스트 작성·리뷰 규범(이름=행위 주장, 준비 상태 정당성 3분류, 계약 단언, 존재 불가 상태 제거, 생성된 테스트 리뷰 체크리스트)의 상세는 [`docs/test-convention.md`](docs/test-convention.md) 참조.
+
 ## Configuration Properties
 
 비즈니스 룰/외부 API 설정값을 `@ConfigurationProperties` record 로 외부화할 때의 위치 규칙.
