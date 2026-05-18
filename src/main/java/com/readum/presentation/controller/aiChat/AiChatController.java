@@ -187,7 +187,7 @@ public class AiChatController {
     @Operation(
             summary = "세션의 메시지 이력 조회 (페이지네이션)",
             description = "createdAt 내림차순으로 메시지 이력을 페이지네이션 조회한다. " +
-                    "SYSTEM 프롬프트와 스트림 중단된 FAILED 부분 응답은 응답에서 제외된다."
+                    "스트림 중단된 FAILED 부분 응답은 응답에서 제외된다."
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공"),

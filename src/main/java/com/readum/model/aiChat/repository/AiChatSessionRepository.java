@@ -12,8 +12,6 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.util.Collection;
-import java.util.List;
 import java.util.Optional;
 
 public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Long> {
@@ -54,7 +52,7 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
     /**
      * 특정 userBook 의 채팅 세션 목록 페이지 조회.
      *
-     * 정렬 / lastChattedAt: 마지막으로 노출 가능한 메시지 (status COMPLETED + role IN USER/ASSISTANT) 의
+     * 정렬 / lastChattedAt: 마지막으로 노출 가능한 메시지 (status COMPLETED) 의
      * createdAt 을 max() 서브쿼리로 구해 사용한다. 메시지가 아직 없는 세션은 session.createdAt 으로 fallback.
      * AiChatSession.updatedAt 을 쓰지 않는 이유 — close() / updateTitle() 같은 비-채팅 이벤트가
      * 갱신해 "최근 채팅 시각" 의 의미가 흐려지기 때문.
@@ -81,7 +79,6 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                 Summary.Status.IN_PROGRESS,
                 Summary.Status.FAILED,
                 AiChatMessage.Status.COMPLETED,
-                List.of(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT),
                 pageable
         );
     }
@@ -100,8 +97,7 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                            (select max(aiChatMessage.createdAt)
                               from AiChatMessage aiChatMessage
                              where aiChatMessage.sessionId = aiChatSession.id
-                               and aiChatMessage.status = :messageCompletedStatus
-                               and aiChatMessage.role in :messageVisibleRoles),
+                               and aiChatMessage.status = :messageCompletedStatus),
                            aiChatSession.createdAt
                        )
                    )
@@ -120,8 +116,7 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                     (select max(aiChatMessage.createdAt)
                        from AiChatMessage aiChatMessage
                       where aiChatMessage.sessionId = aiChatSession.id
-                        and aiChatMessage.status = :messageCompletedStatus
-                        and aiChatMessage.role in :messageVisibleRoles),
+                        and aiChatMessage.status = :messageCompletedStatus),
                     aiChatSession.createdAt
                 ) desc,
                 aiChatSession.id desc
@@ -133,7 +128,6 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
             @Param("summaryInProgressStatus") Summary.Status summaryInProgressStatus,
             @Param("summaryFailedStatus") Summary.Status summaryFailedStatus,
             @Param("messageCompletedStatus") AiChatMessage.Status messageCompletedStatus,
-            @Param("messageVisibleRoles") Collection<AiChatMessage.Role> messageVisibleRoles,
             Pageable pageable
     );
 }

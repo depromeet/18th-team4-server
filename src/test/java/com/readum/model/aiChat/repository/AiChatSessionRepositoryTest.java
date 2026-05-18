@@ -1,6 +1,5 @@
 package com.readum.model.aiChat.repository;
 
-import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
@@ -92,7 +91,7 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: SYSTEM 메시지 / FAILED 부분 응답은 lastChattedAt 계산에서 제외된다")
+    @DisplayName("findSessionsByUserBookIdAndOwner: FAILED 부분 응답은 lastChattedAt 계산에서 제외된다")
     void lastChattedAt_은_노출_가능_메시지만() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
@@ -101,21 +100,16 @@ class AiChatSessionRepositoryTest {
         LocalDateTime now = LocalDateTime.now();
         // 노출 대상 — USER, COMPLETED — 비교적 과거
         saveCompletedUserMessage(session.getId(), now.minusHours(1));
-        // 제외 대상들 — 더 최근에 만들어졌어도 lastChattedAt 에 잡히면 안 된다.
-        aiChatMessageRepository.save(AiChatMessageFixture.of(
-                null, session.getId(), AiChatMessage.Role.SYSTEM, "system prompt", null,
-                null, null, null, AiChatMessage.Status.COMPLETED, now
-        ));
-        aiChatMessageRepository.save(AiChatMessageFixture.of(
-                null, session.getId(), AiChatMessage.Role.ASSISTANT, "partial", null,
-                1, 0, 1, AiChatMessage.Status.FAILED, now
-        ));
+        // 제외 대상 — 더 최근에 만들어졌어도 lastChattedAt 에 잡히면 안 된다.
+        aiChatMessageRepository.save(
+                AiChatMessageFixture.failedAssistantMessageAt(session.getId(), "partial", now)
+        );
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
 
         assertThat(slice.getContent()).hasSize(1);
-        // lastChattedAt 은 1시간 전 USER 메시지 시각이어야 한다 — SYSTEM/FAILED 가 더 최근이지만 무시.
+        // lastChattedAt 은 1시간 전 USER 메시지 시각이어야 한다 — FAILED 가 더 최근이지만 무시.
         assertThat(slice.getContent().get(0).lastChattedAt().toLocalDate())
                 .isEqualTo(now.minusHours(1).toLocalDate());
     }
@@ -275,9 +269,6 @@ class AiChatSessionRepositoryTest {
     }
 
     private void saveCompletedUserMessage(Long sessionId, LocalDateTime createdAt) {
-        aiChatMessageRepository.save(AiChatMessageFixture.of(
-                null, sessionId, AiChatMessage.Role.USER, "msg", null,
-                10, null, 10, AiChatMessage.Status.COMPLETED, createdAt
-        ));
+        aiChatMessageRepository.save(AiChatMessageFixture.userMessageAt(sessionId, "msg", createdAt));
     }
 }

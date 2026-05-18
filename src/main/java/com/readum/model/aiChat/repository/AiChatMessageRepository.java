@@ -8,49 +8,44 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
-import java.util.Collection;
 import java.util.List;
 
 public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Long> {
 
     /**
      * 사용자에게 노출할 메시지 이력 조회.
-     * status=COMPLETED 인 USER/ASSISTANT 메시지만 최신순(createdAt DESC, id DESC) 페이지네이션.
-     * SYSTEM 프롬프트와 스트림 중단된 FAILED 부분 응답은 제외된다.
+     * status=COMPLETED 인 메시지만 최신순(createdAt DESC, id DESC) 페이지네이션.
+     * 스트림 중단된 FAILED 부분 응답은 제외된다.
      */
     default Slice<AiChatMessage> findVisibleHistory(Long sessionId, Pageable pageable) {
-        return findSliceBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+        return findSliceBySessionIdAndStatusOrderByCreatedAtDescIdDesc(
                 sessionId,
                 AiChatMessage.Status.COMPLETED,
-                List.of(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT),
                 pageable
         );
     }
 
-    Slice<AiChatMessage> findSliceBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+    Slice<AiChatMessage> findSliceBySessionIdAndStatusOrderByCreatedAtDescIdDesc(
             Long sessionId,
             AiChatMessage.Status status,
-            Collection<AiChatMessage.Role> roles,
             Pageable pageable
     );
 
     /**
      * 컨텍스트 윈도우용 최근 메시지 조회.
-     * status=COMPLETED 인 USER/ASSISTANT 메시지만 최신순으로 가져온다 (FAILED 메시지 제외).
+     * status=COMPLETED 인 메시지만 최신순으로 가져온다 (FAILED 메시지 제외).
      */
     default List<AiChatMessage> findRecentForContextWindow(Long sessionId, Pageable pageable) {
-        return findBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+        return findBySessionIdAndStatusOrderByCreatedAtDescIdDesc(
                 sessionId,
                 AiChatMessage.Status.COMPLETED,
-                List.of(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT),
                 pageable
         );
     }
 
-    List<AiChatMessage> findBySessionIdAndStatusAndRoleInOrderByCreatedAtDescIdDesc(
+    List<AiChatMessage> findBySessionIdAndStatusOrderByCreatedAtDescIdDesc(
             Long sessionId,
             AiChatMessage.Status status,
-            Collection<AiChatMessage.Role> roles,
             Pageable pageable
     );
 
