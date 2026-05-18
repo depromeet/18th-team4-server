@@ -14,7 +14,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -37,8 +36,7 @@ class UserSearchServiceTest {
     @Test
     void 유효한_세션이면_세션_정보를_반환한다() {
         UUID sessionId = UUID.randomUUID();
-        LocalDateTime now = LocalDateTime.now();
-        User user = UserFixture.of(10L, null, sessionId.toString(), 7L, false, now, now);
+        User user = UserFixture.persistedUser(10L, sessionId.toString(), 7L, false);
 
         given(userRepository.findBySessionId(sessionId.toString())).willReturn(Optional.of(user));
         given(userBookRepository.existsByUserId(10L)).willReturn(true);
@@ -53,8 +51,7 @@ class UserSearchServiceTest {
     @Test
     void 등록된_도서가_없으면_hasRegisteredBooks_가_false_이다() {
         UUID sessionId = UUID.randomUUID();
-        LocalDateTime now = LocalDateTime.now();
-        User user = UserFixture.of(11L, null, sessionId.toString(), null, true, now, now);
+        User user = UserFixture.persistedUser(11L, sessionId.toString(), null, true);
 
         given(userRepository.findBySessionId(sessionId.toString())).willReturn(Optional.of(user));
         given(userBookRepository.existsByUserId(11L)).willReturn(false);

@@ -67,8 +67,7 @@ class UserBookCreateServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
-                LocalDateTime.now(), LocalDateTime.now());
+        User testUser = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
         org.mockito.Mockito.lenient().when(userRepository.findBySessionId(USER_SESSION_ID))
                 .thenReturn(Optional.of(testUser));
     }
@@ -82,14 +81,14 @@ class UserBookCreateServiceTest {
     }
 
     private Book stubBook() {
-        return BookFixture.of(BOOK_ID, EXTERNAL_ID, TITLE, AUTHORS, PUBLISHER, PUBLISHED_YEAR, COVER_URL, LocalDateTime.now());
+        return BookFixture.persistedBook(BOOK_ID, EXTERNAL_ID, TITLE, AUTHORS, PUBLISHER, PUBLISHED_YEAR, COVER_URL);
     }
 
     @Test
     void 신규_도서_등록_시_알라딘_조회_후_upsert_호출_후_UserBook이_저장되고_올바른_결과를_반환한다() {
         Book book = stubBook();
         LocalDateTime savedAt = LocalDateTime.of(2024, 6, 1, 12, 0);
-        UserBook savedUserBook = UserBookFixture.of(100L, USER_ID, BOOK_ID, savedAt);
+        UserBook savedUserBook = UserBookFixture.persistedUserBook(100L, USER_ID, BOOK_ID, savedAt);
 
         given(bookLookupClient.execute(EXTERNAL_ID)).willReturn(stubBookResult());
         given(bookRepository.findByExternalId(EXTERNAL_ID)).willReturn(Optional.of(book));
@@ -117,7 +116,7 @@ class UserBookCreateServiceTest {
     void 이미_등록된_도서_재등록_시_ALREADY_EXISTS_ErrorCode와_기존_UserBook_데이터가_payload에_담긴_ConflictException이_발생한다() {
         Book book = stubBook();
         LocalDateTime existingCreatedAt = LocalDateTime.of(2024, 1, 1, 0, 0);
-        UserBook existingUserBook = UserBookFixture.of(99L, USER_ID, BOOK_ID, existingCreatedAt);
+        UserBook existingUserBook = UserBookFixture.persistedUserBook(99L, USER_ID, BOOK_ID, existingCreatedAt);
 
         given(bookLookupClient.execute(EXTERNAL_ID)).willReturn(stubBookResult());
         given(bookRepository.findByExternalId(EXTERNAL_ID)).willReturn(Optional.of(book));

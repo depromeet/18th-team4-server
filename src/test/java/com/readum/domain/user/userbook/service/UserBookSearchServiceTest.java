@@ -15,7 +15,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,8 +38,7 @@ class UserBookSearchServiceTest {
     private static final String USER_SESSION_ID = "test-session-id";
 
     private User stubUser() {
-        return UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
-                LocalDateTime.now(), LocalDateTime.now());
+        return UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
     }
 
     @Test

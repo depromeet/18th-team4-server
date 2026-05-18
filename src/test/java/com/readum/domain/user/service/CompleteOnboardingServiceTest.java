@@ -4,7 +4,6 @@ import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.dto.CompleteOnboardingResult;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.user.entity.User;
-import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
@@ -33,8 +32,7 @@ class CompleteOnboardingServiceTest {
     @Test
     void 미완료_사용자에_대해_온보딩을_완료_상태로_변경한다() {
         UUID sessionId = UUID.randomUUID();
-        LocalDateTime now = LocalDateTime.now();
-        User user = UserFixture.of(1L, null, sessionId.toString(), null, false, now, now);
+        User user = User.create(sessionId);
 
         given(userRepository.findBySessionId(sessionId.toString())).willReturn(Optional.of(user));
 
@@ -47,8 +45,8 @@ class CompleteOnboardingServiceTest {
     @Test
     void 이미_완료된_사용자에_대해_멱등하게_true_를_반환한다() {
         UUID sessionId = UUID.randomUUID();
-        LocalDateTime now = LocalDateTime.now();
-        User user = UserFixture.of(2L, null, sessionId.toString(), null, true, now, now);
+        User user = User.create(sessionId);
+        user.completeOnboarding();
         LocalDateTime previousUpdatedAt = user.getUpdatedAt();
 
         given(userRepository.findBySessionId(sessionId.toString())).willReturn(Optional.of(user));

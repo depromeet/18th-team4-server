@@ -24,7 +24,6 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,8 +62,7 @@ class SummaryDraftSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
-                LocalDateTime.now(), LocalDateTime.now());
+        User testUser = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
         lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
     }
 
@@ -154,16 +152,14 @@ class SummaryDraftSearchServiceTest {
     }
 
     private AiChatSession activeSession(int accumulatedTokens) {
-        return AiChatSessionFixture.of(
-                SESSION_ID, USER_BOOK_ID, AiChatSession.Status.ACTIVE,
-                0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
+        return AiChatSessionFixture.persistedActiveSession(
+                SESSION_ID, USER_BOOK_ID, 0, accumulatedTokens, null
         );
     }
 
     private AiChatSession closedSession(int accumulatedTokens) {
-        return AiChatSessionFixture.of(
-                SESSION_ID, USER_BOOK_ID, AiChatSession.Status.CLOSED,
-                10, accumulatedTokens, "마지막 메시지", LocalDateTime.now(), LocalDateTime.now()
+        return AiChatSessionFixture.persistedClosedSession(
+                SESSION_ID, USER_BOOK_ID, 10, accumulatedTokens, "마지막 메시지"
         );
     }
 }

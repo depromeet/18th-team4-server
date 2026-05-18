@@ -56,8 +56,7 @@ class AiChatSessionSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
-                LocalDateTime.now(), LocalDateTime.now());
+        User testUser = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
         lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
     }
 

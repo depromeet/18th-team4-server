@@ -87,8 +87,7 @@ class AiChatMessageSendServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = UserFixture.of(USER_ID, null, USER_SESSION_ID, null, false,
-                LocalDateTime.now(), LocalDateTime.now());
+        User testUser = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
         org.mockito.Mockito.lenient().when(userRepository.findBySessionId(USER_SESSION_ID))
                 .thenReturn(java.util.Optional.of(testUser));
         service = new AiChatMessageSendService(
@@ -146,9 +145,8 @@ class AiChatMessageSendServiceTest {
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));
         given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
-                .willReturn(AiChatMessageFixture.of(
-                        1L, 7L, AiChatMessage.Role.ASSISTANT, "", null,
-                        1, 1, 2, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(
+                        1L, 7L, "", null, 1, 1, 2
                 ));
 
         assertThatCode(() -> service.execute(command).blockLast()).doesNotThrowAnyException();
@@ -197,9 +195,8 @@ class AiChatMessageSendServiceTest {
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));
         given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
-                .willReturn(AiChatMessageFixture.of(
-                        1L, 7L, AiChatMessage.Role.ASSISTANT, "", null,
-                        1, 1, 2, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(
+                        1L, 7L, "", null, 1, 1, 2
                 ));
 
         LocalDateTime before = LocalDateTime.now().minusSeconds(10);
@@ -250,11 +247,9 @@ class AiChatMessageSendServiceTest {
                 new AiChatChunk.Completion(312, 58, 370, null)
         ));
 
-        AiChatMessage savedAssistant = AiChatMessageFixture.of(
-                42L, sessionId, AiChatMessage.Role.ASSISTANT,
-                "이 책은 자연 앞에서 인간의 한계를 그립니다.", null,
-                312, 58, 370,
-                AiChatMessage.Status.COMPLETED, LocalDateTime.of(2026, 5, 2, 14, 0, 0)
+        AiChatMessage savedAssistant = AiChatMessageFixture.persistedAssistantMessage(
+                42L, sessionId, "이 책은 자연 앞에서 인간의 한계를 그립니다.", null,
+                312, 58, 370
         );
         given(persistService.saveAssistantSuccess(eq(sessionId), eq("이 책은 자연 앞에서 인간의 한계를 그립니다."), any()))
                 .willReturn(savedAssistant);
@@ -394,9 +389,8 @@ class AiChatMessageSendServiceTest {
         Sinks.Many<AiChatChunk> sink = Sinks.many().unicast().onBackpressureBuffer();
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(sink.asFlux());
 
-        AiChatMessage savedAssistant = AiChatMessageFixture.of(
-                42L, sessionId, AiChatMessage.Role.ASSISTANT, "응답", null,
-                10, 5, 15, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+        AiChatMessage savedAssistant = AiChatMessageFixture.persistedAssistantMessage(
+                42L, sessionId, "응답", null, 10, 5, 15
         );
         CountDownLatch persisted = new CountDownLatch(1);
         willAnswer(invocation -> {
@@ -456,9 +450,8 @@ class AiChatMessageSendServiceTest {
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));
         given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
-                .willReturn(AiChatMessageFixture.of(
-                        1L, sessionId, AiChatMessage.Role.ASSISTANT, "", null,
-                        1, 1, 2, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(
+                        1L, sessionId, "", null, 1, 1, 2
                 ));
 
         StepVerifier.create(service.execute(command))

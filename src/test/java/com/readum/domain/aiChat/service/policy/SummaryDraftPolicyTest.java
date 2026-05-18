@@ -10,8 +10,6 @@ import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -93,16 +91,14 @@ class SummaryDraftPolicyTest {
     }
 
     private AiChatSession activeSession(int accumulatedTokens) {
-        return AiChatSessionFixture.of(
-                SESSION_ID, USER_BOOK_ID, AiChatSession.Status.ACTIVE,
-                0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
+        return AiChatSessionFixture.persistedActiveSession(
+                SESSION_ID, USER_BOOK_ID, 0, accumulatedTokens, null
         );
     }
 
     private AiChatSession closedSession(int accumulatedTokens) {
-        return AiChatSessionFixture.of(
-                SESSION_ID, USER_BOOK_ID, AiChatSession.Status.CLOSED,
-                0, accumulatedTokens, null, LocalDateTime.now(), LocalDateTime.now()
+        return AiChatSessionFixture.persistedClosedSession(
+                SESSION_ID, USER_BOOK_ID, 0, accumulatedTokens, null
         );
     }
 }
