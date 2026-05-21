@@ -5,7 +5,9 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatTitleClient;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 
 import java.util.List;
@@ -20,7 +22,6 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,15 +53,12 @@ class AiChatSessionTitleServiceTest {
     @Test
     void 세션이_존재하고_LLM_이_제목을_반환하면_세션_title_이_갱신된다() {
         Long sessionId = 7L;
-        AiChatSession session = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                1, 0, null, LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 1, 0, null
         );
         List<AiChatMessage> messages = List.of(
-                AiChatMessage.of(1L, sessionId, AiChatMessage.Role.USER, "작가의 의도가 뭐야",
-                        null, null, null, null, AiChatMessage.Status.COMPLETED, LocalDateTime.now()),
-                AiChatMessage.of(2L, sessionId, AiChatMessage.Role.ASSISTANT, "작가는 ...",
-                        null, null, null, null, AiChatMessage.Status.COMPLETED, LocalDateTime.now())
+                AiChatMessageFixture.persistedUserMessage(1L, sessionId, "작가의 의도가 뭐야"),
+                AiChatMessageFixture.persistedAssistantMessage(2L, sessionId, "작가는 ...")
         );
         given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
@@ -87,9 +85,8 @@ class AiChatSessionTitleServiceTest {
     @Test
     void LLM_이_빈_제목을_반환하면_기존_title_은_변경되지_않는다() {
         Long sessionId = 7L;
-        AiChatSession session = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                1, 0, null, LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 1, 0, null
         );
         List<AiChatMessage> messages = List.of();
         given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
@@ -103,9 +100,8 @@ class AiChatSessionTitleServiceTest {
     @Test
     void LLM_이_길게_제목을_반환해도_엔티티가_컬럼_길이까지_자른다() {
         Long sessionId = 7L;
-        AiChatSession session = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                1, 0, null, LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 1, 0, null
         );
         List<AiChatMessage> messages = List.of();
         given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);

@@ -8,6 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 작업 지시에 명시된 파일만 생성/수정할 것. 범위 외 파일은 건드리지 말 것.
 - 기존 소스 파일을 "불필요하다"고 판단해 삭제하지 말 것. 삭제는 명시적으로 요청받은 경우에만 수행할 것.
 
+## 어휘 / 용어 작성 규칙 (문서·코드·대화 공통, 매우 중요)
+
+- **그 단어만 따로 봤을 때 무엇을 가리키는지 바로 이해되지 않는 용어는 쓰지 않는다.** 쉽게 이해되는 우리말로 풀어 말하거나 쓴다. 추상 영어 jargon 뿐 아니라 `Tier`, `production` 처럼 영어가 아니어도 맥락 없이는 모호한 약칭·번호 라벨도 포함된다.
+  - 예: "Tier 1 / Tier 2" → 그 대상을 풀어 서술한다. "production 호출 0" → "실제 서비스 코드(테스트가 아닌 코드)에서 호출하는 곳이 한 군데도 없음".
+- **예외 — 그대로 써도 되는 것**: 널리 통용되는 보편 전문 용어(예: `Trade-off`), 코드 식별자·클래스/메서드 이름, 표준 스펙(`GET`, `400`, `JWT`, `JPA`), 정착된 약어. 처음 등장하는 기술 용어는 짧은 풀이를 한 번 덧붙인다.
+- 판단 기준: **그 단어만 따로 봤을 때 팀원이 바로 이해하는가?** 아니면 풀어 쓴다.
+- 피할 표현 → 한국어 대체의 상세 표는 [`.claude/skills/pr/SKILL.md`](.claude/skills/pr/SKILL.md) 의 "어휘 가이드" 절을 따른다 (PR·이슈·주석·커밋 메시지 공통 적용).
+
 ## Project Overview
 
 **readum** — a Spring Boot 4.0.5 web application using Java 25, Gradle 9.4.1, and Lombok.
@@ -154,8 +162,9 @@ return new UserBookCreateResult(saved.getId(), saved.getUserId(), ...);
 
 ## Entity Convention
 
-- Lombok: `@Getter`, `@NoArgsConstructor(access = PROTECTED)`, `@AllArgsConstructor(access = PRIVATE)`
-- 정적 팩토리 메서드: `create()` (신규 생성), `of()` (모든 필드 지정)
+- Lombok: `@Getter`, `@NoArgsConstructor(access = PROTECTED)`, `@AllArgsConstructor(access = PRIVATE)`. 단, 같은 패키지(`src/test`)의 `{Entity}Fixture` 가 전체필드 생성자를 컴파일-안전하게 호출해야 하면 그 엔티티만 `@AllArgsConstructor(access = PACKAGE)` 로 둔다 (리플렉션 대신 생성자 직접 호출). 이 완화는 같은 패키지에 production 협력자가 없는 entity 패키지 한정으로 적용한다.
+- 정적 팩토리 메서드: 엔티티는 불변식을 강제하는 도메인 팩토리(`create()` 계열 — `create()`/`createInProgress()`/`createChild()` 등)만 노출한다. 특정 id 지정·임의 상태(모든 필드 지정) 객체 생성은 **테스트 전용 책임**이며, 엔티티가 아니라 그 엔티티와 같은 패키지의 `src/test` `{Entity}Fixture` 헬퍼가 package-private 전체필드 생성자를 호출해 수행한다 (`@com.readum.support.TestOnly` 표식). 운영 엔티티에 `of()` (전체 필드 지정 생성) 를 두지 않는다.
+- 픽스처는 **의도가 드러나는 명명 팩토리만** 노출한다 (예: `persistedUser`/`activeToken`/`persistedClosedSession`). 운영 DB 에 존재할 수 있는 유효 상태만, 호출부마다 실제로 달라지는 인자만 받고 나머지는 내부 기본값. 범용 `of()`/`create()` 같은 모든 필드 받는 탈출구와 `ReflectionTestUtils` 는 쓰지 않는다.
 - setter 없이 불변 지향
 
 ## JPQL/Query Convention
@@ -282,7 +291,7 @@ public ResponseEntity<GlobalApiResponse<XxxResponse>> handler(...) {
 | `TooManyRequestsException` | 429 | 외부 API 호출 한도 초과 (LLM rate limit 등) |
 
 - **도메인 ErrorCode**: `domain/{feature}/exception/{Feature}ErrorCode.java` 에 enum 으로 배치, `implements ErrorCode`, 메시지는 한글 (API 응답에 그대로 노출)
-- **예외 던지기**: 서브클래스 타입(HTTP 상태) + ErrorCode(세부 분기) 조합 사용. raw `RuntimeException` / `IllegalArgumentException` 금지. `IllegalStateException` 은 프로그램 버그에만 fail-fast 용으로 사용
+- **예외 던지기**: 서브클래스 타입(HTTP 상태) + ErrorCode(세부 분기) 조합 사용. raw `RuntimeException` / `IllegalArgumentException` 금지. `IllegalStateException` 은 프로그램 버그를 즉시 드러내 멈추는 용도로만 사용 (정상 흐름의 예외 처리에는 쓰지 않음)
 - **핸들러 일원화**: `presentation/common/GlobalExceptionHandler` 한 곳에만 매핑. 컨트롤러 개별 `@ExceptionHandler` 금지
 - **예외 검증 테스트**: `extracting("errorCode")` 같은 리플렉션 문자열 키 금지. `asInstanceOf(InstanceOfAssertFactories.type(...))` + 메서드 레퍼런스로 타입 안전하게 검증
 
@@ -315,6 +324,8 @@ public ResponseEntity<GlobalApiResponse<XxxResponse>> handler(...) {
   @Test
   void 존재하지_않는_사용자를_조회하면_예외가_발생한다() { ... }
   ```
+
+> 테스트 작성·리뷰 규범(이름=행위 주장, 준비 상태 정당성 3분류, 계약 단언, 존재 불가 상태 제거, 생성된 테스트 리뷰 체크리스트)의 상세는 [`docs/test-convention.md`](docs/test-convention.md) 참조.
 
 ## Configuration Properties
 

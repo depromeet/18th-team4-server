@@ -10,6 +10,7 @@ import com.readum.domain.auth.exception.AuthErrorCode;
 import com.readum.domain.auth.out.TokenGenerator;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.model.auth.entity.RefreshToken;
+import com.readum.model.auth.entity.RefreshTokenFixture;
 import com.readum.model.auth.repository.RefreshTokenRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,53 +64,48 @@ class TokenRefreshServiceTest {
         return new ParsedToken(USER_ID, ROLE, OLD_JWT_ID, Instant.now().plus(RT_TTL), TokenType.REFRESH);
     }
 
+    private static final Long ROW_ID = 100L;
+
     private RefreshToken activeRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
-                100L, USER_ID, OLD_JWT_ID, null,
-                now.minusSeconds(60), now.plus(RT_TTL),
-                null, null, null,
-                LocalDateTime.now()
+        return RefreshTokenFixture.activeToken(
+                ROW_ID, USER_ID, OLD_JWT_ID,
+                now.minusSeconds(60), now.plus(RT_TTL)
         );
     }
 
     private RefreshToken revokedRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
-                100L, USER_ID, OLD_JWT_ID, null,
+        return RefreshTokenFixture.revokedToken(
+                ROW_ID, USER_ID, OLD_JWT_ID,
                 now.minusSeconds(3600), now.plus(RT_TTL),
-                null, null, now.minusSeconds(30),
-                LocalDateTime.now()
+                now.minusSeconds(30)
         );
     }
 
     private RefreshToken expiredRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
-                100L, USER_ID, OLD_JWT_ID, null,
-                now.minusSeconds(3600), now.minusSeconds(10),
-                null, null, null,
-                LocalDateTime.now()
+        return RefreshTokenFixture.expiredToken(
+                ROW_ID, USER_ID, OLD_JWT_ID,
+                now.minusSeconds(3600), now.minusSeconds(10)
         );
     }
 
     private RefreshToken inGraceRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
-                100L, USER_ID, OLD_JWT_ID, null,
+        return RefreshTokenFixture.tokenInGracePeriod(
+                ROW_ID, USER_ID, OLD_JWT_ID,
                 now.minusSeconds(120), now.plus(RT_TTL),
-                now.minusSeconds(1), now.plusSeconds(2), null,
-                LocalDateTime.now()
+                now.minusSeconds(1), now.plusSeconds(2)
         );
     }
 
     private RefreshToken postGraceRow() {
         Instant now = Instant.now();
-        return RefreshToken.of(
-                100L, USER_ID, OLD_JWT_ID, null,
+        return RefreshTokenFixture.postGraceToken(
+                ROW_ID, USER_ID, OLD_JWT_ID,
                 now.minusSeconds(120), now.plus(RT_TTL),
-                now.minusSeconds(60), now.minusSeconds(30), null,
-                LocalDateTime.now()
+                now.minusSeconds(60), now.minusSeconds(30)
         );
     }
 
@@ -145,11 +140,9 @@ class TokenRefreshServiceTest {
         String childJwtId = "child-jti";
         Instant childIssuedAt = Instant.now().minusSeconds(1);
         Instant childExpiresAt = childIssuedAt.plus(RT_TTL);
-        RefreshToken child = RefreshToken.of(
+        RefreshToken child = RefreshTokenFixture.persistedChildToken(
                 200L, USER_ID, childJwtId, OLD_JWT_ID,
-                childIssuedAt, childExpiresAt,
-                null, null, null,
-                LocalDateTime.now()
+                childIssuedAt, childExpiresAt
         );
 
         given(tokenGenerator.parse(OLD_RT)).willReturn(refreshTokenClaims());

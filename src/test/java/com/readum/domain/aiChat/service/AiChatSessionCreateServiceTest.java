@@ -7,9 +7,12 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.entity.UserBook;
+import com.readum.model.user.entity.UserBookFixture;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
@@ -20,7 +23,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -51,8 +53,7 @@ class AiChatSessionCreateServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
-                LocalDateTime.now(), LocalDateTime.now());
+        User testUser = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
         lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
     }
 
@@ -61,12 +62,11 @@ class AiChatSessionCreateServiceTest {
         Long userBookId = 10L;
         AiChatSessionCreateCommand command = new AiChatSessionCreateCommand(USER_SESSION_ID, userBookId);
 
-        UserBook userBook = UserBook.of(userBookId, USER_ID, 100L, LocalDateTime.now());
+        UserBook userBook = UserBookFixture.persistedUserBook(userBookId, USER_ID, 100L);
         given(userBookRepository.findByIdAndUserId(userBookId, USER_ID)).willReturn(Optional.of(userBook));
 
-        LocalDateTime now = LocalDateTime.now();
-        AiChatSession persisted = AiChatSession.of(
-                42L, userBookId, AiChatSession.Status.ACTIVE, 0, 0, null, now, now
+        AiChatSession persisted = AiChatSessionFixture.persistedActiveSession(
+                42L, userBookId, 0, 0, null
         );
         given(aiChatSessionRepository.save(any(AiChatSession.class))).willReturn(persisted);
 

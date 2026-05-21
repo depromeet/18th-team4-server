@@ -51,11 +51,7 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
             String prefix = switch (message.getRole()) {
                 case USER -> "User: ";
                 case ASSISTANT -> "Assistant: ";
-                case SYSTEM -> null;
             };
-            if (prefix == null) {
-                continue;
-            }
             sb.append(prefix).append(message.getContent()).append("\n");
         }
         return sb.toString().trim();

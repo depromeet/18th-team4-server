@@ -18,7 +18,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "`user`")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@AllArgsConstructor(access = AccessLevel.PACKAGE)
 public class User {
 
     @Id
@@ -46,18 +46,6 @@ public class User {
     public static User create(UUID sessionId) {
         LocalDateTime now = LocalDateTime.now();
         return new User(null, null, sessionId.toString(), null, false, now, now);
-    }
-
-    public static User of(
-            Long id,
-            String deviceId,
-            String sessionId,
-            Long lastSelectedUserBookId,
-            boolean onboardingCompleted,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
-    ) {
-        return new User(id, deviceId, sessionId, lastSelectedUserBookId, onboardingCompleted, createdAt, updatedAt);
     }
 
     public void completeOnboarding() {

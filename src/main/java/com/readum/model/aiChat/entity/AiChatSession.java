@@ -25,7 +25,7 @@ import java.time.LocalDateTime;
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@AllArgsConstructor(access = AccessLevel.PACKAGE)
 public class AiChatSession {
 
     public enum Status {
@@ -68,19 +68,6 @@ public class AiChatSession {
     public void close() {
         this.status = Status.CLOSED;
         this.updatedAt = LocalDateTime.now();
-    }
-
-    public static AiChatSession of(
-            Long id,
-            Long userBookId,
-            Status status,
-            int userMessageCount,
-            int accumulatedTokens,
-            String title,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
-    ) {
-        return new AiChatSession(id, userBookId, status, userMessageCount, accumulatedTokens, title, createdAt, updatedAt);
     }
 
     public void appendUserMessage() {

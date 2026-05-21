@@ -28,14 +28,10 @@ class AiChatMessageRepositoryTest {
     }
 
     @Test
-    @DisplayName("findVisibleHistory 는 USER + ASSISTANT 의 COMPLETED 만 createdAt DESC, id DESC 로 반환한다")
+    @DisplayName("findVisibleHistory 는 COMPLETED 메시지만 createdAt DESC, id DESC 로 반환한다 (FAILED 제외)")
     void findVisibleHistory_필터링과_정렬() {
         Long sessionId = nextSessionId();
-        // SYSTEM(노출 금지), FAILED(부분 응답) 와 정상 메시지를 인터리빙
-        aiChatMessageRepository.save(AiChatMessage.create(
-                sessionId, AiChatMessage.Role.SYSTEM, AiChatMessage.Status.COMPLETED,
-                "system prompt", null, null, null, null
-        ));
+        // FAILED(부분 응답) 와 정상 메시지를 인터리빙
         aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "u1"));
         aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(sessionId, "a1", 1, 1, 2));
         aiChatMessageRepository.save(AiChatMessage.createAssistantFailed(sessionId, "partial", 1, 0, 1));
@@ -45,15 +41,12 @@ class AiChatMessageRepositoryTest {
         Slice<AiChatMessage> slice = aiChatMessageRepository
                 .findVisibleHistory(sessionId, PageRequest.of(0, 10));
 
-        // SYSTEM 1개 + FAILED 1개 제외 → 4개
+        // FAILED 1개 제외 → 4개
         assertThat(slice.getContent()).hasSize(4);
         assertThat(slice.hasNext()).isFalse();
         // 최신순 (DESC) 이므로 가장 마지막에 저장된 a2 가 첫 요소, u1 이 마지막
         assertThat(slice.getContent().get(0).getContent()).isEqualTo("a2");
         assertThat(slice.getContent().get(3).getContent()).isEqualTo("u1");
-        assertThat(slice.getContent())
-                .extracting(AiChatMessage::getRole)
-                .containsOnly(AiChatMessage.Role.USER, AiChatMessage.Role.ASSISTANT);
         assertThat(slice.getContent())
                 .extracting(AiChatMessage::getStatus)
                 .containsOnly(AiChatMessage.Status.COMPLETED);

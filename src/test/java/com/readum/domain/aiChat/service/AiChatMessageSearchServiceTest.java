@@ -7,10 +7,13 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,7 +25,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.SliceImpl;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -51,8 +53,7 @@ class AiChatMessageSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        User testUser = User.of(USER_ID, null, USER_SESSION_ID, null, false,
-                LocalDateTime.now(), LocalDateTime.now());
+        User testUser = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
         lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
     }
 
@@ -84,22 +85,17 @@ class AiChatMessageSearchServiceTest {
     @Test
     void 소유_세션의_페이지_결과를_변환한다() {
         Long sessionId = 7L;
-        AiChatSession session = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE, 0, 0, null,
-                LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 0, 0, null
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, USER_ID)).willReturn(Optional.of(session));
 
         List<AiChatMessage> rows = List.of(
-                AiChatMessage.of(
-                        2L, sessionId, AiChatMessage.Role.ASSISTANT,
-                        "응답 본문", "인용", 10, 5, 15,
-                        AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                AiChatMessageFixture.persistedAssistantMessage(
+                        2L, sessionId, "응답 본문", "인용", 10, 5, 15
                 ),
-                AiChatMessage.of(
-                        1L, sessionId, AiChatMessage.Role.USER,
-                        "사용자 메시지", null, null, null, null,
-                        AiChatMessage.Status.COMPLETED, LocalDateTime.now().minusSeconds(1)
+                AiChatMessageFixture.persistedUserMessage(
+                        1L, sessionId, "사용자 메시지"
                 )
         );
         given(aiChatMessageRepository.findVisibleHistory(

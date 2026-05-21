@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "book")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@AllArgsConstructor(access = AccessLevel.PACKAGE)
 public class Book {
 
     @Id
@@ -54,18 +54,5 @@ public class Book {
             String coverUrl
     ) {
         return new Book(null, externalId, title, authors, publisher, publishedYear, coverUrl, LocalDateTime.now());
-    }
-
-    public static Book of(
-            Long id,
-            String externalId,
-            String title,
-            String authors,
-            String publisher,
-            Integer publishedYear,
-            String coverUrl,
-            LocalDateTime createdAt
-    ) {
-        return new Book(id, externalId, title, authors, publisher, publishedYear, coverUrl, createdAt);
     }
 }

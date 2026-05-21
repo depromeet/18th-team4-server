@@ -28,7 +28,7 @@ import java.time.LocalDateTime;
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@AllArgsConstructor(access = AccessLevel.PACKAGE)
 public class RefreshToken {
 
     @Id
@@ -73,23 +73,6 @@ public class RefreshToken {
     ) {
         return new RefreshToken(
                 null, userId, jwtId, parentJwtId, issuedAt, expiresAt, null, null, null, LocalDateTime.now()
-        );
-    }
-
-    public static RefreshToken of(
-            Long id,
-            Long userId,
-            String jwtId,
-            String parentJwtId,
-            Instant issuedAt,
-            Instant expiresAt,
-            Instant rotatedAt,
-            Instant graceExpiresAt,
-            Instant revokedAt,
-            LocalDateTime createdAt
-    ) {
-        return new RefreshToken(
-                id, userId, jwtId, parentJwtId, issuedAt, expiresAt, rotatedAt, graceExpiresAt, revokedAt, createdAt
         );
     }
 

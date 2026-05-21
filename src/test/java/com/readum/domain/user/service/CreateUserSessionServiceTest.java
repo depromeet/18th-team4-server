@@ -2,6 +2,7 @@ package com.readum.domain.user.service;
 
 import com.readum.domain.user.dto.CreateUserSessionResult;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,7 +11,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,16 +30,7 @@ class CreateUserSessionServiceTest {
     void 신규_사용자를_저장하고_세션_식별자를_반환한다() {
         given(userRepository.save(org.mockito.ArgumentMatchers.any(User.class))).willAnswer(invocation -> {
             User input = invocation.getArgument(0);
-            LocalDateTime now = LocalDateTime.now();
-            return User.of(
-                    1L,
-                    null,
-                    input.getSessionId(),
-                    null,
-                    false,
-                    now,
-                    now
-            );
+            return UserFixture.persistedUser(1L, input.getSessionId());
         });
 
         CreateUserSessionResult result = createUserSessionService.execute();

@@ -6,7 +6,9 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
@@ -20,7 +22,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -75,9 +76,8 @@ class AiChatMessagePersistServiceTest {
     void 종료된_세션이면_BadRequest_SESSION_CLOSED_를_던진다() {
         Long userId = 1L;
         Long sessionId = 7L;
-        AiChatSession closed = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.CLOSED,
-                0, 0, null, LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession closed = AiChatSessionFixture.persistedClosedSession(
+                sessionId, 100L, 0, 0, null
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(closed));
 
@@ -93,9 +93,8 @@ class AiChatMessagePersistServiceTest {
     void 정상_세션이면_history_조회와_USER_메시지_저장이_순서대로_실행된다() {
         Long userId = 1L;
         Long sessionId = 7L;
-        AiChatSession active = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                0, 0, null, LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession active = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 0, 0, null
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(active));
         given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of(
@@ -124,9 +123,8 @@ class AiChatMessagePersistServiceTest {
     @Test
     void 첫_ASSISTANT_응답_완료_시_제목_생성_트리거가_afterCommit_로_등록된다() {
         Long sessionId = 7L;
-        AiChatSession firstExchangeSession = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                1, 0, null, LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession firstExchangeSession = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 1, 0, null
         );
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(firstExchangeSession));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
@@ -151,9 +149,8 @@ class AiChatMessagePersistServiceTest {
     @Test
     void 두번째_이후_ASSISTANT_응답이면_제목_생성_트리거가_등록되지_않는다() {
         Long sessionId = 7L;
-        AiChatSession laterSession = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                3, 100, "이미 있는 제목", LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession laterSession = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 3, 100, "이미 있는 제목"
         );
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(laterSession));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
@@ -175,25 +172,13 @@ class AiChatMessagePersistServiceTest {
     @Test
     void saveAssistantSuccess_은_ASSISTANT_COMPLETED_저장과_세션_토큰_누적을_수행한다() {
         Long sessionId = 7L;
-        AiChatSession session = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                1, 0, "이전 미리보기", LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 1, 0, "이전 미리보기"
         );
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> {
             AiChatMessage incoming = invocation.getArgument(0);
-            return AiChatMessage.of(
-                    99L,
-                    incoming.getSessionId(),
-                    incoming.getRole(),
-                    incoming.getContent(),
-                    incoming.getQuoteText(),
-                    incoming.getInputTokens(),
-                    incoming.getOutputTokens(),
-                    incoming.getTotalTokens(),
-                    incoming.getStatus(),
-                    incoming.getCreatedAt()
-            );
+            return AiChatMessageFixture.persistedCopyOf(99L, incoming);
         });
 
         AiChatChunk.Completion meta = new AiChatChunk.Completion(312, 58, 370, null);
@@ -215,9 +200,8 @@ class AiChatMessagePersistServiceTest {
     @Test
     void saveAssistantFailed_은_FAILED_저장만_수행하고_partial_이_null_이면_빈_문자열로_저장() {
         Long sessionId = 7L;
-        AiChatSession session = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                1, 0, null, LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 1, 0, null
         );
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
@@ -238,18 +222,13 @@ class AiChatMessagePersistServiceTest {
     @Test
     void saveAssistant_시_meta_가_null_이면_세션_토큰은_누적되지_않는다() {
         Long sessionId = 7L;
-        AiChatSession session = AiChatSession.of(
-                sessionId, 100L, AiChatSession.Status.ACTIVE,
-                2, 100, "기존 제목", LocalDateTime.now(), LocalDateTime.now()
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 2, 100, "기존 제목"
         );
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> {
             AiChatMessage incoming = invocation.getArgument(0);
-            return AiChatMessage.of(
-                    1L, incoming.getSessionId(), incoming.getRole(), incoming.getContent(),
-                    incoming.getQuoteText(), incoming.getInputTokens(), incoming.getOutputTokens(),
-                    incoming.getTotalTokens(), incoming.getStatus(), incoming.getCreatedAt()
-            );
+            return AiChatMessageFixture.persistedCopyOf(1L, incoming);
         });
 
         persistService.saveAssistantSuccess(sessionId, "본문", null);

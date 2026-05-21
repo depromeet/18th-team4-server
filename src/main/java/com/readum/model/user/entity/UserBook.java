@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@AllArgsConstructor(access = AccessLevel.PACKAGE)
 public class UserBook {
 
     @Id
@@ -41,9 +41,5 @@ public class UserBook {
 
     public static UserBook create(Long userId, Long bookId) {
         return new UserBook(null, userId, bookId, LocalDateTime.now());
-    }
-
-    public static UserBook of(Long id, Long userId, Long bookId, LocalDateTime createdAt) {
-        return new UserBook(id, userId, bookId, createdAt);
     }
 }

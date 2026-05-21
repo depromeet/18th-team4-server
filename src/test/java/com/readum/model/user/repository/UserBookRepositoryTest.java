@@ -3,6 +3,7 @@ package com.readum.model.user.repository;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.user.entity.UserBook;
+import com.readum.model.user.entity.UserBookFixture;
 import com.readum.model.user.repository.projection.UserBookListItemProjection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -94,9 +95,12 @@ class UserBookRepositoryTest {
                 uniqueExternalId(), "남의 책", "저자C", "출판사C", 2023, "http://example.com/c.jpg"));
 
         LocalDateTime baseTime = LocalDateTime.of(2025, 1, 1, 0, 0);
-        UserBook olderUserBook = userBookRepository.save(UserBook.of(null, userId, older.getId(), baseTime));
-        UserBook newerUserBook = userBookRepository.save(UserBook.of(null, userId, newer.getId(), baseTime.plusMinutes(1)));
-        userBookRepository.save(UserBook.of(null, otherUserId, otherUserBook.getId(), baseTime.plusMinutes(2)));
+        UserBook olderUserBook = userBookRepository.save(
+                UserBookFixture.userBookRegisteredAt(userId, older.getId(), baseTime));
+        UserBook newerUserBook = userBookRepository.save(
+                UserBookFixture.userBookRegisteredAt(userId, newer.getId(), baseTime.plusMinutes(1)));
+        userBookRepository.save(
+                UserBookFixture.userBookRegisteredAt(otherUserId, otherUserBook.getId(), baseTime.plusMinutes(2)));
 
         List<UserBookListItemProjection> projections =
                 userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
@@ -127,8 +131,10 @@ class UserBookRepositoryTest {
                 uniqueExternalId(), "책2", "저자2", "출판사2", 2024, "http://example.com/2.jpg"));
 
         LocalDateTime sameTime = LocalDateTime.of(2025, 1, 1, 0, 0);
-        UserBook first = userBookRepository.save(UserBook.of(null, userId, book1.getId(), sameTime));
-        UserBook second = userBookRepository.save(UserBook.of(null, userId, book2.getId(), sameTime));
+        UserBook first = userBookRepository.save(
+                UserBookFixture.userBookRegisteredAt(userId, book1.getId(), sameTime));
+        UserBook second = userBookRepository.save(
+                UserBookFixture.userBookRegisteredAt(userId, book2.getId(), sameTime));
 
         List<UserBookListItemProjection> projections =
                 userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);

@@ -29,7 +29,7 @@ import java.time.LocalDateTime;
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@AllArgsConstructor(access = AccessLevel.PACKAGE)
 public class Summary {
 
     public enum Status {
@@ -72,20 +72,6 @@ public class Summary {
     public static Summary createInProgress(Long userBookId, Long aiChatSessionId) {
         LocalDateTime now = LocalDateTime.now();
         return new Summary(null, userBookId, aiChatSessionId, Status.IN_PROGRESS, null, null, null, now, now);
-    }
-
-    public static Summary of(
-            Long id,
-            Long userBookId,
-            Long aiChatSessionId,
-            Status status,
-            String quote,
-            String title,
-            String body,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
-    ) {
-        return new Summary(id, userBookId, aiChatSessionId, status, quote, title, body, createdAt, updatedAt);
     }
 
     public void complete(String title, String body, String quote) {

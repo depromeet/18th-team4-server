@@ -13,7 +13,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -26,16 +25,23 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "인증", description = "Access Token 재발급 및 로그아웃")
 @RestController
 @RequestMapping("/api/v1/auth")
-@RequiredArgsConstructor
 public class AuthController {
 
     private static final String REFRESH_TOKEN_COOKIE = "refresh_token";
 
     private final TokenRefreshService tokenRefreshService;
     private final LogoutService logoutService;
+    private final boolean refreshCookieSecure;
 
-    @Value("${jwt.refresh-cookie-secure:true}")
-    private boolean refreshCookieSecure;
+    public AuthController(
+            TokenRefreshService tokenRefreshService,
+            LogoutService logoutService,
+            @Value("${jwt.refresh-cookie-secure:true}") boolean refreshCookieSecure
+    ) {
+        this.tokenRefreshService = tokenRefreshService;
+        this.logoutService = logoutService;
+        this.refreshCookieSecure = refreshCookieSecure;
+    }
 
     @Operation(
             summary = "Access Token 재발급",

@@ -60,11 +60,7 @@ public class AiSummaryClientImpl implements AiSummaryClient {
             String prefix = switch (message.getRole()) {
                 case USER -> USER_TURN_PREFIX;
                 case ASSISTANT -> ASSISTANT_TURN_PREFIX;
-                case SYSTEM -> null; // 시스템 메시지는 대화 이력에서 제외
             };
-            if (prefix == null) {
-                continue;
-            }
             sb.append(prefix).append(message.getContent()).append("\n");
         }
         return sb.toString().trim();
