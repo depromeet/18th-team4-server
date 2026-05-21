@@ -18,7 +18,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "`user`")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor(access = AccessLevel.PACKAGE)
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class User {
 
     @Id

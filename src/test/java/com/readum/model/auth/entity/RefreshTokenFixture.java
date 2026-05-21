@@ -1,6 +1,7 @@
 package com.readum.model.auth.entity;
 
 import com.readum.support.TestOnly;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -8,7 +9,9 @@ import java.time.LocalDateTime;
 /**
  * 특정 상태의 {@link RefreshToken} 을 만드는 명명 팩토리.
  * 토큰 수명 주기 상태(활성/폐기/만료/유예 중/유예 경과/자식)를 이름으로 드러낸다.
- * 같은 패키지의 package-private 전체필드 생성자를 컴파일-안전하게 호출한다.
+ * 운영 엔티티의 invariant 를 우회하지 않도록 엔티티 생성자는 PRIVATE 으로 두고,
+ * 픽스처는 같은 패키지에서 접근 가능한 protected 무인자 생성자로 객체를 만든 뒤
+ * {@link ReflectionTestUtils} 로 필드를 채운다 (테스트 전용).
  * createdAt 은 어떤 호출부에서도 단언하지 않으므로 내부 기본값(now)을 쓴다.
  */
 @TestOnly
@@ -23,10 +26,7 @@ public final class RefreshTokenFixture {
     public static RefreshToken activeToken(
             Long id, Long userId, String jwtId, Instant issuedAt, Instant expiresAt
     ) {
-        return new RefreshToken(
-                id, userId, jwtId, null, issuedAt, expiresAt,
-                null, null, null, LocalDateTime.now()
-        );
+        return assemble(id, userId, jwtId, null, issuedAt, expiresAt, null, null, null);
     }
 
     /**
@@ -35,10 +35,7 @@ public final class RefreshTokenFixture {
     public static RefreshToken revokedToken(
             Long id, Long userId, String jwtId, Instant issuedAt, Instant expiresAt, Instant revokedAt
     ) {
-        return new RefreshToken(
-                id, userId, jwtId, null, issuedAt, expiresAt,
-                null, null, revokedAt, LocalDateTime.now()
-        );
+        return assemble(id, userId, jwtId, null, issuedAt, expiresAt, null, null, revokedAt);
     }
 
     /**
@@ -47,10 +44,7 @@ public final class RefreshTokenFixture {
     public static RefreshToken expiredToken(
             Long id, Long userId, String jwtId, Instant issuedAt, Instant expiresAt
     ) {
-        return new RefreshToken(
-                id, userId, jwtId, null, issuedAt, expiresAt,
-                null, null, null, LocalDateTime.now()
-        );
+        return assemble(id, userId, jwtId, null, issuedAt, expiresAt, null, null, null);
     }
 
     /**
@@ -60,10 +54,7 @@ public final class RefreshTokenFixture {
             Long id, Long userId, String jwtId, Instant issuedAt, Instant expiresAt,
             Instant rotatedAt, Instant graceExpiresAt
     ) {
-        return new RefreshToken(
-                id, userId, jwtId, null, issuedAt, expiresAt,
-                rotatedAt, graceExpiresAt, null, LocalDateTime.now()
-        );
+        return assemble(id, userId, jwtId, null, issuedAt, expiresAt, rotatedAt, graceExpiresAt, null);
     }
 
     /**
@@ -74,10 +65,7 @@ public final class RefreshTokenFixture {
             Long id, Long userId, String jwtId, Instant issuedAt, Instant expiresAt,
             Instant rotatedAt, Instant graceExpiresAt
     ) {
-        return new RefreshToken(
-                id, userId, jwtId, null, issuedAt, expiresAt,
-                rotatedAt, graceExpiresAt, null, LocalDateTime.now()
-        );
+        return assemble(id, userId, jwtId, null, issuedAt, expiresAt, rotatedAt, graceExpiresAt, null);
     }
 
     /**
@@ -86,9 +74,29 @@ public final class RefreshTokenFixture {
     public static RefreshToken persistedChildToken(
             Long id, Long userId, String jwtId, String parentJwtId, Instant issuedAt, Instant expiresAt
     ) {
-        return new RefreshToken(
-                id, userId, jwtId, parentJwtId, issuedAt, expiresAt,
-                null, null, null, LocalDateTime.now()
-        );
+        return assemble(id, userId, jwtId, parentJwtId, issuedAt, expiresAt, null, null, null);
+    }
+
+    /**
+     * 모든 필드를 받아 {@link ReflectionTestUtils} 로 직접 채우는 조립 헬퍼.
+     * 명명 팩토리만 외부에 노출하고, 필드 주입 메커니즘은 여기 한 곳에 묶는다.
+     */
+    private static RefreshToken assemble(
+            Long id, Long userId, String jwtId, String parentJwtId,
+            Instant issuedAt, Instant expiresAt,
+            Instant rotatedAt, Instant graceExpiresAt, Instant revokedAt
+    ) {
+        RefreshToken token = new RefreshToken();
+        ReflectionTestUtils.setField(token, "id", id);
+        ReflectionTestUtils.setField(token, "userId", userId);
+        ReflectionTestUtils.setField(token, "jwtId", jwtId);
+        ReflectionTestUtils.setField(token, "parentJwtId", parentJwtId);
+        ReflectionTestUtils.setField(token, "issuedAt", issuedAt);
+        ReflectionTestUtils.setField(token, "expiresAt", expiresAt);
+        ReflectionTestUtils.setField(token, "rotatedAt", rotatedAt);
+        ReflectionTestUtils.setField(token, "graceExpiresAt", graceExpiresAt);
+        ReflectionTestUtils.setField(token, "revokedAt", revokedAt);
+        ReflectionTestUtils.setField(token, "createdAt", LocalDateTime.now());
+        return token;
     }
 }
