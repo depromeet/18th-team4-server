@@ -38,11 +38,25 @@ public class AiChatMessagePersistService {
     private final AiChatSessionTitleService aiChatSessionTitleService;
 
     /**
-     * 세션 소유권 및 종료 여부 검증, 이전 이력 조회, USER 메시지 INSERT 까지를
-     * 단일 트랜잭션으로 처리한다.
-     * 호출 순서 주의: 이전 이력 조회를 USER 메시지 save 전에 수행한다.
-     * Hibernate auto-flush 로 인해 save 후에 조회하면 방금 저장한 USER 메시지가
-     * 결과에 포함되어 LLM 컨텍스트에 중복으로 들어가게 된다.
+     * 세션 소유권 및 종료 여부를 검증하고 이전 이력만 조회한다(USER 메시지는 저장하지 않음).
+     * 입력 moderation 을 SSE 시작 전에 동기 실행하기 위해, 저장(record*) 과 분리했다.
+     * 어노테이션 없음: 단순 조회 service 이며, 호출하는 Repository 가 이미 SimpleJpaRepository 의
+     * readOnly 트랜잭션 안에서 실행되어 @Transactional(readOnly) 효과가 중복되고,
+     * 세션 검증 + 이력 조회의 일관 스냅샷은 비즈니스 요구가 아니다(CLAUDE.md Transaction Convention).
+     */
+    public MessageLoadResult loadHistory(Long sessionId, Long userId) {
+        AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, userId)
+                .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+        if (session.isClosed()) {
+            throw new BadRequestException(AiChatErrorCode.SESSION_CLOSED);
+        }
+        List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);
+        return new MessageLoadResult(previousHistory, session.getUserBookId());
+    }
+
+    /**
+     * moderation 통과한 USER 메시지를 COMPLETED 로 저장하고 세션 턴 카운트를 증가시킨다.
+     * 반드시 {@link #loadHistory(Long, Long)} 로 검증을 마친 뒤 호출한다.
      * 동시성 가정: 같은 세션에 sequential 호출만 들어온다고 본다 (UI 의 전송 중 비활성 +
      * application.yml 의 ai-chat.rate-limit 으로 1차 방어). 따라서 session 의
      * userMessageCount read-modify-write 에 락을 걸지 않는다.
@@ -50,18 +64,22 @@ public class AiChatMessagePersistService {
      * 트래픽 패턴이 바뀌면 @Version 최적화 락 도입을 검토.
      */
     @Transactional
-    public MessageLoadResult loadHistoryAndRecordUserMessage(
-            Long sessionId, Long userId, String normalizedContent
-    ) {
+    public void recordUserMessage(Long sessionId, Long userId, String normalizedContent) {
         AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, userId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
-        if (session.isClosed()) {
-            throw new BadRequestException(AiChatErrorCode.SESSION_CLOSED);
-        }
-        List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);
         aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, normalizedContent));
         session.appendUserMessage();
-        return new MessageLoadResult(previousHistory, session.getUserBookId());
+    }
+
+    /**
+     * 입력 가드레일에 차단된 USER 메시지를 REJECTED 로 저장만 한다.
+     * 반드시 {@link #loadHistory(Long, Long)} 로 세션 검증을 마친 뒤 호출한다 — 여기선 저장만 하고 검증하지 않는다.
+     * 세션 턴 카운트(appendUserMessage) 는 증가시키지 않는다(거부 메시지는 정상 대화 턴이 아님).
+     * REJECTED 가 첫 USER 메시지 자리에 끼어도 제목 생성 트리거는 그 다음 정상 USER 메시지가 처음 도착할 때 발동한다.
+     */
+    @Transactional
+    public void recordRejectedUserMessage(Long sessionId, Long userId, String normalizedContent) {
+        aiChatMessageRepository.save(AiChatMessage.createUserMessageRejected(sessionId, normalizedContent));
     }
 
     public record MessageLoadResult(List<HistoryMessage> history, Long userBookId) {}

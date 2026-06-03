@@ -101,16 +101,63 @@ public record GuardrailProperties(
 
     public record Moderation(
             boolean enabled,
-            @NotBlank String model
+            @NotBlank String model,
+            @NotNull List<String> alwaysBlockCategories,
+            @NotNull List<String> bookContextRelaxedCategories,
+            @NotNull FailurePolicy failurePolicy
     ) {
         private static final String DEFAULT_MODEL = "omni-moderation-latest";
 
+        // 책 맥락 유무와 무관하게 항상 차단하는 카테고리.
+        // 주의: Spring AI 2.0.0-M4 의 org.springframework.ai.moderation.Categories 에는
+        // OpenAI 의 illicit / illicit-violent getter 가 없다. 의미상 가장 가까운
+        // dangerous-and-criminal-content(isDangerousAndCriminalContent) 로 대체한다.
+        // 카테고리 이름↔getter 매핑의 정본은 OpenAiInputModerationClientImpl 의 레지스트리이며,
+        // 여기 적힌 이름이 그 레지스트리에 없으면 부팅이 fail-fast 한다(조용한 무시 방지).
+        private static final List<String> DEFAULT_ALWAYS_BLOCK_CATEGORIES = List.of(
+                "self-harm",
+                "self-harm-intent",
+                "self-harm-instructions",
+                "sexual-minors",
+                "dangerous-and-criminal-content"
+        );
+        // 책 맥락(독서 토론) 안에서는 정상 질문으로 흔히 등장하므로, bookContext 가 있을 때만 통과시키는 카테고리.
+        private static final List<String> DEFAULT_BOOK_CONTEXT_RELAXED_CATEGORIES = List.of(
+                "violence",
+                "violence-graphic",
+                "harassment",
+                "harassment-threatening",
+                "sexual",
+                "hate",
+                "hate-threatening"
+        );
+
         public Moderation {
             if (model == null || model.isBlank()) model = DEFAULT_MODEL;
+            if (alwaysBlockCategories == null) alwaysBlockCategories = DEFAULT_ALWAYS_BLOCK_CATEGORIES;
+            if (bookContextRelaxedCategories == null) {
+                bookContextRelaxedCategories = DEFAULT_BOOK_CONTEXT_RELAXED_CATEGORIES;
+            }
+            if (failurePolicy == null) failurePolicy = FailurePolicy.CLOSED;
         }
 
         public static Moderation defaults() {
-            return new Moderation(true, DEFAULT_MODEL);
+            return new Moderation(
+                    true,
+                    DEFAULT_MODEL,
+                    DEFAULT_ALWAYS_BLOCK_CATEGORIES,
+                    DEFAULT_BOOK_CONTEXT_RELAXED_CATEGORIES,
+                    FailurePolicy.CLOSED
+            );
+        }
+
+        /**
+         * 외부 Moderation API 장애 시의 기본 동작.
+         * CLOSED(기본): 차단 우선 — UNAVAILABLE 로 처리해 HTTP 503 으로 응답(운영 안전).
+         * OPEN: 통과 우선 — WARN 로그 후 정상 흐름 진행(개발 환경 전용).
+         */
+        public enum FailurePolicy {
+            OPEN, CLOSED
         }
     }
 

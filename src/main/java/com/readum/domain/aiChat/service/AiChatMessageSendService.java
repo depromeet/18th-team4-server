@@ -4,13 +4,16 @@ import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
+import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.RateLimitInfo;
+import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
@@ -46,6 +49,7 @@ public class AiChatMessageSendService {
     private final AiChatMessageRepository aiChatMessageRepository;
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
+    private final InputModerationClient inputModerationClient;
 
     public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
         User user = userRepository.findBySessionId(command.userSessionId())
@@ -54,19 +58,40 @@ public class AiChatMessageSendService {
         String normalizedContent = validateAndStripContent(command.content());
         Long sessionId = command.sessionId();
 
-        // 사전 단계: rate-limit 검사 / 이전 이력 조회 / USER 메시지 영속화는 모두 SSE 시작 전에 끝난다.
-        // 한도 초과를 던지면 GlobalExceptionHandler 가 HTTP 429 + Retry-After 헤더로 응답한다.
-        // LLM 호출 결과와 무관하게 사용자 메시지는 보존해야 하므로(요구사항) 영속화도 스트림 시작 전에 commit.
-        // 여기서 던진 예외는 SSE 이전에 GlobalExceptionHandler 가 처리해 4XX JSON 응답으로 나간다.
+        // 사전 단계: rate-limit 검사 / 이력 조회 / 입력 moderation / USER 메시지 영속화는 모두 SSE 시작 전에 끝난다.
+        // 여기서 던진 예외는 SSE 이전에 GlobalExceptionHandler 가 처리해 4XX/5XX JSON 응답으로 나간다.
         verifyUserMessageRateLimit(user.getId());
-        AiChatMessagePersistService.MessageLoadResult loaded = aiChatMessagePersistService
-                .loadHistoryAndRecordUserMessage(sessionId, user.getId(), normalizedContent);
+
+        // 이력만 조회(USER 미저장). 세션 검증은 여기서 끝난다.
+        AiChatMessagePersistService.MessageLoadResult loaded =
+                aiChatMessagePersistService.loadHistory(sessionId, user.getId());
+
+        AiChatStreamCommand.BookContext bookContext = resolveBookContext(loaded.userBookId());
+
+        // 입력 가드레일: SSE 시작 전 동기 실행. 거부 응답이 일반 토큰으로 흘러 저장 트리거를 발동하는 문제를 근본 차단.
+        InputModerationResult moderation = inputModerationClient.check(normalizedContent, bookContext);
+        switch (moderation.status()) {
+            case BLOCKED -> {
+                aiChatMessagePersistService.recordRejectedUserMessage(sessionId, user.getId(), normalizedContent);
+                log.warn("[Guardrail] 입력 차단 sessionId={} userId={} categories={}",
+                        sessionId, user.getId(), moderation.flaggedCategories());
+                throw new BadRequestException(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);
+            }
+            case UNAVAILABLE -> {
+                // 외부 Moderation API 장애(fail-closed). USER 메시지를 저장하지 않고 503.
+                throw new ServiceUnavailableException(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE);
+            }
+            case PASSED -> {
+                // 통과: COMPLETED 저장 후 스트림 시작.
+            }
+        }
+
+        // 통과한 경우에만 USER 메시지를 COMPLETED 로 저장(턴 카운트 포함).
+        aiChatMessagePersistService.recordUserMessage(sessionId, user.getId(), normalizedContent);
 
         List<HistoryMessage> withCurrent = new ArrayList<>(loaded.history().size() + 1);
         withCurrent.addAll(loaded.history());
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
-
-        AiChatStreamCommand.BookContext bookContext = resolveBookContext(loaded.userBookId());
 
         StringBuilder contentBuffer = new StringBuilder();
         AtomicReference<AiChatChunk.Completion> completionRef = new AtomicReference<>();
@@ -230,30 +255,41 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 사용자별 호출 폭주 차단. 최근 countPeriodSeconds 초 동안 USER 메시지가
-     * maxMessageCount 회 이상이면 TooManyRequestsException 으로 거절한다.
+     * 사용자별 호출 폭주 차단. 정상/거부 카운터를 각자 독립 한도와 비교한다.
+     * - 정상: 최근 countPeriodSeconds 초 동안 COMPLETED USER 메시지가 maxMessageCount 회 이상이면 거절.
+     * - 거부: 최근 rejectedCountPeriodSeconds 초 동안 REJECTED USER 메시지가 rejectedMaxMessageCount 회 이상이면 거절.
+     * 두 한도는 독립이므로 moderation 의 false-positive 가 폭증해도 정상 채팅(정상 카운트 0) 은 막히지 않고,
+     * 어뷰즈(의도적 거부 입력 반복) 만 거부 카운터로 차단된다.
      * 정밀 정책(사용자 tier 별 한도, 분산 카운터 등) 은 트래픽 데이터가 쌓인 후 도입 예정이며,
      * 현재 구현은 OpenAI 비용 폭주(클라이언트 무한 retry, 키 유출) 방어선이다.
      * 비용 방어선 목적이므로 retryAfter 는 카운트 기간을 그대로 돌려 보낸다 (보수적 추정).
      */
     private void verifyUserMessageRateLimit(Long userId) {
         AiChatProperties.RateLimit limit = aiChatProperties.rateLimit();
-        LocalDateTime since = LocalDateTime.now().minusSeconds(limit.countPeriodSeconds());
 
-        long recentCount = aiChatMessageRepository.countRecentUserMessagesByOwner(userId, since);
-        if (recentCount < limit.maxMessageCount()) {
-            return;
+        LocalDateTime normalSince = LocalDateTime.now().minusSeconds(limit.countPeriodSeconds());
+        long normalCount = aiChatMessageRepository.countRecentUserMessagesByOwner(userId, normalSince);
+        if (normalCount >= limit.maxMessageCount()) {
+            throw rateLimitExceeded(limit.countPeriodSeconds(), limit.maxMessageCount());
         }
 
+        LocalDateTime rejectedSince = LocalDateTime.now().minusSeconds(limit.rejectedCountPeriodSeconds());
+        long rejectedCount = aiChatMessageRepository.countRecentRejectedMessagesByOwner(userId, rejectedSince);
+        if (rejectedCount >= limit.rejectedMaxMessageCount()) {
+            throw rateLimitExceeded(limit.rejectedCountPeriodSeconds(), limit.rejectedMaxMessageCount());
+        }
+    }
+
+    private TooManyRequestsException rateLimitExceeded(int periodSeconds, int maxCount) {
         RateLimitInfo info = new RateLimitInfo(
-                Duration.ofSeconds(limit.countPeriodSeconds()),
-                (long) limit.maxMessageCount(),
+                Duration.ofSeconds(periodSeconds),
+                (long) maxCount,
                 null,
                 0L,
                 null,
                 null,
                 null
         );
-        throw new TooManyRequestsException(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED, info);
+        return new TooManyRequestsException(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED, info);
     }
 }

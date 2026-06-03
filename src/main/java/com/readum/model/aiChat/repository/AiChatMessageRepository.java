@@ -50,28 +50,33 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
     );
 
     /**
-     * 감상문 초안 생성용. FAILED 메시지는 제외하고 createdAt 오름차순으로 모든 유효 메시지를 조회한다.
+     * LLM 프롬프트(감상문 초안 + 첫 USER 메시지 turn 의 세션 제목 생성)용 유효 메시지 조회.
+     * COMPLETED 만 createdAt 오름차순으로 보낸다 — REJECTED(가드레일 차단) 와 FAILED(부분 응답) 는 제외한다.
+     * 화이트리스트(status = COMPLETED) 방식: 새 상태가 추가돼도 명시적으로 허용하지 않는 한 프롬프트로 새어나가지 않는다.
      */
     @Query("""
             select aiChatMessage
               from AiChatMessage aiChatMessage
              where aiChatMessage.sessionId = :sessionId
-               and aiChatMessage.status <> com.readum.model.aiChat.entity.AiChatMessage.Status.FAILED
+               and aiChatMessage.status = com.readum.model.aiChat.entity.AiChatMessage.Status.COMPLETED
              order by aiChatMessage.createdAt asc
             """)
     List<AiChatMessage> findValidMessagesBySessionIdOrderByCreatedAtAsc(@Param("sessionId") Long sessionId);
 
     /**
      * 사용자별 burst rate-limit 검사를 위한 카운트.
-     * since 이후 생성된 USER role 메시지 수를, 소유자(userId) 가 자신의 UserBook 으로 만든 모든 세션에서 합산한다.
+     * since 이후 생성된, 특정 role + status 메시지 수를 소유자(userId) 가 자신의 UserBook 으로 만든 모든 세션에서 합산한다.
      * AiChatSessionRepository.findByIdAndOwner 와 동일한 패턴으로 EXISTS 서브쿼리를 거쳐
      * AiChatMessage → AiChatSession → UserBook → user_id 매핑을 수행한다.
-     * role 은 FQCN 노이즈를 피하기 위해 파라미터로 바인딩하고, default 메서드가 USER 로 고정해 노출한다.
+     * role/status 는 FQCN 노이즈를 피하기 위해 파라미터로 바인딩하고, default 메서드가 의미를 고정해 노출한다.
+     * 정상(COMPLETED) 과 거부(REJECTED) 카운터를 분리해, moderation false-positive 가 폭증해도
+     * 정상 채팅 한도가 막히지 않게 한다.
      */
     @Query("""
             select count(aiChatMessage)
               from AiChatMessage aiChatMessage
              where aiChatMessage.role = :role
+               and aiChatMessage.status = :status
                and aiChatMessage.createdAt >= :since
                and exists (
                      select 1
@@ -82,13 +87,22 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
                         and userBook.userId = :userId
                    )
             """)
-    long countRecentMessagesByRoleAndOwner(
+    long countRecentMessagesByRoleStatusAndOwner(
             @Param("role") AiChatMessage.Role role,
+            @Param("status") AiChatMessage.Status status,
             @Param("userId") Long userId,
             @Param("since") LocalDateTime since
     );
 
+    /** 최근 정상(COMPLETED) USER 메시지 수 — 정상 메시지 rate-limit 용. */
     default long countRecentUserMessagesByOwner(Long userId, LocalDateTime since) {
-        return countRecentMessagesByRoleAndOwner(AiChatMessage.Role.USER, userId, since);
+        return countRecentMessagesByRoleStatusAndOwner(
+                AiChatMessage.Role.USER, AiChatMessage.Status.COMPLETED, userId, since);
+    }
+
+    /** 최근 거부(REJECTED) USER 메시지 수 — 어뷰즈(의도적 거부 입력 반복) rate-limit 용. */
+    default long countRecentRejectedMessagesByOwner(Long userId, LocalDateTime since) {
+        return countRecentMessagesByRoleStatusAndOwner(
+                AiChatMessage.Role.USER, AiChatMessage.Status.REJECTED, userId, since);
     }
 }

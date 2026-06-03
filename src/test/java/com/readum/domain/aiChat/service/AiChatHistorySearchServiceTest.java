@@ -27,7 +27,7 @@ class AiChatHistorySearchServiceTest {
     private final AiChatProperties properties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
             new AiChatProperties.MessageRule(4000),
-            new AiChatProperties.RateLimit(10, 5)
+            new AiChatProperties.RateLimit(10, 5, 3600, 20)
     );
 
     private AiChatHistorySearchService service;

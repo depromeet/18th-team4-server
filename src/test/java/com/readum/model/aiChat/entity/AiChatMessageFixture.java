@@ -105,6 +105,17 @@ public final class AiChatMessageFixture {
     }
 
     /**
+     * 특정 시각에 작성된, 저장 전(id 미부여) REJECTED USER 메시지.
+     * 입력 가드레일에 차단된 메시지가 LLM 프롬프트(컨텍스트/감상문/제목) 에서 제외되는지 검증하는 용도.
+     */
+    public static AiChatMessage rejectedUserMessageAt(Long sessionId, String content, LocalDateTime createdAt) {
+        return new AiChatMessage(
+                null, sessionId, AiChatMessage.Role.USER, content, null,
+                null, null, null, AiChatMessage.Status.REJECTED, createdAt
+        );
+    }
+
+    /**
      * save() 가 id 를 부여해 돌려준 영속 메시지를 모사한다 — source 의 모든 필드를 그대로,
      * id 만 부여해 복제. repository.save 의 willAnswer 스텁용.
      */

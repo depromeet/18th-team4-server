@@ -36,9 +36,11 @@ public class AiChatMessage {
      * COMPLETED : USER 메시지(즉시 저장) 또는 정상 종료된 ASSISTANT 메시지.
      * FAILED    : 스트림 비정상 종료 시 부분 응답을 보존하기 위한 ASSISTANT 메시지 상태.
      *             컨텍스트 윈도우(findRecentForContextWindow) 에서 자동 제외된다.
+     * REJECTED  : 입력 가드레일에 차단된 USER 메시지. 감사 추적을 위해 저장은 하되,
+     *             컨텍스트 윈도우·감상문 초안·세션 제목 생성 어떤 LLM 프롬프트에도 포함되지 않는다.
      */
     public enum Status {
-        COMPLETED, FAILED
+        COMPLETED, FAILED, REJECTED
     }
 
     @Id
@@ -85,6 +87,25 @@ public class AiChatMessage {
                 null,
                 null,
                 Status.COMPLETED,
+                LocalDateTime.now()
+        );
+    }
+
+    /**
+     * 입력 가드레일에 차단된 USER 메시지. 감사 추적용으로 REJECTED 상태로 저장한다.
+     * 거부 사유는 별도 컬럼 없이 로그로만 남긴다(이번 범위). 토큰·인용 없음.
+     */
+    public static AiChatMessage createUserMessageRejected(Long sessionId, String content) {
+        return new AiChatMessage(
+                null,
+                sessionId,
+                Role.USER,
+                content,
+                null,
+                null,
+                null,
+                null,
+                Status.REJECTED,
                 LocalDateTime.now()
         );
     }

@@ -92,9 +92,32 @@ class GuardrailPropertiesTest {
 
     @Test
     void Moderation_의_model_이_blank_이면_defaults_로_보강된다() {
-        GuardrailProperties.Moderation moderation = new GuardrailProperties.Moderation(true, "");
+        GuardrailProperties.Moderation moderation =
+                new GuardrailProperties.Moderation(true, "", List.of("self-harm"), List.of("violence"),
+                        GuardrailProperties.Moderation.FailurePolicy.CLOSED);
 
         assertThat(moderation.model()).isEqualTo(GuardrailProperties.Moderation.defaults().model());
+    }
+
+    @Test
+    void Moderation_의_카테고리_목록과_failurePolicy_가_null_이면_defaults_로_보강된다() {
+        GuardrailProperties.Moderation moderation =
+                new GuardrailProperties.Moderation(true, "omni-moderation-latest", null, null, null);
+
+        assertThat(moderation.alwaysBlockCategories())
+                .isEqualTo(GuardrailProperties.Moderation.defaults().alwaysBlockCategories());
+        assertThat(moderation.bookContextRelaxedCategories())
+                .isEqualTo(GuardrailProperties.Moderation.defaults().bookContextRelaxedCategories());
+        assertThat(moderation.failurePolicy())
+                .isEqualTo(GuardrailProperties.Moderation.FailurePolicy.CLOSED);
+    }
+
+    @Test
+    void Moderation_defaults_의_두_카테고리_목록은_교집합이_없다() {
+        GuardrailProperties.Moderation defaults = GuardrailProperties.Moderation.defaults();
+
+        assertThat(defaults.alwaysBlockCategories())
+                .doesNotContainAnyElementsOf(defaults.bookContextRelaxedCategories());
     }
 
     @Test

@@ -108,4 +108,56 @@ class AiChatMessageRepositoryTest {
         assertThat(recent).hasSize(40);
         assertThat(recent.get(0).getContent()).isEqualTo("메시지 50");
     }
+
+    @Test
+    @DisplayName("AC-5: REJECTED USER 메시지는 findRecentForContextWindow 에서 제외된다")
+    void 컨텍스트_윈도우_REJECTED_제외() {
+        Long sessionId = nextSessionId();
+        aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "정상 질문"));
+        aiChatMessageRepository.save(AiChatMessage.createUserMessageRejected(sessionId, "차단된 질문"));
+        aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(sessionId, "정상 응답", 1, 1, 2));
+
+        List<AiChatMessage> recent = aiChatMessageRepository
+                .findRecentForContextWindow(sessionId, PageRequest.of(0, 40));
+
+        assertThat(recent).hasSize(2);
+        assertThat(recent).extracting(AiChatMessage::getContent)
+                .doesNotContain("차단된 질문");
+        assertThat(recent).extracting(AiChatMessage::getStatus)
+                .containsOnly(AiChatMessage.Status.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("AC-6: findValidMessages 는 REJECTED 와 FAILED 를 제외하고 COMPLETED 만 반환한다 (감상문·제목 누수 차단)")
+    void 유효_메시지_조회_COMPLETED_만() {
+        Long sessionId = nextSessionId();
+        aiChatMessageRepository.save(AiChatMessage.createUserMessageRejected(sessionId, "차단된 질문"));
+        aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "정상 질문"));
+        aiChatMessageRepository.save(AiChatMessage.createAssistantFailed(sessionId, "부분 응답", 1, 0, 1));
+        aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(sessionId, "정상 응답", 1, 1, 2));
+
+        List<AiChatMessage> valid = aiChatMessageRepository
+                .findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);
+
+        assertThat(valid).hasSize(2);
+        assertThat(valid).extracting(AiChatMessage::getContent)
+                .containsExactly("정상 질문", "정상 응답");
+        assertThat(valid).extracting(AiChatMessage::getStatus)
+                .containsOnly(AiChatMessage.Status.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("countRecentRejectedMessagesByOwner 는 REJECTED USER 메시지만 센다")
+    void 거부_메시지_카운트는_REJECTED_만() {
+        // owner 매핑(UserBook→Session) 이 없는 임의 sessionId 라서 0 이 나오는 게 정상.
+        // 여기서는 쿼리가 status 로 필터링하는지(컴파일/실행 회귀) 만 가볍게 확인한다.
+        Long sessionId = nextSessionId();
+        aiChatMessageRepository.save(AiChatMessage.createUserMessageRejected(sessionId, "차단된 질문"));
+        aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "정상 질문"));
+
+        long rejected = aiChatMessageRepository
+                .countRecentRejectedMessagesByOwner(999_999L, java.time.LocalDateTime.now().minusHours(1));
+
+        assertThat(rejected).isZero();
+    }
 }

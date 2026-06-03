@@ -31,11 +31,18 @@ public record AiChatProperties(
     /**
      * 사용자별 호출 한도. 정밀 정책은 추후 도입 예정이고, 현재는 OpenAI 비용 폭주
      * (클라이언트 무한 retry, 키 유출) 방어 용도다.
-     * 정책: 최근 countPeriodSeconds 초 안에 USER 메시지가 maxMessageCount 회 이상이면 429.
+     * 정상/거부 카운터를 분리한다 — moderation false-positive 가 폭증해도 정상 메시지 카운트는 0 이라
+     * 정상 채팅이 막히지 않고, 어뷰즈(의도적 거부 입력 반복)만 거부 카운터로 차단된다.
+     * 정책:
+     * - 정상: 최근 countPeriodSeconds 초 안에 COMPLETED USER 메시지가 maxMessageCount 회 이상이면 429.
+     * - 거부: 최근 rejectedCountPeriodSeconds 초 안에 REJECTED USER 메시지가 rejectedMaxMessageCount 회 이상이면 429.
+     *   거부 한도는 운영 데이터가 없으므로 정상보다 충분히 큰 시간창·횟수의 보수적 시작값으로 둔다.
      */
     public record RateLimit(
             @Positive int countPeriodSeconds,
-            @Positive int maxMessageCount
+            @Positive int maxMessageCount,
+            @Positive int rejectedCountPeriodSeconds,
+            @Positive int rejectedMaxMessageCount
     ) {
     }
 }

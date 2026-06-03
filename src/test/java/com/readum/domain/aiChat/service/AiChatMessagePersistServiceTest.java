@@ -58,13 +58,13 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void 소유권_없는_세션이면_NotFoundException_을_던지고_USER_메시지는_저장되지_않는다() {
+    void loadHistory_소유권_없는_세션이면_NotFoundException_을_던진다() {
         Long userId = 1L;
         Long sessionId = 7L;
 
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "질문"))
+        assertThatThrownBy(() -> persistService.loadHistory(sessionId, userId))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
@@ -73,7 +73,7 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void 종료된_세션이면_BadRequest_SESSION_CLOSED_를_던진다() {
+    void loadHistory_종료된_세션이면_BadRequest_SESSION_CLOSED_를_던진다() {
         Long userId = 1L;
         Long sessionId = 7L;
         AiChatSession closed = AiChatSessionFixture.persistedClosedSession(
@@ -81,7 +81,7 @@ class AiChatMessagePersistServiceTest {
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(closed));
 
-        assertThatThrownBy(() -> persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "질문"))
+        assertThatThrownBy(() -> persistService.loadHistory(sessionId, userId))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
                 .extracting(BadRequestException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_CLOSED);
@@ -90,7 +90,7 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void 정상_세션이면_history_조회와_USER_메시지_저장이_순서대로_실행된다() {
+    void loadHistory_는_이전_이력만_조회하고_USER_메시지를_저장하지_않는다() {
         Long userId = 1L;
         Long sessionId = 7L;
         AiChatSession active = AiChatSessionFixture.persistedActiveSession(
@@ -103,21 +103,57 @@ class AiChatMessagePersistServiceTest {
         ));
 
         AiChatMessagePersistService.MessageLoadResult result =
-                persistService.loadHistoryAndRecordUserMessage(sessionId, userId, "이번 질문");
+                persistService.loadHistory(sessionId, userId);
 
-        // 결과는 이전 이력만 (현재 메시지는 SendService 가 직접 append)
         assertThat(result.history()).hasSize(2);
         assertThat(result.history().get(0).content()).isEqualTo("이전 질문");
         assertThat(result.history().get(1).content()).isEqualTo("이전 응답");
         assertThat(result.userBookId()).isEqualTo(100L);
 
-        // history 조회 후 USER 메시지 저장 — 순서 검증 (Hibernate auto-flush 회피)
-        org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(aiChatHistorySearchService, aiChatMessageRepository);
-        inOrder.verify(aiChatHistorySearchService).findPreviousHistory(sessionId);
-        inOrder.verify(aiChatMessageRepository).save(any(AiChatMessage.class));
+        // 검증/조회만 — USER 미저장, 턴 카운트 미증가
+        verify(aiChatMessageRepository, never()).save(any());
+        assertThat(active.getUserMessageCount()).isZero();
+    }
 
-        // 세션 통계 갱신 확인
+    @Test
+    void recordUserMessage_는_COMPLETED_저장과_세션_턴카운트_증가를_수행한다() {
+        Long userId = 1L;
+        Long sessionId = 7L;
+        AiChatSession active = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 0, 0, null
+        );
+        given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(active));
+        given(aiChatMessageRepository.save(any(AiChatMessage.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        persistService.recordUserMessage(sessionId, userId, "이번 질문");
+
+        ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
+        verify(aiChatMessageRepository).save(captor.capture());
+        AiChatMessage saved = captor.getValue();
+        assertThat(saved.getRole()).isEqualTo(AiChatMessage.Role.USER);
+        assertThat(saved.getStatus()).isEqualTo(AiChatMessage.Status.COMPLETED);
+        assertThat(saved.getContent()).isEqualTo("이번 질문");
         assertThat(active.getUserMessageCount()).isEqualTo(1);
+    }
+
+    @Test
+    void recordRejectedUserMessage_는_REJECTED_저장만_하고_턴카운트를_증가시키지_않는다() {
+        Long userId = 1L;
+        Long sessionId = 7L;
+        given(aiChatMessageRepository.save(any(AiChatMessage.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        persistService.recordRejectedUserMessage(sessionId, userId, "차단된 질문");
+
+        ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
+        verify(aiChatMessageRepository).save(captor.capture());
+        AiChatMessage saved = captor.getValue();
+        assertThat(saved.getRole()).isEqualTo(AiChatMessage.Role.USER);
+        assertThat(saved.getStatus()).isEqualTo(AiChatMessage.Status.REJECTED);
+        assertThat(saved.getContent()).isEqualTo("차단된 질문");
+        // 거부 메시지는 세션 검증/턴 카운트와 무관 — 세션 조회 자체를 하지 않는다.
+        verify(aiChatSessionRepository, never()).findByIdAndOwner(any(), any());
     }
 
     @Test
