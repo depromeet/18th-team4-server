@@ -139,12 +139,11 @@ class AiChatMessagePersistServiceTest {
 
     @Test
     void recordRejectedUserMessage_는_REJECTED_저장만_하고_턴카운트를_증가시키지_않는다() {
-        Long userId = 1L;
         Long sessionId = 7L;
         given(aiChatMessageRepository.save(any(AiChatMessage.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
 
-        persistService.recordRejectedUserMessage(sessionId, userId, "차단된 질문");
+        persistService.recordRejectedUserMessage(sessionId, "차단된 질문");
 
         ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
         verify(aiChatMessageRepository).save(captor.capture());

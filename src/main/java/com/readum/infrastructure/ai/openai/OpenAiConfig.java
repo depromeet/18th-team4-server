@@ -1,6 +1,5 @@
 package com.readum.infrastructure.ai.openai;
 
-import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.infrastructure.ai.openai.advisor.ModerationOutputAdvisor;
 import com.readum.infrastructure.ai.openai.advisor.PromptInjectionPatternAdvisor;
@@ -29,8 +28,6 @@ public class OpenAiConfig {
 
     private static final int ORDER_PROMPT_INJECTION = 100;
     private static final int ORDER_SAFE_GUARD = 200;
-    // 입력 moderation 은 더 이상 advisor 체인이 아니라 서비스 계층(InputModerationClient) 에서 동기 실행한다.
-    // 거부 응답이 일반 토큰으로 흘러 저장 트리거를 발동하던 문제를 근본 차단하기 위함.
     private static final int ORDER_MODERATION_OUTPUT = 1000;
 
     @Bean
@@ -62,23 +59,12 @@ public class OpenAiConfig {
                     .build());
         }
 
-        // 3) OpenAI Moderation API 기반 입출력 advisor (외부 호출, 비용 발생).
-        //    enabled=true 인데 빈이 없으면 운영자가 보안 기능이 동작 중이라고 오해할 수 있어 fail-fast.
-        if (guardrailProperties.moderation().enabled()) {
-            ModerationModel moderationModel = moderationModelProvider.getIfAvailable();
-            if (moderationModel == null) {
-                throw new IllegalStateException(
-                        "readum.guardrail.moderation.enabled=true 이지만 ModerationModel 빈이 등록되어 있지 않습니다. "
-                                + "spring.ai.openai.moderation 설정을 확인하거나, moderation 을 비활성화하려면 "
-                                + "readum.guardrail.moderation.enabled=false 로 변경하세요."
-                );
-            }
-            advisors.add(new ModerationOutputAdvisor(
-                    moderationModel,
-                    guardrailProperties.output().failureResponse(),
-                    ORDER_MODERATION_OUTPUT
-            ));
-        }
+        // 3) OpenAI Moderation API 기반 출력 advisor
+        advisors.add(new ModerationOutputAdvisor(
+                requireModerationModel(moderationModelProvider),
+                guardrailProperties.output().failureResponse(),
+                ORDER_MODERATION_OUTPUT
+        ));
 
         ChatClient.Builder chatClientBuilder = builder.defaultSystem(systemPrompt);
         if (!advisors.isEmpty()) {
@@ -87,27 +73,24 @@ public class OpenAiConfig {
         return chatClientBuilder.build();
     }
 
-    // 입력 moderation Port 구현체.
-    // - enabled=false: 항상 통과하는 no-op (dev 무키 환경 또는 명시적 비활성화).
-    // - enabled=true + ModerationModel 빈 있음: OpenAiInputModerationClientImpl 등록.
-    // - enabled=true + ModerationModel 빈 부재: fail-fast (운영자 설정 오류 — chatClient 빈과 동일 정책).
     @Bean
     public InputModerationClient inputModerationClient(
             GuardrailProperties guardrailProperties,
             ObjectProvider<ModerationModel> moderationModelProvider
     ) {
-        if (!guardrailProperties.moderation().enabled()) {
-            return (userText, bookContext) -> InputModerationResult.passed();
-        }
+        return new OpenAiInputModerationClientImpl(
+                requireModerationModel(moderationModelProvider), guardrailProperties);
+    }
+
+    private ModerationModel requireModerationModel(ObjectProvider<ModerationModel> moderationModelProvider) {
         ModerationModel moderationModel = moderationModelProvider.getIfAvailable();
         if (moderationModel == null) {
             throw new IllegalStateException(
-                    "readum.guardrail.moderation.enabled=true 이지만 ModerationModel 빈이 등록되어 있지 않습니다. "
-                            + "spring.ai.openai.moderation 설정을 확인하거나, moderation 을 비활성화하려면 "
-                            + "readum.guardrail.moderation.enabled=false 로 변경하세요."
+                    "ModerationModel 빈이 등록되어 있지 않습니다. "
+                            + "spring.ai.openai.api-key 와 spring.ai.openai.moderation 설정을 확인하세요."
             );
         }
-        return new OpenAiInputModerationClientImpl(moderationModel, guardrailProperties);
+        return moderationModel;
     }
 
     // Spring AI auto-config(OpenAiChatAutoConfiguration#openAiApi) 는 ResponseErrorHandler bean 을

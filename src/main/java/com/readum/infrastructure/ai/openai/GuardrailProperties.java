@@ -100,7 +100,6 @@ public record GuardrailProperties(
     }
 
     public record Moderation(
-            boolean enabled,
             @NotBlank String model,
             @NotNull List<String> alwaysBlockCategories,
             @NotNull List<String> bookContextRelaxedCategories,
@@ -143,7 +142,6 @@ public record GuardrailProperties(
 
         public static Moderation defaults() {
             return new Moderation(
-                    true,
                     DEFAULT_MODEL,
                     DEFAULT_ALWAYS_BLOCK_CATEGORIES,
                     DEFAULT_BOOK_CONTEXT_RELAXED_CATEGORIES,

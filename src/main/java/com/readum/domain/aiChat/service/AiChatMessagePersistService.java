@@ -78,7 +78,7 @@ public class AiChatMessagePersistService {
      * REJECTED 가 첫 USER 메시지 자리에 끼어도 제목 생성 트리거는 그 다음 정상 USER 메시지가 처음 도착할 때 발동한다.
      */
     @Transactional
-    public void recordRejectedUserMessage(Long sessionId, Long userId, String normalizedContent) {
+    public void recordRejectedUserMessage(Long sessionId, String normalizedContent) {
         aiChatMessageRepository.save(AiChatMessage.createUserMessageRejected(sessionId, normalizedContent));
     }
 

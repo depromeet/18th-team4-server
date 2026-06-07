@@ -93,7 +93,7 @@ class GuardrailPropertiesTest {
     @Test
     void Moderation_의_model_이_blank_이면_defaults_로_보강된다() {
         GuardrailProperties.Moderation moderation =
-                new GuardrailProperties.Moderation(true, "", List.of("self-harm"), List.of("violence"),
+                new GuardrailProperties.Moderation("", List.of("self-harm"), List.of("violence"),
                         GuardrailProperties.Moderation.FailurePolicy.CLOSED);
 
         assertThat(moderation.model()).isEqualTo(GuardrailProperties.Moderation.defaults().model());
@@ -102,7 +102,7 @@ class GuardrailPropertiesTest {
     @Test
     void Moderation_의_카테고리_목록과_failurePolicy_가_null_이면_defaults_로_보강된다() {
         GuardrailProperties.Moderation moderation =
-                new GuardrailProperties.Moderation(true, "omni-moderation-latest", null, null, null);
+                new GuardrailProperties.Moderation("omni-moderation-latest", null, null, null);
 
         assertThat(moderation.alwaysBlockCategories())
                 .isEqualTo(GuardrailProperties.Moderation.defaults().alwaysBlockCategories());

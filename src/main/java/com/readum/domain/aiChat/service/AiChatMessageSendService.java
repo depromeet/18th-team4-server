@@ -72,7 +72,7 @@ public class AiChatMessageSendService {
         InputModerationResult moderation = inputModerationClient.check(normalizedContent, bookContext);
         switch (moderation.status()) {
             case BLOCKED -> {
-                aiChatMessagePersistService.recordRejectedUserMessage(sessionId, user.getId(), normalizedContent);
+                aiChatMessagePersistService.recordRejectedUserMessage(sessionId, normalizedContent);
                 log.warn("[Guardrail] 입력 차단 sessionId={} userId={} categories={}",
                         sessionId, user.getId(), moderation.flaggedCategories());
                 throw new BadRequestException(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);

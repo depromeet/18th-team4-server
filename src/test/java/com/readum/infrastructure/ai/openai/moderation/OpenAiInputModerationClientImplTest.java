@@ -33,7 +33,7 @@ class OpenAiInputModerationClientImplTest {
             ModerationModel model, GuardrailProperties.Moderation.FailurePolicy policy
     ) {
         GuardrailProperties.Moderation moderation = new GuardrailProperties.Moderation(
-                true, "omni-moderation-latest", ALWAYS_BLOCK, RELAXED, policy);
+                "omni-moderation-latest", ALWAYS_BLOCK, RELAXED, policy);
         GuardrailProperties props = new GuardrailProperties(null, null, moderation, null);
         return new OpenAiInputModerationClientImpl(model, props);
     }
@@ -142,7 +142,7 @@ class OpenAiInputModerationClientImplTest {
     void AC11_두_카테고리_목록의_교집합이_공집합이_아니면_부팅_검증이_실패한다() {
         ModerationModel model = mock(ModerationModel.class);
         GuardrailProperties.Moderation moderation = new GuardrailProperties.Moderation(
-                true, "omni-moderation-latest",
+                "omni-moderation-latest",
                 List.of("self-harm", "violence"),   // violence 가 양쪽에 모두 존재
                 List.of("violence", "harassment"),
                 GuardrailProperties.Moderation.FailurePolicy.CLOSED);
@@ -158,7 +158,7 @@ class OpenAiInputModerationClientImplTest {
     void 알_수_없는_카테고리_이름이_설정되면_부팅_검증이_실패한다() {
         ModerationModel model = mock(ModerationModel.class);
         GuardrailProperties.Moderation moderation = new GuardrailProperties.Moderation(
-                true, "omni-moderation-latest",
+                "omni-moderation-latest",
                 List.of("self-harm", "illicit-violent"),   // illicit-violent 는 이 Spring AI 버전에 없음
                 RELAXED,
                 GuardrailProperties.Moderation.FailurePolicy.CLOSED);

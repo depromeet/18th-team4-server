@@ -290,7 +290,7 @@ class AiChatMessageSendServiceTest {
                 .extracting(BadRequestException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);
 
-        verify(persistService).recordRejectedUserMessage(7L, 1L, "차단 대상");
+        verify(persistService).recordRejectedUserMessage(7L, "차단 대상");
         verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
         verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
     }
@@ -320,7 +320,7 @@ class AiChatMessageSendServiceTest {
                 .isEqualTo(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE);
 
         verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
-        verify(persistService, never()).recordRejectedUserMessage(anyLong(), anyLong(), anyString());
+        verify(persistService, never()).recordRejectedUserMessage(anyLong(), anyString());
         verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
     }
 
@@ -360,7 +360,7 @@ class AiChatMessageSendServiceTest {
 
         // 통과 시 USER 메시지가 COMPLETED 로 저장됨
         verify(persistService, times(1)).recordUserMessage(sessionId, 1L, "주제 요약");
-        verify(persistService, never()).recordRejectedUserMessage(anyLong(), anyLong(), anyString());
+        verify(persistService, never()).recordRejectedUserMessage(anyLong(), anyString());
         verify(persistService, times(1))
                 .saveAssistantSuccess(eq(sessionId), eq("이 책은 자연 앞에서 인간의 한계를 그립니다."), any());
         verify(persistService, never())
