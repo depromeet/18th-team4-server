@@ -36,11 +36,14 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiChatMessageSendService {
+
+    private static final Pattern WHITESPACE_RUN = Pattern.compile("[\\p{Z}\\s]+");
 
     private final UserRepository userRepository;
     private final AiChatMessagePersistService aiChatMessagePersistService;
@@ -221,18 +224,11 @@ public class AiChatMessageSendService {
         return AiChatErrorCode.AI_STREAM_INTERRUPTED;
     }
 
-    // 한국어 IME 의 NBSP(U+00A0) / Narrow NBSP(U+202F) / Figure Space(U+2007) 는
-    // Character.isWhitespace() 에서 빠져 String.strip()/isBlank() 로는 못 잡힌다.
-    // \p{Z}(Unicode Separator: Zs/Zl/Zp) + \s 로 모든 유니코드 공백 + ASCII 공백류를
-    // 단일 공백으로 정규화한 뒤 양끝을 다듬어, Bean Validation 의 @NotBlank 가 놓치는
-    // NBSP-only 입력까지 빈 본문으로 거절한다.
-    private static final java.util.regex.Pattern WHITESPACE_RUN =
-            java.util.regex.Pattern.compile("[\\p{Z}\\s]+");
-
     private String validateAndStripContent(String raw) {
         if (raw == null) {
             throw new BadRequestException(AiChatErrorCode.MESSAGE_CONTENT_BLANK);
         }
+        // NBSP(U+00A0) 등 유니코드 공백을 ASCII 공백으로 정규화한 뒤 strip. @NotBlank/strip() 이 놓치는 공백-only 입력을 빈 본문으로 거절.
         String normalized = WHITESPACE_RUN.matcher(raw).replaceAll(" ").strip();
         if (normalized.isEmpty()) {
             throw new BadRequestException(AiChatErrorCode.MESSAGE_CONTENT_BLANK);
