@@ -4,15 +4,17 @@ import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
+import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
+import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.TooManyRequestsException;
-import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatMessageFixture;
@@ -49,6 +51,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -77,10 +80,13 @@ class AiChatMessageSendServiceTest {
     @Mock
     private BookRepository bookRepository;
 
+    @Mock
+    private InputModerationClient inputModerationClient;
+
     private final AiChatProperties aiChatProperties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
             new AiChatProperties.MessageRule(4000),
-            new AiChatProperties.RateLimit(10, 5)
+            new AiChatProperties.RateLimit(10, 5, 3600, 20)
     );
 
     private AiChatMessageSendService service;
@@ -88,12 +94,20 @@ class AiChatMessageSendServiceTest {
     @BeforeEach
     void setUp() {
         User testUser = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
-        org.mockito.Mockito.lenient().when(userRepository.findBySessionId(USER_SESSION_ID))
+        lenient().when(userRepository.findBySessionId(USER_SESSION_ID))
                 .thenReturn(java.util.Optional.of(testUser));
+        // 입력 가드레일 기본값: 통과. 차단/장애 케이스는 각 테스트에서 override.
+        lenient().when(inputModerationClient.check(anyString(), any()))
+                .thenReturn(InputModerationResult.passed());
         service = new AiChatMessageSendService(
                 userRepository, persistService, aiChatClient, aiChatProperties,
-                aiChatMessageRepository, userBookRepository, bookRepository
+                aiChatMessageRepository, userBookRepository, bookRepository, inputModerationClient
         );
+    }
+
+    private void givenLoadHistory(Long sessionId, List<HistoryMessage> history, Long userBookId) {
+        given(persistService.loadHistory(sessionId, USER_ID))
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(history, userBookId));
     }
 
     @Test
@@ -105,21 +119,19 @@ class AiChatMessageSendServiceTest {
                 .extracting(BadRequestException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.MESSAGE_CONTENT_BLANK);
 
-        verify(persistService, never()).loadHistoryAndRecordUserMessage(anyLong(), anyLong(), anyString());
+        verify(persistService, never()).loadHistory(anyLong(), anyLong());
     }
 
     @Test
     void NBSP_등_유니코드_공백만_있으면_BadRequest_MESSAGE_CONTENT_BLANK() {
-        // Character.isWhitespace() 가 빠뜨리는 NBSP(U+00A0) / Narrow NBSP(U+202F) /
-        // Figure Space(U+2007) 만 들어와도 빈 본문으로 거절되어야 한다.
-        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "    ");
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "   ");
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
                 .extracting(BadRequestException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.MESSAGE_CONTENT_BLANK);
 
-        verify(persistService, never()).loadHistoryAndRecordUserMessage(anyLong(), anyLong(), anyString());
+        verify(persistService, never()).loadHistory(anyLong(), anyLong());
     }
 
     @Test
@@ -131,7 +143,7 @@ class AiChatMessageSendServiceTest {
                 .extracting(BadRequestException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.MESSAGE_CONTENT_TOO_LONG);
 
-        verify(persistService, never()).loadHistoryAndRecordUserMessage(anyLong(), anyLong(), anyString());
+        verify(persistService, never()).loadHistory(anyLong(), anyLong());
     }
 
     @Test
@@ -139,8 +151,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
                 .willReturn(4L);
-        given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
+        givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));
@@ -163,8 +174,44 @@ class AiChatMessageSendServiceTest {
                 .extracting(TooManyRequestsException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED);
 
-        verify(persistService, never()).loadHistoryAndRecordUserMessage(anyLong(), anyLong(), anyString());
+        verify(persistService, never()).loadHistory(anyLong(), anyLong());
         verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
+    }
+
+    @Test
+    void 거부_카운트가_거부_한도에_도달하면_정상_카운트가_0이어도_차단된다() {
+        // 정상/거부 카운터 독립(AC-14): 정상 메시지가 0 건이어도 거부 한도(20) 도달이면 차단.
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
+        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
+                .willReturn(0L);
+        given(aiChatMessageRepository.countRecentRejectedMessagesByOwner(eq(1L), any(LocalDateTime.class)))
+                .willReturn(20L);
+
+        assertThatThrownBy(() -> service.execute(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
+                .extracting(TooManyRequestsException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED);
+
+        verify(persistService, never()).loadHistory(anyLong(), anyLong());
+        verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
+    }
+
+    @Test
+    void 거부_카운트가_높아도_거부_한도_미만이면_정상_채팅은_차단되지_않는다() {
+        // 정상/거부 카운터 독립(AC-14): false-positive 로 거부가 19건 쌓여도(한도 20 미만) 정상 채팅은 통과.
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
+        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
+                .willReturn(4L);
+        given(aiChatMessageRepository.countRecentRejectedMessagesByOwner(eq(1L), any(LocalDateTime.class)))
+                .willReturn(19L);
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
+                new AiChatChunk.Completion(1, 1, 2, null)
+        ));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, 7L, "", null, 1, 1, 2));
+
+        assertThatCode(() -> service.execute(command).blockLast()).doesNotThrowAnyException();
     }
 
     @Test
@@ -189,8 +236,7 @@ class AiChatMessageSendServiceTest {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
                 .willReturn(0L);
-        given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
+        givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));
@@ -211,7 +257,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 사전_단계에서_NotFoundException_이_던져지면_그대로_전파된다() {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
-        given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
+        given(persistService.loadHistory(7L, 1L))
                 .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         assertThatThrownBy(() -> service.execute(command))
@@ -223,7 +269,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 사전_단계에서_BadRequestException_SESSION_CLOSED_도_그대로_전파된다() {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
-        given(persistService.loadHistoryAndRecordUserMessage(7L, 1L, "질문"))
+        given(persistService.loadHistory(7L, 1L))
                 .willThrow(new BadRequestException(AiChatErrorCode.SESSION_CLOSED));
 
         assertThatThrownBy(() -> service.execute(command))
@@ -233,13 +279,57 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 정상_스트림이면_Token_여러개와_Done_이벤트가_방출되고_ASSISTANT_가_저장된다() {
+    void 입력_가드레일에_차단되면_REJECTED_저장_후_BadRequest_를_던지고_스트림은_시작하지_않는다() {
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "차단 대상");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(inputModerationClient.check(eq("차단 대상"), any()))
+                .willReturn(InputModerationResult.blocked(List.of("self-harm")));
+
+        assertThatThrownBy(() -> service.execute(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
+                .extracting(BadRequestException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);
+
+        verify(persistService).recordRejectedUserMessage(7L, "차단 대상");
+        verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
+        verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
+    }
+
+    @Test
+    void 입력_가드레일_차단_응답_메시지는_거부_정본_텍스트다() {
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "차단 대상");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(inputModerationClient.check(eq("차단 대상"), any()))
+                .willReturn(InputModerationResult.blocked(List.of("sexual-minors")));
+
+        assertThatThrownBy(() -> service.execute(command))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요.");
+    }
+
+    @Test
+    void Moderation_API_장애_UNAVAILABLE_이면_저장없이_ServiceUnavailable_을_던진다() {
+        SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(inputModerationClient.check(eq("질문"), any()))
+                .willReturn(InputModerationResult.serviceUnavailable("OpenAI Moderation 502"));
+
+        assertThatThrownBy(() -> service.execute(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(ServiceUnavailableException.class))
+                .extracting(ServiceUnavailableException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE);
+
+        verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
+        verify(persistService, never()).recordRejectedUserMessage(anyLong(), anyString());
+        verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
+    }
+
+    @Test
+    void 정상_스트림이면_Token_여러개와_Done_이벤트가_방출되고_USER_와_ASSISTANT_가_저장된다() {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "주제 요약");
 
-        given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "주제 요약"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
-
+        givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
                 new AiChatChunk.Token("이 책은"),
                 new AiChatChunk.Token(" 자연 앞에서"),
@@ -268,6 +358,9 @@ class AiChatMessageSendServiceTest {
                 })
                 .verifyComplete();
 
+        // 통과 시 USER 메시지가 COMPLETED 로 저장됨
+        verify(persistService, times(1)).recordUserMessage(sessionId, 1L, "주제 요약");
+        verify(persistService, never()).recordRejectedUserMessage(anyLong(), anyString());
         verify(persistService, times(1))
                 .saveAssistantSuccess(eq(sessionId), eq("이 책은 자연 앞에서 인간의 한계를 그립니다."), any());
         verify(persistService, never())
@@ -279,9 +372,7 @@ class AiChatMessageSendServiceTest {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
-        given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
-
+        givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.concat(
                 Flux.just(new AiChatChunk.Token("부분 응답")),
                 Flux.error(new RuntimeException("connection reset"))
@@ -307,8 +398,7 @@ class AiChatMessageSendServiceTest {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
-        given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
+        givenLoadHistory(sessionId, List.of(), 100L);
         RateLimitInfo info = new RateLimitInfo(
                 java.time.Duration.ofSeconds(13), null, null, null, null,
                 java.time.Duration.ofSeconds(12), null
@@ -332,8 +422,7 @@ class AiChatMessageSendServiceTest {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
-        given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
+        givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.error(
                 new TooManyRequestsException(AiChatErrorCode.AI_QUOTA_EXHAUSTED)
         ));
@@ -353,13 +442,10 @@ class AiChatMessageSendServiceTest {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
-        given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
-        // 청크 emit 시점을 테스트가 직접 제어하기 위한 sink (wall-clock race 회피).
+        givenLoadHistory(sessionId, List.of(), 100L);
         Sinks.Many<AiChatChunk> sink = Sinks.many().unicast().onBackpressureBuffer();
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(sink.asFlux());
 
-        // boundedElastic 비동기 영속화 완료를 기다리기 위한 latch
         CountDownLatch persisted = new CountDownLatch(1);
         willAnswer(invocation -> {
             persisted.countDown();
@@ -384,8 +470,7 @@ class AiChatMessageSendServiceTest {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
-        given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
+        givenLoadHistory(sessionId, List.of(), 100L);
         Sinks.Many<AiChatChunk> sink = Sinks.many().unicast().onBackpressureBuffer();
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(sink.asFlux());
 
@@ -398,10 +483,6 @@ class AiChatMessageSendServiceTest {
             return savedAssistant;
         }).given(persistService).saveAssistantSuccess(eq(sessionId), eq("응답"), any());
 
-        // Token emit → 다운스트림 onNext 까지 동기 전파됨 → assertNext 가 받음.
-        // Completion emit → concatMap 이 동기적으로 completionRef.set 까지 처리.
-        // tryEmitNext 가 반환된 시점에 모든 상태가 결정되므로 thenCancel 이 항상
-        // completionRef != null 인 상태에서 실행된다.
         StepVerifier.create(service.execute(command))
                 .then(() -> sink.tryEmitNext(new AiChatChunk.Token("응답")))
                 .assertNext(event -> assertThat(event).isInstanceOf(MessageStreamEvent.Token.class))
@@ -421,12 +502,9 @@ class AiChatMessageSendServiceTest {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
-        given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(), 100L));
+        givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.never());
 
-        // 어떤 청크도 emit 되지 않은 상태에서 cancel.
-        // doOnCancel 의 skip 분기가 동기 early-return 이라 별도 wait 불필요.
         StepVerifier.create(service.execute(command))
                 .expectSubscription()
                 .thenCancel()
@@ -441,11 +519,10 @@ class AiChatMessageSendServiceTest {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "이번 질문");
 
-        given(persistService.loadHistoryAndRecordUserMessage(sessionId, 1L, "이번 질문"))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(List.of(
-                        new HistoryMessage(HistoryMessage.Role.USER, "이전 질문"),
-                        new HistoryMessage(HistoryMessage.Role.ASSISTANT, "이전 응답")
-                ), 100L));
+        givenLoadHistory(sessionId, List.of(
+                new HistoryMessage(HistoryMessage.Role.USER, "이전 질문"),
+                new HistoryMessage(HistoryMessage.Role.ASSISTANT, "이전 응답")
+        ), 100L);
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
                 new AiChatChunk.Completion(1, 1, 2, null)
         ));
@@ -458,8 +535,7 @@ class AiChatMessageSendServiceTest {
                 .expectNextCount(1)
                 .verifyComplete();
 
-        org.mockito.ArgumentCaptor<AiChatStreamCommand> captor =
-                org.mockito.ArgumentCaptor.forClass(AiChatStreamCommand.class);
+        ArgumentCaptor<AiChatStreamCommand> captor = ArgumentCaptor.forClass(AiChatStreamCommand.class);
         verify(aiChatClient).stream(captor.capture());
         List<HistoryMessage> sentHistory = captor.getValue().history();
         assertThat(sentHistory).hasSize(3);

@@ -12,6 +12,8 @@ public enum AiChatErrorCode implements ErrorCode {
     MESSAGE_CONTENT_BLANK("메시지 본문은 비어 있을 수 없습니다."),
     MESSAGE_CONTENT_TOO_LONG("메시지 본문은 4000자 이하여야 합니다."),
     USER_RATE_LIMIT_EXCEEDED("메시지를 너무 자주 보내고 있습니다. 잠시 후 다시 시도해 주세요."),
+    GUARDRAIL_BLOCKED_INPUT("요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요."),
+    GUARDRAIL_MODERATION_UNAVAILABLE("일시적으로 메시지를 처리할 수 없습니다. 잠시 후 다시 시도해 주세요."),
     AI_RATE_LIMIT_BURST("AI 호출이 일시적으로 한도에 도달했습니다. 잠시 후 다시 시도해 주세요."),
     AI_QUOTA_EXHAUSTED("AI 사용 한도가 소진되었습니다. 운영자에게 문의해 주세요."),
     AI_PROVIDER_ERROR("AI 응답 처리에 실패했습니다."),

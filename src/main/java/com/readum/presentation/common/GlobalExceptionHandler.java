@@ -9,6 +9,7 @@ import com.readum.domain.exception.ForbiddenException;
 import com.readum.domain.exception.GatewayTimeoutException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
+import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.exception.UnprocessableEntityException;
@@ -16,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -30,10 +32,12 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 public class GlobalExceptionHandler {
 
     // 도메인 비즈니스 예외 - 잘못된 요청
+    // 응답 메시지는 ex.getMessage() 를 쓴다. 단일 인자 생성 시에는 ErrorCode 기본 메시지와 동일하지만,
+    // override 생성자로 만든 경우(예: 가드레일 거부 텍스트 = properties 정본) 그 값이 그대로 노출된다.
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<GlobalApiResponse<?>> handleBadRequest(BadRequestException ex) {
-        log.warn("Bad request: {}", ex.getErrorCode().getMessage());
-        return GlobalApiResponse.error(HttpStatus.BAD_REQUEST, ex.getErrorCode().getMessage());
+        log.warn("Bad request: {}", ex.getMessage());
+        return GlobalApiResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     // 도메인 비즈니스 예외 - 인증 실패
@@ -112,6 +116,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<GlobalApiResponse<?>> handleExternalApi(ExternalApiException ex) {
         log.error("외부 시스템 호출 실패 - {}", ex.getErrorCode().name(), ex);
         return GlobalApiResponse.error(HttpStatus.INTERNAL_SERVER_ERROR, ex.getErrorCode().getMessage());
+    }
+
+    // 도메인 비즈니스 예외 - 일시적 처리 불가 (외부 의존 장애 fail-closed 등) → 503 + Retry-After
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<GlobalApiResponse<?>> handleServiceUnavailable(ServiceUnavailableException ex) {
+        log.error("Service unavailable: {}", ex.getErrorCode().getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+                .body(new GlobalApiResponse<>(null, new GlobalApiResponse.ErrorBody(ex.getMessage())));
     }
 
     // DB 접근 실패 - 커넥션 끊김, 타임아웃, 제약 위반 등

@@ -25,8 +25,10 @@ ai-chat:
   message:
     max-content-length: 4000
   rate-limit:
-    count-period-seconds: 10   # 카운트 기간 (초). 최근 N 초 동안의 메시지를 센다.
-    max-message-count: 5       # 카운트 기간 안에 허용되는 USER 메시지 수. 초과 시 HTTP 429.
+    count-period-seconds: 10            # 정상 메시지 카운트 기간 (초).
+    max-message-count: 5                # 기간 안에 허용되는 COMPLETED USER 메시지 수. 초과 시 HTTP 429.
+    rejected-count-period-seconds: 3600 # 거부 메시지 카운트 기간 (초). 어뷰즈 탐지용으로 넓게.
+    rejected-max-message-count: 20      # 기간 안에 허용되는 REJECTED USER 메시지 수. 초과 시 HTTP 429.
 
 springdoc:
   api-docs:
