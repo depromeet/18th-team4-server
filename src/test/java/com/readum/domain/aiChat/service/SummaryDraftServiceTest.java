@@ -103,7 +103,7 @@ class SummaryDraftServiceTest {
                 assistantMessage(SESSION_ID, "주인공이 선택의 기로에 서는 장면이 인상적입니다.")
         );
         SummaryDraftResult expected = new SummaryDraftResult("나의 독서 감상", "깊은 울림을 주는 책이었다.", "선택의 기로에서");
-        Summary inProgressSummary = Summary.createInProgress(USER_BOOK_ID, SESSION_ID);
+        Summary inProgressSummary = Summary.createInProgress(USER_BOOK_ID, SESSION_ID, java.time.LocalDate.now());
 
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
@@ -125,7 +125,7 @@ class SummaryDraftServiceTest {
     @Test
     void AI_호출_실패시_Summary가_FAILED로_마킹된다() {
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
-        Summary inProgressSummary = Summary.createInProgress(USER_BOOK_ID, SESSION_ID);
+        Summary inProgressSummary = Summary.createInProgress(USER_BOOK_ID, SESSION_ID, java.time.LocalDate.now());
 
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));

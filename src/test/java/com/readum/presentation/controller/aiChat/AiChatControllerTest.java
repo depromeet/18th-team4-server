@@ -501,7 +501,7 @@ class AiChatControllerTest {
     @Test
     void eligibility_정상_요청시_200과_eligible_true를_반환한다() throws Exception {
         given(summaryDraftSearchService.findEligibility(eq(1L), any()))
-                .willReturn(new SummaryDraftEligibilityResult(true, null, null));
+                .willReturn(new SummaryDraftEligibilityResult(true, null, null, 100));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility")
                         .cookie(USER_SESSION_COOKIE))
@@ -515,7 +515,8 @@ class AiChatControllerTest {
                 .willReturn(new SummaryDraftEligibilityResult(
                         false,
                         IneligibleReason.SESSION_ALREADY_CLOSED.name(),
-                        AiChatErrorCode.SESSION_ALREADY_CLOSED.getMessage()
+                        AiChatErrorCode.SESSION_ALREADY_CLOSED.getMessage(),
+                        100
                 ));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility")
@@ -532,7 +533,8 @@ class AiChatControllerTest {
                 .willReturn(new SummaryDraftEligibilityResult(
                         false,
                         IneligibleReason.CHAT_VOLUME_NOT_ENOUGH.name(),
-                        AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH.getMessage()
+                        AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH.getMessage(),
+                        20
                 ));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility")
