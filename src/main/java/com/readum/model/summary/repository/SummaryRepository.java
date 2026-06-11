@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 public interface SummaryRepository extends JpaRepository<Summary, Long> {
@@ -19,4 +21,10 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from Summary summary where summary.userBookId = :userBookId")
     int deleteAllByUserBookId(@Param("userBookId") Long userBookId);
+
+    Optional<Summary> findByAiChatSessionIdAndSummaryDate(Long aiChatSessionId, LocalDate summaryDate);
+
+    Optional<Summary> findFirstByAiChatSessionIdOrderByCreatedAtDesc(Long aiChatSessionId);
+
+    List<Summary> findByStatusAndRetryCountLessThan(Summary.Status status, int retryCount);
 }

@@ -65,6 +65,19 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
     List<AiChatMessage> findValidMessagesBySessionIdOrderByCreatedAtAsc(@Param("sessionId") Long sessionId);
 
     /**
+     * 마지막 요약 이후 유효 메시지 조회.
+     * 스케줄러가 요약 대상 메시지를 추출할 때 사용한다.
+     * since 시점 이후(초과) COMPLETED 메시지만 createdAt 오름차순으로 반환한다.
+     */
+    default List<AiChatMessage> findValidMessagesSince(Long sessionId, LocalDateTime since) {
+        return findBySessionIdAndStatusAndCreatedAtAfterOrderByCreatedAtAsc(
+                sessionId, AiChatMessage.Status.COMPLETED, since);
+    }
+
+    List<AiChatMessage> findBySessionIdAndStatusAndCreatedAtAfterOrderByCreatedAtAsc(
+            Long sessionId, AiChatMessage.Status status, LocalDateTime createdAt);
+
+    /**
      * 사용자별 burst rate-limit 검사를 위한 카운트.
      * since 이후 생성된, 특정 role + status 메시지 수를 소유자(userId) 가 자신의 UserBook 으로 만든 모든 세션에서 합산한다.
      * AiChatSessionRepository.findByIdAndOwner 와 동일한 패턴으로 EXISTS 서브쿼리를 거쳐
