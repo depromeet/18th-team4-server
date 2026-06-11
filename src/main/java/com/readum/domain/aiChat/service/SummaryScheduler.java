@@ -76,9 +76,7 @@ public class SummaryScheduler {
 
         for (Summary summary : failedSummaries) {
             try {
-                summary.resetToInProgress();
-                summaryDraftService.executeForScheduler(
-                        summary.getAiChatSessionId(), summary.getSummaryDate());
+                summaryDraftService.retryForScheduler(summary.getId());
             } catch (Exception e) {
                 log.error("독후감 재시도 실패 summaryId={} sessionId={}",
                         summary.getId(), summary.getAiChatSessionId(), e);

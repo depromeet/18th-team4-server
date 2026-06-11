@@ -150,6 +150,38 @@ public class SummaryDraftService {
         generateAndUpdateStatus(aiChatSessionId, ctx);
     }
 
+    /**
+     * 실패한 기존 Summary 를 재사용하여 재시도한다.
+     * TX1: 기존 Summary 를 IN_PROGRESS 로 되돌리고 retryCount 를 증가시킨다.
+     * LLM 호출 (TX 밖)
+     * TX2 (성공): Summary → COMPLETED
+     * TX3 (실패): Summary → FAILED
+     */
+    public void retryForScheduler(Long summaryId) {
+        PreparedContext ctx = transactionTemplate.execute(status -> {
+            Summary summary = summaryRepository.findById(summaryId)
+                    .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SUMMARY_NOT_FOUND));
+
+            AiChatSession session = aiChatSessionRepository.findById(summary.getAiChatSessionId())
+                    .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+
+            LocalDateTime since = summaryRepository
+                    .findFirstByAiChatSessionIdOrderByCreatedAtDesc(summary.getAiChatSessionId())
+                    .filter(latest -> !latest.getId().equals(summaryId))
+                    .map(Summary::getCreatedAt)
+                    .orElse(session.getCreatedAt());
+
+            List<AiChatMessage> messages = aiChatMessageRepository
+                    .findValidMessagesSince(summary.getAiChatSessionId(), since);
+
+            summary.resetToInProgress();
+
+            return new PreparedContext(summary.getId(), messages);
+        });
+
+        generateAndUpdateStatus(ctx.summaryId(), ctx);
+    }
+
     private void generateAndUpdateStatus(Long sessionId, PreparedContext ctx) {
         SummaryDraftResult result;
         try {
