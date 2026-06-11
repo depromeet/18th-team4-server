@@ -12,6 +12,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Long> {
@@ -130,4 +132,7 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
             @Param("messageCompletedStatus") AiChatMessage.Status messageCompletedStatus,
             Pageable pageable
     );
+
+    List<AiChatSession> findByStatusAndAccumulatedTokensGreaterThanEqualAndUpdatedAtAfter(
+            AiChatSession.Status status, int accumulatedTokens, LocalDateTime updatedAt);
 }

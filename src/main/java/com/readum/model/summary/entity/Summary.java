@@ -103,9 +103,6 @@ public class Summary {
     public void resetToInProgress() {
         this.status = Status.IN_PROGRESS;
         this.retryCount++;
-        this.title = null;
-        this.body = null;
-        this.quote = null;
         this.updatedAt = LocalDateTime.now();
     }
 
