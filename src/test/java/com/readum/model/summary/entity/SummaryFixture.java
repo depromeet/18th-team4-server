@@ -2,6 +2,7 @@ package com.readum.model.summary.entity;
 
 import com.readum.support.TestOnly;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -19,14 +20,15 @@ public final class SummaryFixture {
     /**
      * 저장되어 id 가 부여된, IN_PROGRESS 상태의 감상문.
      * 본문(title/body/quote)은 아직 비어 있다.
+     * summaryDate 는 오늘 날짜를 기본값으로 사용한다.
      */
     public static Summary persistedInProgressSummary(
             Long id, Long userBookId, Long aiChatSessionId
     ) {
         LocalDateTime now = LocalDateTime.now();
         return new Summary(
-                id, userBookId, aiChatSessionId, Summary.Status.IN_PROGRESS,
-                null, null, null, now, now
+                id, userBookId, aiChatSessionId, LocalDate.now(),
+                Summary.Status.IN_PROGRESS, 0, null, null, null, now, now
         );
     }
 }

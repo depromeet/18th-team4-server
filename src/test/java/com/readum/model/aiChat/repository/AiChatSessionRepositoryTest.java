@@ -150,7 +150,7 @@ class AiChatSessionRepositoryTest {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "summarizing-session");
-        summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
+        summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), java.time.LocalDate.now()));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -165,7 +165,7 @@ class AiChatSessionRepositoryTest {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "completed-session");
-        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
+        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), java.time.LocalDate.now()));
         summary.complete("title", "body", "quote");
         summaryRepository.saveAndFlush(summary);
 
@@ -182,7 +182,7 @@ class AiChatSessionRepositoryTest {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "failed-session");
-        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
+        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), java.time.LocalDate.now()));
         summary.fail();
         summaryRepository.saveAndFlush(summary);
 
