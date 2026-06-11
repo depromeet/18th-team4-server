@@ -22,6 +22,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Slf4j
@@ -81,7 +83,7 @@ public class SummaryDraftService {
             session.close();
 
             Summary summary = summaryRepository.save(
-                    Summary.createInProgress(session.getUserBookId(), sessionId));
+                    Summary.createInProgress(session.getUserBookId(), sessionId, LocalDate.now()));
 
             return new PreparedContext(summary.getId(), messages);
         });
@@ -112,6 +114,54 @@ public class SummaryDraftService {
         }
 
         // TX2: AI 성공 → content 채우고 COMPLETED
+        transactionTemplate.executeWithoutResult(status ->
+                summaryRepository.findById(ctx.summaryId())
+                        .ifPresent(summary -> summary.complete(result.title(), result.body(), result.quote())));
+    }
+
+    /**
+     * 스케줄러 전용 독후감 생성.
+     * 인증 없이 세션 ID 만으로 동작하며, 세션 상태를 변경하지 않는다.
+     * 마지막 요약 이후 메시지를 대상으로 LLM 을 호출한다.
+     *
+     * TX1: 세션 조회 + 메시지 조회 + Summary(IN_PROGRESS) 저장
+     * LLM 호출 (TX 밖)
+     * TX2 (성공): Summary → COMPLETED
+     * TX3 (실패): Summary → FAILED
+     */
+    public void executeForScheduler(Long aiChatSessionId, LocalDate summaryDate) {
+        PreparedContext ctx = transactionTemplate.execute(status -> {
+            AiChatSession session = aiChatSessionRepository.findById(aiChatSessionId)
+                    .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+
+            LocalDateTime since = summaryRepository
+                    .findFirstByAiChatSessionIdOrderByCreatedAtDesc(aiChatSessionId)
+                    .map(Summary::getCreatedAt)
+                    .orElse(session.getCreatedAt());
+
+            List<AiChatMessage> messages = aiChatMessageRepository.findValidMessagesSince(aiChatSessionId, since);
+
+            Summary summary = summaryRepository.save(
+                    Summary.createInProgress(session.getUserBookId(), aiChatSessionId, summaryDate));
+
+            return new PreparedContext(summary.getId(), messages);
+        });
+
+        generateAndUpdateStatus(aiChatSessionId, ctx);
+    }
+
+    private void generateAndUpdateStatus(Long sessionId, PreparedContext ctx) {
+        SummaryDraftResult result;
+        try {
+            result = aiSummaryClient.generate(ctx.messages());
+        } catch (Exception e) {
+            transactionTemplate.executeWithoutResult(status ->
+                    summaryRepository.findById(ctx.summaryId())
+                            .ifPresent(Summary::fail));
+            log.error("감상문 자동 생성 실패 sessionId={}", sessionId, e);
+            return;
+        }
+
         transactionTemplate.executeWithoutResult(status ->
                 summaryRepository.findById(ctx.summaryId())
                         .ifPresent(summary -> summary.complete(result.title(), result.body(), result.quote())));
