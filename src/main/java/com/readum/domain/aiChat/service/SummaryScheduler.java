@@ -85,7 +85,14 @@ public class SummaryScheduler {
     }
 
     private List<Long> findEligibleSessionIds() {
-        return aiChatSessionRepository.findAll().stream()
+        LocalDateTime yesterday = LocalDateTime.now().minusDays(1);
+
+        return aiChatSessionRepository
+                .findByStatusAndAccumulatedTokensGreaterThanEqualAndUpdatedAtAfter(
+                        AiChatSession.Status.ACTIVE,
+                        SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS,
+                        yesterday)
+                .stream()
                 .filter(session -> {
                     LocalDateTime since = summaryRepository
                             .findFirstByAiChatSessionIdOrderByCreatedAtDesc(session.getId())
