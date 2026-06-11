@@ -101,7 +101,7 @@ class SummaryDraftSearchServiceTest {
     }
 
     @Test
-    void 정상_요청시_eligible_true_결과를_반환한다() {
+    void 정상_요청시_eligible_true와_진행률을_반환한다() {
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
@@ -111,6 +111,7 @@ class SummaryDraftSearchServiceTest {
         assertThat(result.eligible()).isTrue();
         assertThat(result.reason()).isNull();
         assertThat(result.message()).isNull();
+        assertThat(result.progressPercent()).isEqualTo(100);
     }
 
     @Test
@@ -127,7 +128,7 @@ class SummaryDraftSearchServiceTest {
     }
 
     @Test
-    void 토큰이_부족하면_eligible_false와_CHAT_VOLUME_NOT_ENOUGH를_반환한다() {
+    void 토큰이_부족하면_eligible_false와_진행률을_반환한다() {
         AiChatSession session = activeSession(INSUFFICIENT_TOKENS);
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
@@ -137,6 +138,7 @@ class SummaryDraftSearchServiceTest {
         assertThat(result.eligible()).isFalse();
         assertThat(result.reason()).isEqualTo(IneligibleReason.CHAT_VOLUME_NOT_ENOUGH.name());
         assertThat(result.message()).isEqualTo(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH.getMessage());
+        assertThat(result.progressPercent()).isEqualTo(20);
     }
 
     @Test
