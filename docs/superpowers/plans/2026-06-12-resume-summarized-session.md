@@ -35,7 +35,7 @@
 10. 배포 시 데이터 마이그레이션 SQL 작성
 11. 전체 검증
 
-**중요 — 테스트 DB:** 이 프로젝트의 DAO 통합 테스트(`@SpringBootTest`)는 TestContainer 가 아니라 **dev RDS 에 직접 접속**한다. 따라서 Task 1 의 unique 제약 제거가 선행되지 않으면 Task 4 이후의 DAO 테스트가 DB 제약 위반으로 실패한다.
+**중요 — 테스트 DB (실행 중 정정):** DAO 통합 테스트(`@SpringBootTest`)는 dev RDS 가 아니라 **H2 인메모리** (`src/test/resources/application.yml`, `ddl-auto: create-drop`) 로 돈다 — 스키마가 엔티티 어노테이션에서 생성된다. 따라서 세션당 복수 감상문 테스트(Task 4 이후)를 통과시키려면 `Summary` 엔티티의 `@UniqueConstraint` 어노테이션 제거가 선행되어야 한다 (원래 Task 8 이던 것을 Task 4 로 앞당김). Task 1 의 SQL 은 dev RDS(배포 환경) 전용이며 테스트와 무관 — dev RDS 는 초기화/재생성 가능하므로(사용자 확인) 적용 시점은 자유.
 
 ---
 
@@ -398,7 +398,9 @@ class SummaryRepositoryTest {
 Run: `./gradlew compileTestJava`
 Expected: FAIL — `createFailed`, `createCompleted`, `findTopByAiChatSessionIdOrderByIdDesc` 미정의
 
-- [ ] **Step 3: Summary 에 write-once 팩토리 추가**
+- [ ] **Step 3: Summary 에 write-once 팩토리 추가 + unique 제약 어노테이션 제거**
+
+(실행 중 변경: 테스트 DB 가 H2 + 엔티티 기반 스키마 생성이라, 복수 행 테스트 통과를 위해 `@Table` 의 `uniqueConstraints = { @UniqueConstraint(name = "uk_summary_ai_chat_session", ...) }` 블럭과 `jakarta.persistence.UniqueConstraint` import 제거를 Task 8 에서 이 Task 로 앞당긴다.)
 
 `Summary.java` 의 `createInProgress` 아래에 추가 (기존 메서드는 아직 삭제하지 않음). 전체필드 생성자의 필드 순서는 `(id, userBookId, aiChatSessionId, status, quote, title, body, createdAt, updatedAt)` 이다:
 
@@ -1119,7 +1121,7 @@ git commit -m "feat(ai-chat): 감상문 조회를 세션 잠금과 최신 행 �
 
 - enum 을 `{ COMPLETED, FAILED }` 로 축소
 - `createInProgress()`, `complete()`, `fail()`, `isCompleted()` 메서드 삭제 (write-once — 생성 후 상태·내용 변경 경로 자체를 없앤다. `isCompleted` 는 호출처 없음)
-- `@Table` 의 `uniqueConstraints = { @UniqueConstraint(name = "uk_summary_ai_chat_session", ...) }` 블럭 삭제 (DB 는 Task 1 에서 이미 제거됨; `jakarta.persistence.UniqueConstraint` import 도 삭제)
+- (unique 제약 어노테이션 제거는 Task 4 로 앞당겨져 이미 완료됨)
 - 클래스에 다음 javadoc 추가:
 
 ```java
