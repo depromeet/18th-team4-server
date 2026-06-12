@@ -30,4 +30,19 @@ public final class SummaryFixture {
                 null, null, null, now, now
         );
     }
+
+    /**
+     * 저장되어 id 가 부여된, COMPLETED 상태의 감상문.
+     * 캘린더 조회 단언에 쓰이는 값(summaryDate/title/body)만 받는다. quote 는 단언하지 않으므로 내부 기본값(null).
+     */
+    public static Summary persistedCompletedSummary(
+            Long id, Long userBookId, Long aiChatSessionId, LocalDate summaryDate,
+            String title, String body
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Summary(
+                id, userBookId, aiChatSessionId, summaryDate, Summary.Status.COMPLETED,
+                null, title, body, now, now
+        );
+    }
 }
