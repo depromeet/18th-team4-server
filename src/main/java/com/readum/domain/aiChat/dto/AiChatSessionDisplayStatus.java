@@ -2,12 +2,16 @@ package com.readum.domain.aiChat.dto;
 
 /**
  * 책별 세션 목록 응답에 노출되는 합성 상태.
- * AiChatSession.Status (ACTIVE/CLOSED) 와 Summary.Status (IN_PROGRESS/COMPLETED/FAILED) 를
+ * AiChatSession.Status (ACTIVE/LOCKED) 와 세션의 최신 Summary.Status (COMPLETED/FAILED) 를
  * Repository JPQL CASE 식이 합성한 결과를 enum 으로 받아 컴파일 타임 안전성을 확보한다.
+ *  - SUMMARIZING: 감상문 생성 중 (세션 잠김 — 메시지 전송 불가)
+ *  - ACTIVE: 대화 가능, 생성된 감상문 없음
+ *  - SUMMARIZED: 대화 가능, 최신 감상문 생성 완료
+ *  - FAILED: 대화 가능, 최신 감상문 생성 실패
  */
 public enum AiChatSessionDisplayStatus {
     ACTIVE,
     SUMMARIZING,
-    CLOSED,
+    SUMMARIZED,
     FAILED
 }

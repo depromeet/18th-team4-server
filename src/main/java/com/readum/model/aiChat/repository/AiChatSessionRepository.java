@@ -54,16 +54,18 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
      *
      * 정렬 / lastChattedAt: 마지막으로 노출 가능한 메시지 (status COMPLETED) 의
      * createdAt 을 max() 서브쿼리로 구해 사용한다. 메시지가 아직 없는 세션은 session.createdAt 으로 fallback.
-     * AiChatSession.updatedAt 을 쓰지 않는 이유 — lock() / updateTitle() 같은 비-채팅 이벤트가
+     * AiChatSession.updatedAt 을 쓰지 않는 이유 — lock() / unlock() / updateTitle() 같은 비-채팅 이벤트가
      * 갱신해 "최근 채팅 시각" 의 의미가 흐려지기 때문.
      *
-     * status 도출: AiChatSession.status (ACTIVE/LOCKED) 와 Summary.status (IN_PROGRESS/COMPLETED/FAILED) 를
+     * status 도출: AiChatSession.status (ACTIVE/LOCKED) 와 세션의 최신 Summary.status (COMPLETED/FAILED) 를
      * CASE 로 합성해 단일 문자열로 반환한다. 매핑 규칙:
-     *  - session ACTIVE                       → "ACTIVE"
-     *  - session LOCKED + summary IN_PROGRESS → "SUMMARIZING"
-     *  - session LOCKED + summary FAILED      → "FAILED"
-     *  - session LOCKED + 그 외 (COMPLETED 또는 summary 없음) → "CLOSED"
+     *  - session LOCKED                          → "SUMMARIZING" (감상문 생성 중 — 직전 감상문 존재 여부와 무관)
+     *  - session ACTIVE + 감상문 없음             → "ACTIVE"
+     *  - session ACTIVE + 최신 감상문 FAILED      → "FAILED"
+     *  - session ACTIVE + 최신 감상문 COMPLETED   → "SUMMARIZED"
      *
+     * 감상문은 세션당 여러 건(재생성 이력) 존재할 수 있으므로 left join 의 on 절에서
+     * max(id) 서브쿼리로 최신 한 건만 매칭한다.
      * Summary 와 AiChatSession 사이에 JPA 연관관계가 없어 left join 의 on 절로 직접 매칭한다.
      * Hibernate 6+ 의 entity-without-association join 문법.
      *
@@ -75,9 +77,9 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
         return findSessionsByUserBookIdAndOwnerInternal(
                 userBookId,
                 userId,
-                AiChatSession.Status.ACTIVE,
-                Summary.Status.IN_PROGRESS,
+                AiChatSession.Status.LOCKED,
                 Summary.Status.FAILED,
+                Summary.Status.COMPLETED,
                 AiChatMessage.Status.COMPLETED,
                 pageable
         );
@@ -88,10 +90,10 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                        aiChatSession.id
                      , aiChatSession.title
                      , case
-                           when aiChatSession.status = :activeStatus then 'ACTIVE'
-                           when summary.status = :summaryInProgressStatus then 'SUMMARIZING'
+                           when aiChatSession.status = :lockedStatus then 'SUMMARIZING'
                            when summary.status = :summaryFailedStatus then 'FAILED'
-                           else 'CLOSED'
+                           when summary.status = :summaryCompletedStatus then 'SUMMARIZED'
+                           else 'ACTIVE'
                        end
                      , coalesce(
                            (select max(aiChatMessage.createdAt)
@@ -104,6 +106,9 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
               from AiChatSession aiChatSession
               left join Summary summary
                      on summary.aiChatSessionId = aiChatSession.id
+                    and summary.id = (select max(otherSummary.id)
+                                        from Summary otherSummary
+                                       where otherSummary.aiChatSessionId = aiChatSession.id)
              where aiChatSession.userBookId = :userBookId
                and exists (
                      select 1
@@ -124,9 +129,9 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
     Slice<AiChatSessionListProjection> findSessionsByUserBookIdAndOwnerInternal(
             @Param("userBookId") Long userBookId,
             @Param("userId") Long userId,
-            @Param("activeStatus") AiChatSession.Status activeStatus,
-            @Param("summaryInProgressStatus") Summary.Status summaryInProgressStatus,
+            @Param("lockedStatus") AiChatSession.Status lockedStatus,
             @Param("summaryFailedStatus") Summary.Status summaryFailedStatus,
+            @Param("summaryCompletedStatus") Summary.Status summaryCompletedStatus,
             @Param("messageCompletedStatus") AiChatMessage.Status messageCompletedStatus,
             Pageable pageable
     );

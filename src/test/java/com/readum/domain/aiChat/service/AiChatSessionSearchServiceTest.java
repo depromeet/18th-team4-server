@@ -102,7 +102,7 @@ class AiChatSessionSearchServiceTest {
     }
 
     @Test
-    void ACTIVE_SUMMARIZING_CLOSED_FAILED_상태가_그대로_변환된다() {
+    void ACTIVE_SUMMARIZING_SUMMARIZED_FAILED_상태가_그대로_변환된다() {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
         LocalDateTime base = LocalDateTime.of(2026, 5, 7, 12, 0, 0);
@@ -111,7 +111,7 @@ class AiChatSessionSearchServiceTest {
         List<AiChatSessionListProjection> rows = List.of(
                 new AiChatSessionListProjection(4L, "최근", "SUMMARIZING", base.plusMinutes(3)),
                 new AiChatSessionListProjection(3L, "활성", "ACTIVE", base.plusMinutes(2)),
-                new AiChatSessionListProjection(2L, "종료", "CLOSED", base.minusDays(1)),
+                new AiChatSessionListProjection(2L, "감상문 완료", "SUMMARIZED", base.minusDays(1)),
                 new AiChatSessionListProjection(1L, "실패", "FAILED", base.minusDays(2))
         );
         given(aiChatSessionRepository.findSessionsByUserBookIdAndOwner(
@@ -127,7 +127,7 @@ class AiChatSessionSearchServiceTest {
                 .containsExactly(
                         AiChatSessionDisplayStatus.SUMMARIZING,
                         AiChatSessionDisplayStatus.ACTIVE,
-                        AiChatSessionDisplayStatus.CLOSED,
+                        AiChatSessionDisplayStatus.SUMMARIZED,
                         AiChatSessionDisplayStatus.FAILED
                 );
         assertThat(result.sessions().get(0).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 7));

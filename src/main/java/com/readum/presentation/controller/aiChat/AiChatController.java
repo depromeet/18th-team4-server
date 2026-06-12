@@ -80,8 +80,8 @@ public class AiChatController {
     @Operation(
             summary = "AI 채팅 세션 목록 조회",
             description = "선택한 도서(userBookId)에 대한 채팅 세션을 최근 채팅 날짜 내림차순으로 페이지네이션 조회한다. " +
-                    "각 세션은 ACTIVE / SUMMARIZING / CLOSED / FAILED 상태로 구분된다 — " +
-                    "SUMMARIZING 은 감상문 초안 비동기 생성 중, FAILED 는 생성 실패 상태를 의미한다. " +
+                    "각 세션은 ACTIVE / SUMMARIZING / SUMMARIZED / FAILED 상태로 구분된다 — " +
+                    "SUMMARIZING 은 감상문 초안 비동기 생성 중, SUMMARIZED 는 최신 감상문 생성 완료, FAILED 는 생성 실패 상태를 의미한다. " +
                     "lastChattedDate 는 마지막으로 노출된 메시지(USER/ASSISTANT, COMPLETED) 의 날짜이며, " +
                     "메시지가 없는 세션은 세션 생성 날짜로 fallback 된다. " +
                     "세션이 없으면 빈 배열로 200 응답한다."

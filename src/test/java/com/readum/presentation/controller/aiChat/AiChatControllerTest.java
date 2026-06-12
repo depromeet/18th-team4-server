@@ -164,7 +164,7 @@ class AiChatControllerTest {
                         List.of(
                                 new AiChatSessionResult(4L, "최근", AiChatSessionDisplayStatus.SUMMARIZING, today),
                                 new AiChatSessionResult(3L, "활성", AiChatSessionDisplayStatus.ACTIVE, today),
-                                new AiChatSessionResult(2L, "종료", AiChatSessionDisplayStatus.CLOSED, yesterday),
+                                new AiChatSessionResult(2L, "감상문 완료", AiChatSessionDisplayStatus.SUMMARIZED, yesterday),
                                 new AiChatSessionResult(1L, "실패", AiChatSessionDisplayStatus.FAILED, yesterday)
                         ),
                         1,
@@ -186,7 +186,7 @@ class AiChatControllerTest {
                 .andExpect(jsonPath("$.data.sessions[0].lastChattedDate").value("2026-05-07"))
                 .andExpect(jsonPath("$.data.sessions[3].lastChattedDate").value("2026-05-06"))
                 .andExpect(jsonPath("$.data.sessions[1].status").value("ACTIVE"))
-                .andExpect(jsonPath("$.data.sessions[2].status").value("CLOSED"))
+                .andExpect(jsonPath("$.data.sessions[2].status").value("SUMMARIZED"))
                 .andExpect(jsonPath("$.data.sessions[3].status").value("FAILED"))
                 .andExpect(jsonPath("$.data.page").value(1))
                 .andExpect(jsonPath("$.data.size").value(20))

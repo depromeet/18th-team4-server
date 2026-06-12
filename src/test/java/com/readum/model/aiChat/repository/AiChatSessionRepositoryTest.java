@@ -145,12 +145,11 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: CLOSED + Summary IN_PROGRESS 면 'SUMMARIZING' 으로 도출")
+    @DisplayName("findSessionsByUserBookIdAndOwner: LOCKED 세션은 'SUMMARIZING' 으로 도출된다")
     void status_SUMMARIZING_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "summarizing-session");
-        summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
+        saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "summarizing-session");
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -160,31 +159,27 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: CLOSED + Summary COMPLETED 면 'CLOSED' 로 도출")
-    void status_CLOSED_with_completed_summary() {
+    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE + 최신 감상문 COMPLETED 면 'SUMMARIZED' 로 도출")
+    void status_SUMMARIZED_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "completed-session");
-        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
-        summary.complete("title", "body", "quote");
-        summaryRepository.saveAndFlush(summary);
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "summarized-session");
+        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문", "인용"));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
 
         assertThat(slice.getContent()).hasSize(1);
-        assertThat(slice.getContent().get(0).status()).isEqualTo("CLOSED");
+        assertThat(slice.getContent().get(0).status()).isEqualTo("SUMMARIZED");
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: CLOSED + Summary FAILED 면 'FAILED' 로 도출")
+    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE + 최신 감상문 FAILED 면 'FAILED' 로 도출")
     void status_FAILED_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "failed-session");
-        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
-        summary.fail();
-        summaryRepository.saveAndFlush(summary);
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "failed-session");
+        summaryRepository.save(Summary.createFailed(userBook.getId(), session.getId()));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -194,17 +189,35 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: CLOSED + Summary 없음 (엣지) 이면 'CLOSED' 로 도출")
-    void status_CLOSED_without_summary() {
+    @DisplayName("findSessionsByUserBookIdAndOwner: 감상문 여러 건이면 최신 행 기준으로 도출된다 (FAILED 후 COMPLETED → SUMMARIZED)")
+    void status_최신_감상문_기준_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "closed-no-summary");
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "retried-session");
+        summaryRepository.save(Summary.createFailed(userBook.getId(), session.getId()));
+        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문", "인용"));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
 
         assertThat(slice.getContent()).hasSize(1);
-        assertThat(slice.getContent().get(0).status()).isEqualTo("CLOSED");
+        assertThat(slice.getContent().get(0).status()).isEqualTo("SUMMARIZED");
+        // 행이 2건이어도 최신 한 건만 join 되어 세션은 한 번만 나타난다.
+    }
+
+    @Test
+    @DisplayName("findSessionsByUserBookIdAndOwner: 재생성 중(LOCKED)이면 직전 COMPLETED 가 있어도 'SUMMARIZING'")
+    void status_재생성_중에는_SUMMARIZING_우선() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "regenerating-session");
+        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문", "인용"));
+
+        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
+                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
+
+        assertThat(slice.getContent()).hasSize(1);
+        assertThat(slice.getContent().get(0).status()).isEqualTo("SUMMARIZING");
     }
 
     @Test
