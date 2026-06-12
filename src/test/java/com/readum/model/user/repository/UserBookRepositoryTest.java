@@ -158,6 +158,21 @@ class UserBookRepositoryTest {
         assertThat(projections).isEmpty();
     }
 
+    @Test
+    @DisplayName("findByUserId 는 해당 사용자의 등록 도서만 전부 반환한다")
+    void findByUserId_본인_등록_도서만_반환() {
+        Long userId = nextUserId();
+        Long otherUserId = nextUserId();
+        UserBook first = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        UserBook second = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        userBookRepository.save(UserBook.create(otherUserId, nextBookId()));
+
+        List<UserBook> found = userBookRepository.findByUserId(userId);
+
+        assertThat(found).extracting(UserBook::getId)
+                .containsExactlyInAnyOrder(first.getId(), second.getId());
+    }
+
     private static synchronized Long nextUserId() {
         userIdSeq += 1;
         return userIdSeq;

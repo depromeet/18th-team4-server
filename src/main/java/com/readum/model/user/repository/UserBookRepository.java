@@ -18,6 +18,8 @@ public interface UserBookRepository extends JpaRepository<UserBook, Long> {
 
     Optional<UserBook> findByUserIdAndBookId(Long userId, Long bookId);
 
+    List<UserBook> findByUserId(Long userId);
+
     @Query("""
             select new com.readum.model.user.repository.projection.UserBookListItemProjection(
                        userBook.id
