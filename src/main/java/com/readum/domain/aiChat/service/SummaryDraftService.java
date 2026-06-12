@@ -107,7 +107,9 @@ public class SummaryDraftService {
             // TX2 (실패 경로): FAILED 행 기록 + 세션 잠금 해제
             transactionTemplate.executeWithoutResult(status -> {
                 summaryRepository.save(Summary.createFailed(preparedContext.userBookId(), sessionId));
-                aiChatSessionRepository.findById(sessionId).ifPresent(AiChatSession::unlock);
+                aiChatSessionRepository.findById(sessionId).ifPresentOrElse(
+                        AiChatSession::unlock,
+                        () -> log.warn("감상문 생성 종료 후 잠금 해제할 세션을 찾지 못함 sessionId={}", sessionId));
             });
             log.error("감상문 생성 실패 sessionId={}", sessionId, e);
             return;
@@ -118,7 +120,9 @@ public class SummaryDraftService {
             summaryRepository.save(Summary.createCompleted(
                     preparedContext.userBookId(), sessionId,
                     result.title(), result.body(), result.quote()));
-            aiChatSessionRepository.findById(sessionId).ifPresent(AiChatSession::unlock);
+            aiChatSessionRepository.findById(sessionId).ifPresentOrElse(
+                    AiChatSession::unlock,
+                    () -> log.warn("감상문 생성 종료 후 잠금 해제할 세션을 찾지 못함 sessionId={}", sessionId));
         });
     }
 

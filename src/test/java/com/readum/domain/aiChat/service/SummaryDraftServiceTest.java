@@ -35,6 +35,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -131,14 +132,16 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
         given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(SESSION_ID)).willReturn(List.of());
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
-        // LLM 호출 시점(생성 진행 중)에 세션이 LOCKED 인 것을 검증한다.
+        // LLM 호출 시점(생성 진행 중)의 세션 상태를 캡처해 두고, 호출이 끝난 뒤 바깥에서 단언한다.
+        AtomicReference<AiChatSession.Status> statusDuringGeneration = new AtomicReference<>();
         given(aiSummaryClient.generate(any())).willAnswer(invocation -> {
-            assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.LOCKED);
+            statusDuringGeneration.set(session.getStatus());
             return expected;
         });
 
         summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
+        assertThat(statusDuringGeneration.get()).isEqualTo(AiChatSession.Status.LOCKED);
         assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.ACTIVE);
     }
 
