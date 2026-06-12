@@ -1,7 +1,10 @@
 package com.readum.domain.summary.service;
 
+import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.summary.dto.MonthlySummaryResult;
+import com.readum.domain.summary.dto.SummaryResult;
+import com.readum.domain.summary.exception.SummaryErrorCode;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.book.entity.Book;
@@ -30,6 +33,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -105,5 +109,82 @@ class SummarySearchServiceTest {
         assertThatThrownBy(() -> summarySearchService.findMonthly(JUNE, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
                 .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(UserErrorCode.INVALID_SESSION));
+    }
+
+    @Test
+    void 월별_조회는_감상문마다_자기_책의_제목을_매핑한다() {
+        UserBook firstUserBook = UserBookFixture.persistedUserBook(10L, USER_ID, 100L);
+        UserBook secondUserBook = UserBookFixture.persistedUserBook(20L, USER_ID, 200L);
+        Book firstBook = BookFixture.persistedBook(
+                100L, "ext-1", "첫 번째 책", "저자", "출판사", 2024, "http://example.com/a.jpg");
+        Book secondBook = BookFixture.persistedBook(
+                200L, "ext-2", "두 번째 책", "저자", "출판사", 2025, "http://example.com/b.jpg");
+        Summary firstSummary = SummaryFixture.persistedCompletedSummary(
+                17L, 10L, 1000L, LocalDate.of(2026, 6, 11), "첫 감상문", "본문1");
+        Summary secondSummary = SummaryFixture.persistedCompletedSummary(
+                18L, 20L, 2000L, LocalDate.of(2026, 6, 12), "둘째 감상문", "본문2");
+
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(firstUserBook, secondUserBook));
+        given(summaryRepository.findMonthlyCompleted(
+                List.of(10L, 20L), LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30)))
+                .willReturn(List.of(secondSummary, firstSummary));
+        given(bookRepository.findAllById(List.of(200L, 100L))).willReturn(List.of(firstBook, secondBook));
+
+        List<MonthlySummaryResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+
+        assertThat(results).extracting(MonthlySummaryResult::summaryId, MonthlySummaryResult::bookTitle)
+                .containsExactly(
+                        tuple(18L, "두 번째 책"),
+                        tuple(17L, "첫 번째 책"));
+    }
+
+    @Test
+    void 상세_조회는_본인_소유의_완성된_감상문을_반환한다() {
+        Summary summary = SummaryFixture.persistedCompletedSummary(
+                17L, 10L, 1000L, LocalDate.of(2026, 6, 11), "감상문 제목", "감상문 본문");
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(summaryRepository.findById(17L)).willReturn(Optional.of(summary));
+        given(userBookRepository.findByIdAndUserId(10L, USER_ID))
+                .willReturn(Optional.of(UserBookFixture.persistedUserBook(10L, USER_ID, 100L)));
+
+        SummaryResult result = summarySearchService.findById(17L, USER_SESSION_ID);
+
+        assertThat(result.title()).isEqualTo("감상문 제목");
+        assertThat(result.body()).isEqualTo("감상문 본문");
+    }
+
+    @Test
+    void 존재하지_않는_감상문을_상세_조회하면_NotFoundException_을_던진다() {
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(summaryRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summarySearchService.findById(99L, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
+                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND));
+    }
+
+    @Test
+    void 미완성_감상문을_상세_조회하면_NotFoundException_을_던진다() {
+        Summary inProgress = SummaryFixture.persistedInProgressSummary(17L, 10L, 1000L);
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(summaryRepository.findById(17L)).willReturn(Optional.of(inProgress));
+
+        assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
+                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND));
+    }
+
+    @Test
+    void 남의_감상문을_상세_조회하면_NotFoundException_을_던진다() {
+        Summary summary = SummaryFixture.persistedCompletedSummary(
+                17L, 10L, 1000L, LocalDate.of(2026, 6, 11), "감상문 제목", "감상문 본문");
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(summaryRepository.findById(17L)).willReturn(Optional.of(summary));
+        given(userBookRepository.findByIdAndUserId(10L, USER_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
+                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND));
     }
 }

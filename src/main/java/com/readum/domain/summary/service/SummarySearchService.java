@@ -53,10 +53,16 @@ public class SummarySearchService {
         List<Long> userBookIds = userBooks.stream().map(UserBook::getId).toList();
         List<Summary> summaries = summaryRepository.findMonthlyCompleted(
                 userBookIds, yearMonth.atDay(1), yearMonth.atEndOfMonth());
+        if (summaries.isEmpty()) {
+            return List.of();
+        }
 
         Map<Long, Long> bookIdByUserBookId = userBooks.stream()
                 .collect(Collectors.toMap(UserBook::getId, UserBook::getBookId));
-        List<Long> bookIds = userBooks.stream().map(UserBook::getBookId).distinct().toList();
+        List<Long> bookIds = summaries.stream()
+                .map(summary -> bookIdByUserBookId.get(summary.getUserBookId()))
+                .distinct()
+                .toList();
         Map<Long, Book> bookById = bookRepository.findAllById(bookIds).stream()
                 .collect(Collectors.toMap(Book::getId, Function.identity()));
 
@@ -64,6 +70,23 @@ public class SummarySearchService {
                 .map(summary -> MonthlySummaryResult.from(
                         summary, bookById.get(bookIdByUserBookId.get(summary.getUserBookId())).getTitle()))
                 .toList();
+    }
+
+    public SummaryResult findById(Long summaryId, String userSessionId) {
+        User user = userRepository.findBySessionId(userSessionId)
+                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
+
+        Summary summary = summaryRepository.findById(summaryId)
+                .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_FOUND));
+
+        if (!summary.isCompleted()) {
+            throw new NotFoundException(SummaryErrorCode.SUMMARY_NOT_FOUND);
+        }
+
+        userBookRepository.findByIdAndUserId(summary.getUserBookId(), user.getId())
+                .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_FOUND));
+
+        return SummaryResult.from(summary);
     }
 
     public SummaryResult findBySessionId(Long sessionId, String userSessionId) {
