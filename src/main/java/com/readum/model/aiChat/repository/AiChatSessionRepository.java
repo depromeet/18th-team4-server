@@ -54,15 +54,15 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
      *
      * 정렬 / lastChattedAt: 마지막으로 노출 가능한 메시지 (status COMPLETED) 의
      * createdAt 을 max() 서브쿼리로 구해 사용한다. 메시지가 아직 없는 세션은 session.createdAt 으로 fallback.
-     * AiChatSession.updatedAt 을 쓰지 않는 이유 — close() / updateTitle() 같은 비-채팅 이벤트가
+     * AiChatSession.updatedAt 을 쓰지 않는 이유 — lock() / updateTitle() 같은 비-채팅 이벤트가
      * 갱신해 "최근 채팅 시각" 의 의미가 흐려지기 때문.
      *
-     * status 도출: AiChatSession.status (ACTIVE/CLOSED) 와 Summary.status (IN_PROGRESS/COMPLETED/FAILED) 를
+     * status 도출: AiChatSession.status (ACTIVE/LOCKED) 와 Summary.status (IN_PROGRESS/COMPLETED/FAILED) 를
      * CASE 로 합성해 단일 문자열로 반환한다. 매핑 규칙:
      *  - session ACTIVE                       → "ACTIVE"
-     *  - session CLOSED + summary IN_PROGRESS → "SUMMARIZING"
-     *  - session CLOSED + summary FAILED      → "FAILED"
-     *  - session CLOSED + 그 외 (COMPLETED 또는 summary 없음) → "CLOSED"
+     *  - session LOCKED + summary IN_PROGRESS → "SUMMARIZING"
+     *  - session LOCKED + summary FAILED      → "FAILED"
+     *  - session LOCKED + 그 외 (COMPLETED 또는 summary 없음) → "CLOSED"
      *
      * Summary 와 AiChatSession 사이에 JPA 연관관계가 없어 left join 의 on 절로 직접 매칭한다.
      * Hibernate 6+ 의 entity-without-association join 문법.
