@@ -15,6 +15,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Getter
@@ -46,6 +47,9 @@ public class Summary {
     @Column(name = "ai_chat_session_id", nullable = false)
     private Long aiChatSessionId;
 
+    @Column(name = "summary_date", nullable = false)
+    private LocalDate summaryDate;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private Status status;
@@ -68,10 +72,14 @@ public class Summary {
     /**
      * 감상문 생성 시작 시점에 IN_PROGRESS 상태로 레코드를 먼저 생성한다.
      * content(title/body/quote)는 AI 응답 후 complete() 로 채운다.
+     * summaryDate 는 이 감상문이 다루는 대화가 있었던 날짜 (캘린더 표시 기준).
      */
-    public static Summary createInProgress(Long userBookId, Long aiChatSessionId) {
+    public static Summary createInProgress(Long userBookId, Long aiChatSessionId, LocalDate summaryDate) {
         LocalDateTime now = LocalDateTime.now();
-        return new Summary(null, userBookId, aiChatSessionId, Status.IN_PROGRESS, null, null, null, now, now);
+        return new Summary(
+                null, userBookId, aiChatSessionId, summaryDate,
+                Status.IN_PROGRESS, null, null, null, now, now
+        );
     }
 
     public void complete(String title, String body, String quote) {

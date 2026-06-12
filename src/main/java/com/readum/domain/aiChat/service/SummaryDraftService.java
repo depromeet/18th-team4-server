@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Slf4j
@@ -81,7 +82,7 @@ public class SummaryDraftService {
             session.close();
 
             Summary summary = summaryRepository.save(
-                    Summary.createInProgress(session.getUserBookId(), sessionId));
+                    Summary.createInProgress(session.getUserBookId(), sessionId, LocalDate.now()));
 
             return new PreparedContext(summary.getId(), messages);
         });

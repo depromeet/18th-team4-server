@@ -2,6 +2,7 @@ package com.readum.model.summary.entity;
 
 import com.readum.support.TestOnly;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -25,7 +26,7 @@ public final class SummaryFixture {
     ) {
         LocalDateTime now = LocalDateTime.now();
         return new Summary(
-                id, userBookId, aiChatSessionId, Summary.Status.IN_PROGRESS,
+                id, userBookId, aiChatSessionId, LocalDate.now(), Summary.Status.IN_PROGRESS,
                 null, null, null, now, now
         );
     }
