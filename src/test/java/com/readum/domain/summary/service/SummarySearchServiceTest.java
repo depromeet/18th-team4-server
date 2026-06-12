@@ -155,6 +155,30 @@ class SummarySearchServiceTest {
     }
 
     @Test
+    void 해당_월에_감상문이_없으면_책_조회_없이_빈_리스트를_반환한다() {
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(userBookRepository.findByUserId(USER_ID))
+                .willReturn(List.of(UserBookFixture.persistedUserBook(10L, USER_ID, 100L)));
+        given(summaryRepository.findMonthlyCompleted(
+                List.of(10L), LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30)))
+                .willReturn(List.of());
+
+        List<MonthlySummaryResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+
+        assertThat(results).isEmpty();
+        verifyNoInteractions(bookRepository);
+    }
+
+    @Test
+    void 상세_조회_시_세션이_유효하지_않으면_UnauthorizedException_을_던진다() {
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(UserErrorCode.INVALID_SESSION));
+    }
+
+    @Test
     void 존재하지_않는_감상문을_상세_조회하면_NotFoundException_을_던진다() {
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(summaryRepository.findById(99L)).willReturn(Optional.empty());
