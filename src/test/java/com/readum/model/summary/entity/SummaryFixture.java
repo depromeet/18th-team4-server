@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
  * 특정 상태의 {@link Summary} 를 만드는 명명 팩토리.
  * 감상문 진행 상태(생성 중)를 이름으로 드러낸다.
  * 같은 패키지의 package-private 전체필드 생성자를 컴파일-안전하게 호출한다.
- * createdAt/updatedAt 은 어떤 호출부에서도 단언하지 않으므로 내부 기본값(now)을 쓴다.
+ * createdAt/updatedAt/summaryDate 는 어떤 호출부에서도 단언하지 않으므로 내부 기본값(now)을 쓴다.
  */
 @TestOnly
 public final class SummaryFixture {

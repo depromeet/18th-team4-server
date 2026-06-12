@@ -72,7 +72,7 @@ public class Summary {
     /**
      * 감상문 생성 시작 시점에 IN_PROGRESS 상태로 레코드를 먼저 생성한다.
      * content(title/body/quote)는 AI 응답 후 complete() 로 채운다.
-     * summaryDate 는 이 감상문이 다루는 대화가 있었던 날짜 (캘린더 표시 기준).
+     * summaryDate 는 요약 생성을 요청한(수동/자동) 날짜 (캘린더 표시 기준).
      */
     public static Summary createInProgress(Long userBookId, Long aiChatSessionId, LocalDate summaryDate) {
         LocalDateTime now = LocalDateTime.now();
