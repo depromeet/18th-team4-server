@@ -14,7 +14,6 @@ import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.entity.Summary;
-import com.readum.model.summary.entity.SummaryFixture;
 import com.readum.model.summary.repository.SummaryRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserFixture;
@@ -25,6 +24,7 @@ import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -49,7 +49,6 @@ import static org.mockito.Mockito.verify;
 class SummaryDraftServiceTest {
 
     private static final Long SESSION_ID = 1L;
-    private static final Long SUMMARY_ID = 100L;
     private static final Long USER_ID = 10L;
     private static final String USER_SESSION_ID = "test-session-id";
     private static final Long USER_BOOK_ID = 1L;
@@ -96,48 +95,72 @@ class SummaryDraftServiceTest {
     }
 
     @Test
-    void 정상_요청시_세션을_닫고_Summary를_COMPLETED로_저장한다() {
+    void 정상_요청시_COMPLETED_감상문을_새_행으로_저장하고_세션을_다시_활성화한다() {
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
         List<AiChatMessage> messages = List.of(
                 userMessage(SESSION_ID, "이 책에서 가장 인상 깊은 장면은?"),
                 assistantMessage(SESSION_ID, "주인공이 선택의 기로에 서는 장면이 인상적입니다.")
         );
         SummaryDraftResult expected = new SummaryDraftResult("나의 독서 감상", "깊은 울림을 주는 책이었다.", "선택의 기로에서");
-        Summary inProgressSummary = Summary.createInProgress(USER_BOOK_ID, SESSION_ID);
 
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
         given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(SESSION_ID)).willReturn(messages);
-        given(summaryRepository.save(any(Summary.class))).willReturn(
-                SummaryFixture.persistedInProgressSummary(SUMMARY_ID, USER_BOOK_ID, SESSION_ID));
-        given(summaryRepository.findById(SUMMARY_ID)).willReturn(Optional.of(inProgressSummary));
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(aiSummaryClient.generate(messages)).willReturn(expected);
 
         summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
-        assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.LOCKED);
-        assertThat(inProgressSummary.getStatus()).isEqualTo(Summary.Status.COMPLETED);
-        assertThat(inProgressSummary.getTitle()).isEqualTo("나의 독서 감상");
-        assertThat(inProgressSummary.getBody()).isEqualTo("깊은 울림을 주는 책이었다.");
-        assertThat(inProgressSummary.getQuote()).isEqualTo("선택의 기로에서");
+        ArgumentCaptor<Summary> summaryCaptor = ArgumentCaptor.forClass(Summary.class);
+        verify(summaryRepository).save(summaryCaptor.capture());
+        Summary saved = summaryCaptor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(Summary.Status.COMPLETED);
+        assertThat(saved.getAiChatSessionId()).isEqualTo(SESSION_ID);
+        assertThat(saved.getTitle()).isEqualTo("나의 독서 감상");
+        assertThat(saved.getBody()).isEqualTo("깊은 울림을 주는 책이었다.");
+        assertThat(saved.getQuote()).isEqualTo("선택의 기로에서");
+        assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.ACTIVE);
     }
 
     @Test
-    void AI_호출_실패시_Summary가_FAILED로_마킹된다() {
+    void 생성이_진행되는_동안에는_세션이_잠겨있다() {
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
-        Summary inProgressSummary = Summary.createInProgress(USER_BOOK_ID, SESSION_ID);
+        SummaryDraftResult expected = new SummaryDraftResult("제목", "본문", "인용");
 
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
         given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(SESSION_ID)).willReturn(List.of());
-        given(summaryRepository.save(any(Summary.class))).willReturn(
-                SummaryFixture.persistedInProgressSummary(SUMMARY_ID, USER_BOOK_ID, SESSION_ID));
-        given(summaryRepository.findById(SUMMARY_ID)).willReturn(Optional.of(inProgressSummary));
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
+        // LLM 호출 시점(생성 진행 중)에 세션이 LOCKED 인 것을 검증한다.
+        given(aiSummaryClient.generate(any())).willAnswer(invocation -> {
+            assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.LOCKED);
+            return expected;
+        });
+
+        summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
+
+        assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.ACTIVE);
+    }
+
+    @Test
+    void AI_호출_실패시_FAILED_감상문을_새_행으로_저장하고_세션을_다시_활성화한다() {
+        AiChatSession session = activeSession(SUFFICIENT_TOKENS);
+
+        given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
+        given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(SESSION_ID)).willReturn(List.of());
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(aiSummaryClient.generate(any())).willThrow(new RuntimeException("AI 오류"));
 
         summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
-        assertThat(inProgressSummary.getStatus()).isEqualTo(Summary.Status.FAILED);
+        ArgumentCaptor<Summary> summaryCaptor = ArgumentCaptor.forClass(Summary.class);
+        verify(summaryRepository).save(summaryCaptor.capture());
+        Summary saved = summaryCaptor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(Summary.Status.FAILED);
+        assertThat(saved.getAiChatSessionId()).isEqualTo(SESSION_ID);
+        assertThat(saved.getTitle()).isNull();
+        assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.ACTIVE);
     }
 
     @Test

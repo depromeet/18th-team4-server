@@ -58,15 +58,18 @@ public class SummaryDraftService {
     }
 
     /**
-     * TX1(검증 + IN_PROGRESS 저장)을 동기로 완료한 뒤 즉시 반환한다.
-     * LLM 호출과 상태 업데이트(TX2/TX3)는 @Async 메서드에서 백그라운드로 처리된다.
+     * TX1(검증 + 세션 잠금)을 동기로 완료한 뒤 즉시 반환한다.
+     * LLM 호출과 결과 기록(TX2)은 @Async 메서드에서 백그라운드로 처리된다.
+     * 감상문 행은 미리 만들지 않는다 — "생성 중" 은 세션 LOCKED 상태가 표현하고,
+     * 감상문(Summary) 은 생성 시도가 끝난 시점에 결과(COMPLETED/FAILED)와 함께 한 번만 기록된다.
+     * 중복 생성 방지: 비관적 락 + "ACTIVE 일 때만 LOCKED 전이"(SummaryDraftPolicy) 조합이 막는다.
      */
     public void execute(Long sessionId, String userSessionId) {
         User user = userRepository.findBySessionId(userSessionId)
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
 
-        // TX1: 검증 + 세션 잠금 + Summary(IN_PROGRESS) 선점 — 커밋 후 즉시 반환
-        PreparedContext ctx = transactionTemplate.execute(status -> {
+        // TX1: 검증 + 세션 잠금 — 커밋 후 즉시 반환
+        PreparedContext preparedContext = transactionTemplate.execute(status -> {
             AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
@@ -80,42 +83,44 @@ public class SummaryDraftService {
 
             session.lock();
 
-            Summary summary = summaryRepository.save(
-                    Summary.createInProgress(session.getUserBookId(), sessionId));
-
-            return new PreparedContext(summary.getId(), messages);
+            return new PreparedContext(session.getUserBookId(), messages);
         });
 
-        // 백그라운드에서 LLM 호출 + 상태 업데이트
-        generateAsync(sessionId, ctx);
+        // 백그라운드에서 LLM 호출 + 결과 기록
+        generateAsync(sessionId, preparedContext);
     }
 
     /**
-     * TX 밖에서 LLM을 호출하고 결과를 DB에 반영한다.
+     * TX 밖에서 LLM 을 호출하고 결과를 DB 에 반영한다.
      * @Async 로 별도 스레드에서 실행되므로 호출자는 즉시 반환된다.
      *
-     * TX2 (성공): Summary → COMPLETED
-     * TX3 (실패): Summary → FAILED
+     * 성공/실패 모두 "감상문 행 기록 + 세션 잠금 해제(unlock)" 를 한 트랜잭션으로 묶는다 —
+     * 세션은 다시 활성화됐는데 결과 행이 없는 어중간한 상태를 막기 위함.
+     * 알려진 한계: 생성 도중 프로세스가 죽으면 세션이 LOCKED 로 남는다 (복구 정책은 별도 이슈).
      */
     @Async
-    public void generateAsync(Long sessionId, PreparedContext ctx) {
+    public void generateAsync(Long sessionId, PreparedContext preparedContext) {
         SummaryDraftResult result;
         try {
-            result = aiSummaryClient.generate(ctx.messages());
+            result = aiSummaryClient.generate(preparedContext.messages());
         } catch (Exception e) {
-            // TX3: AI 실패 → FAILED 마킹
-            transactionTemplate.executeWithoutResult(status ->
-                    summaryRepository.findById(ctx.summaryId())
-                            .ifPresent(Summary::fail));
+            // TX2 (실패 경로): FAILED 행 기록 + 세션 잠금 해제
+            transactionTemplate.executeWithoutResult(status -> {
+                summaryRepository.save(Summary.createFailed(preparedContext.userBookId(), sessionId));
+                aiChatSessionRepository.findById(sessionId).ifPresent(AiChatSession::unlock);
+            });
             log.error("감상문 생성 실패 sessionId={}", sessionId, e);
             return;
         }
 
-        // TX2: AI 성공 → content 채우고 COMPLETED
-        transactionTemplate.executeWithoutResult(status ->
-                summaryRepository.findById(ctx.summaryId())
-                        .ifPresent(summary -> summary.complete(result.title(), result.body(), result.quote())));
+        // TX2 (성공 경로): COMPLETED 행 기록 + 세션 잠금 해제
+        transactionTemplate.executeWithoutResult(status -> {
+            summaryRepository.save(Summary.createCompleted(
+                    preparedContext.userBookId(), sessionId,
+                    result.title(), result.body(), result.quote()));
+            aiChatSessionRepository.findById(sessionId).ifPresent(AiChatSession::unlock);
+        });
     }
 
-    public record PreparedContext(Long summaryId, List<AiChatMessage> messages) {}
+    public record PreparedContext(Long userBookId, List<AiChatMessage> messages) {}
 }
