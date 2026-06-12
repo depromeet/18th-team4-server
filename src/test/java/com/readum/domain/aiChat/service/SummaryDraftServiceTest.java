@@ -179,7 +179,7 @@ class SummaryDraftServiceTest {
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.SESSION_ALREADY_CLOSED);
+                .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
 
         verify(aiSummaryClient, never()).generate(any());
         verify(summaryRepository, never()).save(any());

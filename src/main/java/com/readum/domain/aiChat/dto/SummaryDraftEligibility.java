@@ -13,7 +13,7 @@ public record SummaryDraftEligibility(boolean eligible, IneligibleReason reason)
     }
 
     public enum IneligibleReason {
-        SESSION_ALREADY_CLOSED(AiChatErrorCode.SESSION_ALREADY_CLOSED),
+        SUMMARY_IN_PROGRESS(AiChatErrorCode.SUMMARY_IN_PROGRESS),
         CHAT_VOLUME_NOT_ENOUGH(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
 
         private final AiChatErrorCode errorCode;

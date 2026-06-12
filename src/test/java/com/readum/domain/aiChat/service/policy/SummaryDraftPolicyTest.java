@@ -33,13 +33,13 @@ class SummaryDraftPolicyTest {
     }
 
     @Test
-    void 잠긴_세션이면_SESSION_ALREADY_CLOSED_사유로_evaluate된다() {
+    void 잠긴_세션이면_SUMMARY_IN_PROGRESS_사유로_evaluate된다() {
         AiChatSession session = lockedSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS + 100);
 
         SummaryDraftEligibility result = summaryDraftPolicy.evaluate(session);
 
         assertThat(result.eligible()).isFalse();
-        assertThat(result.reason()).isEqualTo(IneligibleReason.SESSION_ALREADY_CLOSED);
+        assertThat(result.reason()).isEqualTo(IneligibleReason.SUMMARY_IN_PROGRESS);
     }
 
     @Test
@@ -49,7 +49,7 @@ class SummaryDraftPolicyTest {
         assertThatThrownBy(() -> summaryDraftPolicy.assertEligible(session))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.SESSION_ALREADY_CLOSED);
+                .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
     }
 
     @Test
@@ -87,7 +87,7 @@ class SummaryDraftPolicyTest {
 
         SummaryDraftEligibility result = summaryDraftPolicy.evaluate(session);
 
-        assertThat(result.reason()).isEqualTo(IneligibleReason.SESSION_ALREADY_CLOSED);
+        assertThat(result.reason()).isEqualTo(IneligibleReason.SUMMARY_IN_PROGRESS);
     }
 
     private AiChatSession activeSession(int accumulatedTokens) {

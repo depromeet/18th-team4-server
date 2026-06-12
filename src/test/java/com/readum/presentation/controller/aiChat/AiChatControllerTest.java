@@ -510,20 +510,20 @@ class AiChatControllerTest {
     }
 
     @Test
-    void eligibility_종료된_세션이면_200과_SESSION_ALREADY_CLOSED를_반환한다() throws Exception {
+    void eligibility_잠긴_세션이면_200과_SUMMARY_IN_PROGRESS를_반환한다() throws Exception {
         given(summaryDraftSearchService.findEligibility(eq(1L), any()))
                 .willReturn(new SummaryDraftEligibilityResult(
                         false,
-                        IneligibleReason.SESSION_ALREADY_CLOSED.name(),
-                        AiChatErrorCode.SESSION_ALREADY_CLOSED.getMessage()
+                        IneligibleReason.SUMMARY_IN_PROGRESS.name(),
+                        AiChatErrorCode.SUMMARY_IN_PROGRESS.getMessage()
                 ));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.eligible").value(false))
-                .andExpect(jsonPath("$.data.reason").value("SESSION_ALREADY_CLOSED"))
-                .andExpect(jsonPath("$.data.message").value("이미 감상문이 작성된 세션입니다."));
+                .andExpect(jsonPath("$.data.reason").value("SUMMARY_IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.message").value("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."));
     }
 
     @Test
@@ -575,14 +575,14 @@ class AiChatControllerTest {
     }
 
     @Test
-    void 감상문_초안_이미_닫힌_세션이면_409를_반환한다() throws Exception {
-        org.mockito.Mockito.doThrow(new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED))
+    void 감상문_초안_잠긴_세션이면_409를_반환한다() throws Exception {
+        org.mockito.Mockito.doThrow(new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS))
                 .when(summaryDraftService).execute(eq(1L), any());
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error.message").value("이미 감상문이 작성된 세션입니다."));
+                .andExpect(jsonPath("$.error.message").value("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."));
     }
 
     @Test

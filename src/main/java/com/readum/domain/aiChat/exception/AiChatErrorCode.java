@@ -7,7 +7,6 @@ public enum AiChatErrorCode implements ErrorCode {
     USER_BOOK_NOT_FOUND("등록된 도서가 아닙니다."),
     SESSION_NOT_FOUND("세션을 찾을 수 없습니다."),
     SESSION_LOCKED("감상문 생성 중에는 메시지를 보낼 수 없습니다."),
-    SESSION_ALREADY_CLOSED("이미 감상문이 작성된 세션입니다."),
     CHAT_VOLUME_NOT_ENOUGH("감상문 초안을 생성하기에 대화량이 부족합니다."),
     MESSAGE_CONTENT_BLANK("메시지 본문은 비어 있을 수 없습니다."),
     MESSAGE_CONTENT_TOO_LONG("메시지 본문은 4000자 이하여야 합니다."),
