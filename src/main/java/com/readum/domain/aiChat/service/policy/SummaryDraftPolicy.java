@@ -16,7 +16,7 @@ public class SummaryDraftPolicy {
 
     public SummaryDraftEligibility evaluate(AiChatSession session) {
         return switch (session.getStatus()) {
-            case CLOSED -> SummaryDraftEligibility.fail(IneligibleReason.SESSION_ALREADY_CLOSED);
+            case LOCKED -> SummaryDraftEligibility.fail(IneligibleReason.SESSION_ALREADY_CLOSED);
             case ACTIVE -> session.getAccumulatedTokens() < MIN_ACCUMULATED_TOKENS
                     ? SummaryDraftEligibility.fail(IneligibleReason.CHAT_VOLUME_NOT_ENOUGH)
                     : SummaryDraftEligibility.pass();

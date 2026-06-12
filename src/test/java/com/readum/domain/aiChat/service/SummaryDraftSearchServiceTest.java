@@ -114,8 +114,8 @@ class SummaryDraftSearchServiceTest {
     }
 
     @Test
-    void 이미_종료된_세션이면_eligible_false와_SESSION_ALREADY_CLOSED를_반환한다() {
-        AiChatSession session = closedSession(SUFFICIENT_TOKENS);
+    void 이미_잠긴_세션이면_eligible_false와_SESSION_ALREADY_CLOSED를_반환한다() {
+        AiChatSession session = lockedSession(SUFFICIENT_TOKENS);
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
@@ -157,8 +157,8 @@ class SummaryDraftSearchServiceTest {
         );
     }
 
-    private AiChatSession closedSession(int accumulatedTokens) {
-        return AiChatSessionFixture.persistedClosedSession(
+    private AiChatSession lockedSession(int accumulatedTokens) {
+        return AiChatSessionFixture.persistedLockedSession(
                 SESSION_ID, USER_BOOK_ID, 10, accumulatedTokens, "마지막 메시지"
         );
     }

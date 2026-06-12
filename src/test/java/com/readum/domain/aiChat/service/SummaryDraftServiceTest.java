@@ -115,7 +115,7 @@ class SummaryDraftServiceTest {
 
         summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
-        assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.CLOSED);
+        assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.LOCKED);
         assertThat(inProgressSummary.getStatus()).isEqualTo(Summary.Status.COMPLETED);
         assertThat(inProgressSummary.getTitle()).isEqualTo("나의 독서 감상");
         assertThat(inProgressSummary.getBody()).isEqualTo("깊은 울림을 주는 책이었다.");
@@ -169,11 +169,11 @@ class SummaryDraftServiceTest {
     }
 
     @Test
-    void 이미_닫힌_세션이면_ConflictException이_발생한다() {
-        AiChatSession closedSession = AiChatSessionFixture.persistedClosedSession(
+    void 잠긴_세션이면_ConflictException이_발생한다() {
+        AiChatSession lockedSession = AiChatSessionFixture.persistedLockedSession(
                 SESSION_ID, USER_BOOK_ID, 10, SUFFICIENT_TOKENS, "마지막 메시지"
         );
-        given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(closedSession));
+        given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(lockedSession));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))

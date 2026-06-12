@@ -38,7 +38,7 @@ public class AiChatMessagePersistService {
     private final AiChatSessionTitleService aiChatSessionTitleService;
 
     /**
-     * 세션 소유권 및 종료 여부를 검증하고 이전 이력만 조회한다(USER 메시지는 저장하지 않음).
+     * 세션 소유권 및 잠김 여부를 검증하고 이전 이력만 조회한다(USER 메시지는 저장하지 않음).
      * 입력 moderation 을 SSE 시작 전에 동기 실행하기 위해, 저장(record*) 과 분리했다.
      * 어노테이션 없음: 단순 조회 service 이며, 호출하는 Repository 가 이미 SimpleJpaRepository 의
      * readOnly 트랜잭션 안에서 실행되어 @Transactional(readOnly) 효과가 중복되고,
@@ -47,8 +47,8 @@ public class AiChatMessagePersistService {
     public MessageLoadResult loadHistory(Long sessionId, Long userId) {
         AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, userId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
-        if (session.isClosed()) {
-            throw new BadRequestException(AiChatErrorCode.SESSION_CLOSED);
+        if (session.isLocked()) {
+            throw new BadRequestException(AiChatErrorCode.SESSION_LOCKED);
         }
         List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);
         return new MessageLoadResult(previousHistory, session.getUserBookId());

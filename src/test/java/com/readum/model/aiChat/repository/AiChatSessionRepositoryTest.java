@@ -149,7 +149,7 @@ class AiChatSessionRepositoryTest {
     void status_SUMMARIZING_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "summarizing-session");
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "summarizing-session");
         summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
@@ -164,7 +164,7 @@ class AiChatSessionRepositoryTest {
     void status_CLOSED_with_completed_summary() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "completed-session");
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "completed-session");
         Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
         summary.complete("title", "body", "quote");
         summaryRepository.saveAndFlush(summary);
@@ -181,7 +181,7 @@ class AiChatSessionRepositoryTest {
     void status_FAILED_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "failed-session");
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "failed-session");
         Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId()));
         summary.fail();
         summaryRepository.saveAndFlush(summary);
@@ -198,7 +198,7 @@ class AiChatSessionRepositoryTest {
     void status_CLOSED_without_summary() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "closed-no-summary");
+        saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "closed-no-summary");
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -259,8 +259,8 @@ class AiChatSessionRepositoryTest {
 
     private AiChatSession saveSession(Long userBookId, AiChatSession.Status status, String title) {
         AiChatSession session = AiChatSession.create(userBookId);
-        if (status == AiChatSession.Status.CLOSED) {
-            session.close();
+        if (status == AiChatSession.Status.LOCKED) {
+            session.lock();
         }
         if (title != null) {
             session.updateTitle(title);

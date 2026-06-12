@@ -65,7 +65,7 @@ public class SummaryDraftService {
         User user = userRepository.findBySessionId(userSessionId)
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
 
-        // TX1: 검증 + 세션 종료 + Summary(IN_PROGRESS) 선점 — 커밋 후 즉시 반환
+        // TX1: 검증 + 세션 잠금 + Summary(IN_PROGRESS) 선점 — 커밋 후 즉시 반환
         PreparedContext ctx = transactionTemplate.execute(status -> {
             AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
@@ -78,7 +78,7 @@ public class SummaryDraftService {
             List<AiChatMessage> messages =
                     aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);
 
-            session.close();
+            session.lock();
 
             Summary summary = summaryRepository.save(
                     Summary.createInProgress(session.getUserBookId(), sessionId));

@@ -309,16 +309,16 @@ class AiChatControllerTest {
     }
 
     @Test
-    void 메시지_전송_종료된_세션이면_400() throws Exception {
+    void 메시지_전송_잠긴_세션이면_400() throws Exception {
         given(aiChatMessageSendService.execute(any()))
-                .willThrow(new BadRequestException(AiChatErrorCode.SESSION_CLOSED));
+                .willThrow(new BadRequestException(AiChatErrorCode.SESSION_LOCKED));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .cookie(USER_SESSION_COOKIE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.message").value("종료된 세션에는 메시지를 보낼 수 없습니다."));
+                .andExpect(jsonPath("$.error.message").value("감상문 생성 중에는 메시지를 보낼 수 없습니다."));
     }
 
     @Test

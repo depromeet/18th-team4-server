@@ -29,7 +29,7 @@ import java.time.LocalDateTime;
 public class AiChatSession {
 
     public enum Status {
-        ACTIVE, CLOSED
+        ACTIVE, LOCKED
     }
 
     private static final int TITLE_MAX_LENGTH = 100;
@@ -65,8 +65,19 @@ public class AiChatSession {
         return new AiChatSession(null, userBookId, Status.ACTIVE, 0, 0, null, now, now);
     }
 
-    public void close() {
-        this.status = Status.CLOSED;
+    /**
+     * 감상문 생성이 도는 동안 세션을 잠가 메시지 전송과 중복 생성 요청을 막는다.
+     */
+    public void lock() {
+        this.status = Status.LOCKED;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 감상문 생성이 끝나면(성공/실패 무관) 세션을 다시 활성화해 대화를 이어갈 수 있게 한다.
+     */
+    public void unlock() {
+        this.status = Status.ACTIVE;
         this.updatedAt = LocalDateTime.now();
     }
 
@@ -95,8 +106,8 @@ public class AiChatSession {
         this.updatedAt = LocalDateTime.now();
     }
 
-    public boolean isClosed() {
-        return this.status == Status.CLOSED;
+    public boolean isLocked() {
+        return this.status == Status.LOCKED;
     }
 
     private static String truncateTitle(String title) {
