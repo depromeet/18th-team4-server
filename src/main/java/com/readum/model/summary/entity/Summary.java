@@ -87,10 +87,9 @@ public class Summary {
         );
     }
 
-    public void complete(String title, String body, String quote) {
+    public void complete(String title, String body) {
         this.title = title;
         this.body = body;
-        this.quote = quote;
         this.status = Status.COMPLETED;
         this.updatedAt = LocalDateTime.now();
     }

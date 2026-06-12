@@ -452,15 +452,14 @@ class AiChatControllerTest {
 
     @Test
     void 감상문_조회_정상_요청시_200과_감상문을_반환한다() throws Exception {
-        SummaryResult result = new SummaryResult("나의 독서 감상", "깊은 울림을 주는 책이었다.", "선택의 기로에서");
+        SummaryResult result = new SummaryResult("나의 독서 감상", "깊은 울림을 주는 책이었다.");
         given(summarySearchService.findBySessionId(eq(1L), any())).willReturn(result);
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("나의 독서 감상"))
-                .andExpect(jsonPath("$.data.body").value("깊은 울림을 주는 책이었다."))
-                .andExpect(jsonPath("$.data.quote").value("선택의 기로에서"));
+                .andExpect(jsonPath("$.data.body").value("깊은 울림을 주는 책이었다."));
     }
 
     @Test

@@ -116,7 +116,7 @@ public class SummaryDraftService {
         // TX2: AI 성공 → content 채우고 COMPLETED
         transactionTemplate.executeWithoutResult(status ->
                 summaryRepository.findById(ctx.summaryId())
-                        .ifPresent(summary -> summary.complete(result.title(), result.body(), result.quote())));
+                        .ifPresent(summary -> summary.complete(result.title(), result.body())));
     }
 
     /**
@@ -196,7 +196,7 @@ public class SummaryDraftService {
 
         transactionTemplate.executeWithoutResult(status ->
                 summaryRepository.findById(ctx.summaryId())
-                        .ifPresent(summary -> summary.complete(result.title(), result.body(), result.quote())));
+                        .ifPresent(summary -> summary.complete(result.title(), result.body())));
     }
 
     public record PreparedContext(Long summaryId, List<AiChatMessage> messages) {}
