@@ -1,4 +1,4 @@
-package com.readum.domain.aiChat.dto;
+package com.readum.domain.summary.dto;
 
 import com.readum.model.summary.entity.Summary;
 
