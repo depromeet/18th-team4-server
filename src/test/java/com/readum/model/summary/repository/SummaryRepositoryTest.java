@@ -21,7 +21,7 @@ class SummaryRepositoryTest {
 
     private static long sessionIdSeq = 900_000L;
 
-    private static long nextSessionId() {
+    private static synchronized long nextSessionId() {
         return sessionIdSeq++;
     }
 
