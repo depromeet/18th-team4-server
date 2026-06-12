@@ -139,7 +139,7 @@ public class AiChatController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "SSE 스트림 시작 (이후 token/done/error 이벤트 흐름)"),
-            @ApiResponse(responseCode = "400", description = "본문 검증 실패 / 종료된 세션"),
+            @ApiResponse(responseCode = "400", description = "본문 검증 실패 / 감상문 생성 중인 세션(SESSION_LOCKED)"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
             @ApiResponse(
@@ -209,20 +209,23 @@ public class AiChatController {
     @Operation(
             summary = "감상문 조회",
             description = """
-                    세션에 저장된 감상문(제목·본문·인상 깊은 구절)을 조회한다.
+                    세션의 최신 감상문(제목·본문·인상 깊은 구절)을 조회한다.
 
-                    감상문 status 별 응답:
-                    - **COMPLETED**: 200 — 감상문 정상 반환
-                    - **IN_PROGRESS**: 409 — AI 생성 중. 잠시 후 재시도 필요
-                    - **FAILED**: 409 — AI 생성 실패
-                    - 감상문 초안 생성 API 미호출 상태: 404
+                    응답 분기:
+                    - 세션이 감상문 생성 중(잠김): 409 SUMMARY_IN_PROGRESS — 잠시 후 재시도 필요
+                    - 최신 감상문 COMPLETED: 200 — 감상문 정상 반환
+                    - 최신 감상문 FAILED: 409 SUMMARY_GENERATION_FAILED — AI 생성 실패
+                    - 감상문 생성 이력 없음: 404
+
+                    감상문 생성이 끝나면(성공/실패 무관) 세션은 자동으로 다시 활성화되어 대화를 이어갈 수 있다.
+                    같은 세션에서 감상문을 다시 생성하면 새 감상문이 최신으로 조회된다 (과거 감상문은 DB 에 이력으로 보존).
                     """
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "감상문 조회 성공"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
-            @ApiResponse(responseCode = "404", description = "세션 없음, 소유권 없음, 또는 감상문 생성 요청 전"),
-            @ApiResponse(responseCode = "409", description = "감상문 생성 중(IN_PROGRESS) 또는 생성 실패(FAILED)")
+            @ApiResponse(responseCode = "404", description = "세션 없음, 소유권 없음, 또는 감상문 생성 이력 없음"),
+            @ApiResponse(responseCode = "409", description = "감상문 생성 중 또는 최신 감상문이 생성 실패 상태")
     })
     @GetMapping("/sessions/{sessionId}/summary")
     public ResponseEntity<GlobalApiResponse<SummaryResponse>> getSummary(
@@ -235,7 +238,7 @@ public class AiChatController {
 
     @Operation(
             summary = "감상문 초안 생성 가능 여부 조회",
-            description = "AI 채팅 세션이 감상문 초안 생성 조건(미종료 + 누적 토큰 충족)을 만족하는지 검사한다. " +
+            description = "AI 채팅 세션이 감상문 초안 생성 조건(생성 진행 중이 아님 + 누적 토큰 충족)을 만족하는지 검사한다. " +
                     "부수 효과 없이 가능 여부와 사유만 반환한다. " +
                     "세션 미존재 또는 본인 소유가 아닌 세션은 404로 응답한다."
     )
@@ -257,8 +260,10 @@ public class AiChatController {
             summary = "감상문 초안 생성 요청",
             description = """
                     AI 채팅 세션의 대화 내용을 바탕으로 감상문 초안 생성을 요청한다.
-                    세션 검증 후 즉시 202를 반환하며, 실제 생성은 백그라운드에서 진행된다.
+                    세션 검증 후 세션을 잠그고(생성 중 메시지 전송 차단) 즉시 202를 반환하며, 실제 생성은 백그라운드에서 진행된다.
                     생성 결과는 GET /sessions/{sessionId}/summary 로 폴링하여 확인한다.
+                    생성이 끝나면(성공/실패 무관) 세션은 자동으로 다시 활성화되어 대화를 이어갈 수 있다.
+                    이미 감상문이 있는 세션도 다시 요청할 수 있다 — 새 감상문이 새 행으로 추가되고 최신 행이 현재 감상문이 된다.
                     누적 토큰이 임계값에 미치지 못하면 422 를 반환한다.
                     """
     )
@@ -266,7 +271,7 @@ public class AiChatController {
             @ApiResponse(responseCode = "202", description = "생성 요청 접수. 백그라운드에서 진행 중"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
-            @ApiResponse(responseCode = "409", description = "이미 감상문이 작성된 세션"),
+            @ApiResponse(responseCode = "409", description = "감상문 생성이 이미 진행 중인 세션"),
             @ApiResponse(responseCode = "422", description = "누적 토큰 부족으로 초안 생성 불가")
     })
     @PostMapping("/sessions/{sessionId}/summary-draft")
