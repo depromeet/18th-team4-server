@@ -16,6 +16,12 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
+/**
+ * 감상문 — 끝난 생성 시도의 불변 기록.
+ * 생성이 끝난 시점에 결과(COMPLETED/FAILED)와 함께 한 번만 만들어지고 이후 변경되지 않는다.
+ * 세션과 1:N — 재생성할 때마다 행이 추가되며 "현재 감상문" 은 최신 행이다 (과거 행은 이력/품질 감사용).
+ * "생성 중" 상태는 이 엔티티가 아니라 세션(AiChatSession.Status.LOCKED) 이 표현한다.
+ */
 @Getter
 @Entity
 @Table(
@@ -29,7 +35,7 @@ import java.time.LocalDateTime;
 public class Summary {
 
     public enum Status {
-        IN_PROGRESS, COMPLETED, FAILED
+        COMPLETED, FAILED
     }
 
     @Id
@@ -62,15 +68,6 @@ public class Summary {
     private LocalDateTime updatedAt;
 
     /**
-     * 감상문 생성 시작 시점에 IN_PROGRESS 상태로 레코드를 먼저 생성한다.
-     * content(title/body/quote)는 AI 응답 후 complete() 로 채운다.
-     */
-    public static Summary createInProgress(Long userBookId, Long aiChatSessionId) {
-        LocalDateTime now = LocalDateTime.now();
-        return new Summary(null, userBookId, aiChatSessionId, Status.IN_PROGRESS, null, null, null, now, now);
-    }
-
-    /**
      * 생성 성공으로 끝난 감상문 기록.
      * 감상문 행은 생성 시도가 끝난 시점에 결과와 함께 한 번만 만들어지며 이후 변경되지 않는다.
      * "생성 중" 상태는 이 엔티티가 아니라 세션(AiChatSession.Status.LOCKED) 이 표현한다.
@@ -91,20 +88,4 @@ public class Summary {
         return new Summary(null, userBookId, aiChatSessionId, Status.FAILED, null, null, null, now, now);
     }
 
-    public void complete(String title, String body, String quote) {
-        this.title = title;
-        this.body = body;
-        this.quote = quote;
-        this.status = Status.COMPLETED;
-        this.updatedAt = LocalDateTime.now();
-    }
-
-    public void fail() {
-        this.status = Status.FAILED;
-        this.updatedAt = LocalDateTime.now();
-    }
-
-    public boolean isCompleted() {
-        return this.status == Status.COMPLETED;
-    }
 }

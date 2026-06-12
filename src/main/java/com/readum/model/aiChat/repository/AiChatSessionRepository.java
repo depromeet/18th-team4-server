@@ -63,6 +63,7 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
      *  - session ACTIVE + 감상문 없음             → "ACTIVE"
      *  - session ACTIVE + 최신 감상문 FAILED      → "FAILED"
      *  - session ACTIVE + 최신 감상문 COMPLETED   → "SUMMARIZED"
+     * 세션 행마다 상관 서브쿼리 2종(메시지 max, 감상문 max)이 실행되지만 MVP 트래픽에서는 허용 범위로 판단.
      *
      * 감상문은 세션당 여러 건(재생성 이력) 존재할 수 있으므로 left join 의 on 절에서
      * max(id) 서브쿼리로 최신 한 건만 매칭한다.

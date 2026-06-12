@@ -42,8 +42,6 @@ public class SummarySearchService {
         return switch (summary.getStatus()) {
             case COMPLETED -> SummaryResult.from(summary);
             case FAILED -> throw new ConflictException(AiChatErrorCode.SUMMARY_GENERATION_FAILED);
-            // 과도기 분기: Status.IN_PROGRESS 는 다음 Task 에서 enum 과 함께 제거된다. 새 코드는 이 행을 만들지 않는다.
-            case IN_PROGRESS -> throw new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS);
         };
     }
 }
