@@ -150,6 +150,7 @@ class SummarySearchServiceTest {
 
         SummaryResult result = summarySearchService.findById(17L, USER_SESSION_ID);
 
+        assertThat(result.aiChatSessionId()).isEqualTo(1000L);
         assertThat(result.title()).isEqualTo("감상문 제목");
         assertThat(result.body()).isEqualTo("감상문 본문");
     }

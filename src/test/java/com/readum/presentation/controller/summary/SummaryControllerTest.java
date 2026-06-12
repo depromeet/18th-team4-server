@@ -105,13 +105,14 @@ class SummaryControllerTest {
     }
 
     @Test
-    void 상세_조회는_감상문_제목과_본문을_반환한다() throws Exception {
+    void 상세_조회는_채팅_세션_id와_감상문_제목과_본문을_반환한다() throws Exception {
         given(summarySearchService.findById(eq(17L), anyString()))
-                .willReturn(new SummaryResult("감상문 제목", "감상문 본문", null));
+                .willReturn(new SummaryResult(1000L, "감상문 제목", "감상문 본문", null));
 
         mockMvc.perform(get("/api/v1/summaries/17")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.summary.aiChatSessionId").value(1000))
                 .andExpect(jsonPath("$.data.summary.title").value("감상문 제목"))
                 .andExpect(jsonPath("$.data.summary.body").value("감상문 본문"));
     }
