@@ -27,6 +27,10 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * 모든 조회 메서드가 여러 Repository 를 한 트랜잭션으로 묶어 일관된 스냅샷으로 읽는다
+ * (Transaction Convention 의 {@code @Transactional(readOnly = true)} 예외 조항).
+ */
 @Service
 @RequiredArgsConstructor
 public class SummarySearchService {
@@ -37,9 +41,6 @@ public class SummarySearchService {
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
 
-    /**
-     * 여러 Repository 를 한 트랜잭션으로 묶어 일관된 상태로 읽는다 (Transaction Convention 예외 조항).
-     */
     @Transactional(readOnly = true)
     public List<MonthlySummaryResult> findMonthly(YearMonth yearMonth, String userSessionId) {
         User user = userRepository.findBySessionId(userSessionId)
@@ -72,6 +73,7 @@ public class SummarySearchService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public SummaryResult findById(Long summaryId, String userSessionId) {
         User user = userRepository.findBySessionId(userSessionId)
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
@@ -89,6 +91,7 @@ public class SummarySearchService {
         return SummaryResult.from(summary);
     }
 
+    @Transactional(readOnly = true)
     public SummaryResult findBySessionId(Long sessionId, String userSessionId) {
         User user = userRepository.findBySessionId(userSessionId)
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
