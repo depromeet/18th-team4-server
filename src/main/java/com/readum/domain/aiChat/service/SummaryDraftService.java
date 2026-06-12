@@ -104,6 +104,8 @@ public class SummaryDraftService {
         try {
             result = aiSummaryClient.generate(preparedContext.messages());
         } catch (Exception e) {
+            // 실패 원인을 먼저 기록한다 — 아래 TX2 가 DB 오류로 실패해도 LLM 실패 원인이 남도록.
+            log.error("감상문 생성 실패 sessionId={}", sessionId, e);
             // TX2 (실패 경로): FAILED 행 기록 + 세션 잠금 해제
             transactionTemplate.executeWithoutResult(status -> {
                 summaryRepository.save(Summary.createFailed(preparedContext.userBookId(), sessionId));
@@ -111,7 +113,6 @@ public class SummaryDraftService {
                         AiChatSession::unlock,
                         () -> log.warn("감상문 생성 종료 후 잠금 해제할 세션을 찾지 못함 sessionId={}", sessionId));
             });
-            log.error("감상문 생성 실패 sessionId={}", sessionId, e);
             return;
         }
 
