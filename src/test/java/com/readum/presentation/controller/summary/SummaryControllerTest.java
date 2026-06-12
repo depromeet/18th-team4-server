@@ -72,6 +72,7 @@ class SummaryControllerTest {
                         .param("yearMonth", "2026-06")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.summaries").isArray())
                 .andExpect(jsonPath("$.data.summaries").isEmpty());
     }
 
@@ -87,7 +88,8 @@ class SummaryControllerTest {
     void yearMonth_가_누락되면_400_을_반환한다() throws Exception {
         mockMvc.perform(get("/api/v1/summaries")
                         .cookie(USER_SESSION_COOKIE))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message").value("필수 요청 값이 없습니다: yearMonth"));
     }
 
     @Test

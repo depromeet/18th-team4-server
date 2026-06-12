@@ -62,18 +62,16 @@ public class SummaryController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공"),
+            @ApiResponse(responseCode = "400", description = "summaryId 타입 오류 (숫자가 아님)"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "감상문 없음, 소유권 없음, 또는 미완성")
     })
     @GetMapping("/{summaryId}")
-    public ResponseEntity<GlobalApiResponse<SummaryDetailWrapper>> getSummaryDetail(
+    public ResponseEntity<GlobalApiResponse<SummaryDetailResponse>> getSummaryDetail(
             @CookieValue(name = "user_session") String userSessionId,
             @PathVariable Long summaryId
     ) {
         SummaryResult result = summarySearchService.findById(summaryId, userSessionId);
-        return GlobalApiResponse.ok(new SummaryDetailWrapper(SummaryDetailResponse.from(result)));
+        return GlobalApiResponse.ok(SummaryDetailResponse.from(result));
     }
-
-    /** 응답 포맷 컨벤션(단수는 {@code 단수명사: {}})에 맞춰 detail 을 {@code summary} 키로 감싼다. */
-    public record SummaryDetailWrapper(SummaryDetailResponse summary) {}
 }
