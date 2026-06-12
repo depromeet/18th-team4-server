@@ -29,4 +29,28 @@ public final class SummaryFixture {
                 null, null, null, now, now
         );
     }
+
+    /**
+     * 저장되어 id 가 부여된, 생성 완료(COMPLETED) 감상문.
+     */
+    public static Summary persistedCompletedSummary(
+            Long id, Long userBookId, Long aiChatSessionId, String title, String body, String quote
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Summary(
+                id, userBookId, aiChatSessionId, Summary.Status.COMPLETED,
+                quote, title, body, now, now
+        );
+    }
+
+    /**
+     * 저장되어 id 가 부여된, 생성 실패(FAILED) 감상문.
+     */
+    public static Summary persistedFailedSummary(Long id, Long userBookId, Long aiChatSessionId) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Summary(
+                id, userBookId, aiChatSessionId, Summary.Status.FAILED,
+                null, null, null, now, now
+        );
+    }
 }

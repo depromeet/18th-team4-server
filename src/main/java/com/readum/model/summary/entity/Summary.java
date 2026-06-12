@@ -9,7 +9,6 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -23,9 +22,6 @@ import java.time.LocalDateTime;
         name = "summary",
         indexes = {
                 @Index(name = "idx_summary_user_book", columnList = "user_book_id")
-        },
-        uniqueConstraints = {
-                @UniqueConstraint(name = "uk_summary_ai_chat_session", columnNames = "ai_chat_session_id")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -72,6 +68,27 @@ public class Summary {
     public static Summary createInProgress(Long userBookId, Long aiChatSessionId) {
         LocalDateTime now = LocalDateTime.now();
         return new Summary(null, userBookId, aiChatSessionId, Status.IN_PROGRESS, null, null, null, now, now);
+    }
+
+    /**
+     * 생성 성공으로 끝난 감상문 기록.
+     * 감상문 행은 생성 시도가 끝난 시점에 결과와 함께 한 번만 만들어지며 이후 변경되지 않는다.
+     * "생성 중" 상태는 이 엔티티가 아니라 세션(AiChatSession.Status.LOCKED) 이 표현한다.
+     */
+    public static Summary createCompleted(
+            Long userBookId, Long aiChatSessionId, String title, String body, String quote
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Summary(null, userBookId, aiChatSessionId, Status.COMPLETED, quote, title, body, now, now);
+    }
+
+    /**
+     * 생성 실패로 끝난 시도의 기록.
+     * 세션은 실패 후 다시 활성화되므로, 폴링 응답("생성 실패")의 영속 근거이자 품질 감사용 흔적으로 남긴다.
+     */
+    public static Summary createFailed(Long userBookId, Long aiChatSessionId) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Summary(null, userBookId, aiChatSessionId, Status.FAILED, null, null, null, now, now);
     }
 
     public void complete(String title, String body, String quote) {
