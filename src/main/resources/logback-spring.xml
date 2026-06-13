@@ -2,9 +2,19 @@
 <configuration>
 
     <!--
+        파일 로그 패턴: 기본 패턴에 traceId/spanId(MDC) 를 더한다.
+        분산 추적(micrometer-tracing) 미설정 시 두 값은 빈 값('-')으로 표시되며, 추후 추적을 붙이면
+        Slack 알림 / AI 감사 로그와 같은 키로 한 요청을 추적할 수 있다.
+        include 보다 먼저 정의해야 Spring Boot 의 ${FILE_LOG_PATTERN:-기본값} 가 이 값을 채택한다.
+    -->
+    <property name="FILE_LOG_PATTERN"
+              value="[%d{yyyy-MM-dd HH:mm:ss}:%-3relative] %-5level ${PID:-} --- [%15.15thread] traceId=%X{traceId:-} spanId=%X{spanId:-} %-40.40logger{36} : %msg%n"/>
+
+    <!--
         Spring Boot 가 제공하는 기본 설정을 가져온다.
-        - clr(색상), wEx 등 변환 규칙과 CONSOLE_LOG_PATTERN/FILE_LOG_PATTERN 기본값을 정의한다.
+        - clr(색상), wEx 등 변환 규칙과 CONSOLE_LOG_PATTERN 기본값을 정의한다.
         - 변환기 클래스명을 직접 적지 않으므로 Spring Boot 버전 변경에도 안전하다.
+        - 위에서 미리 정의한 FILE_LOG_PATTERN 은 그대로 유지된다.
     -->
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
@@ -22,14 +32,6 @@
     <springProperty scope="context" name="SLACK_WEBHOOK_URL" source="SLACK_WEBHOOK_URL" defaultValue=""/>
     <springProperty scope="context" name="APP_ENV" source="APP_ENV" defaultValue="unknown"/>
     <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="readum"/>
-
-    <!--
-        파일 로그 패턴: 기본 패턴에 traceId/spanId(MDC) 를 더한다.
-        분산 추적(micrometer-tracing) 미설정 시 두 값은 빈 값('-')으로 표시되며, 추후 추적을 붙이면
-        Slack 알림 / AI 감사 로그와 같은 키로 한 요청을 추적할 수 있다.
-    -->
-    <property name="FILE_LOG_PATTERN"
-              value="[%d{yyyy-MM-dd HH:mm:ss}:%-3relative] %-5level ${PID:-} --- [%15.15thread] traceId=%X{traceId:-} spanId=%X{spanId:-} %-40.40logger{36} : %msg%n"/>
 
     <!-- 콘솔 출력 (모든 환경 공통, 색상 포함) -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
