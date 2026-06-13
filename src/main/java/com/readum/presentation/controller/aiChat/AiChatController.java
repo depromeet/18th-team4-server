@@ -11,6 +11,7 @@ import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.AiChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
+import com.readum.domain.aiChat.service.SummaryEditService;
 import com.readum.domain.aiChat.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
@@ -21,6 +22,7 @@ import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
 import com.readum.presentation.controller.aiChat.dto.SummaryDraftEligibilityResponse;
+import com.readum.presentation.controller.aiChat.dto.SummaryEditRequest;
 import com.readum.presentation.controller.aiChat.dto.SummaryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.headers.Header;
@@ -38,6 +40,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -54,6 +57,7 @@ public class AiChatController {
     private final AiChatMessageSendService aiChatMessageSendService;
     private final AiChatMessageSearchService aiChatMessageSearchService;
     private final SummaryDraftService summaryDraftService;
+    private final SummaryEditService summaryEditService;
     private final SummarySearchService summarySearchService;
     private final SummaryDraftSearchService summaryDraftSearchService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
@@ -229,6 +233,27 @@ public class AiChatController {
             @PathVariable Long sessionId
     ) {
         SummaryResult result = summarySearchService.findBySessionId(sessionId, userSessionId);
+        return GlobalApiResponse.ok(SummaryResponse.from(result));
+    }
+
+    @Operation(
+            summary = "감상문 수정",
+            description = "완성된 감상문의 제목과 본문을 수정한다. " +
+                    "감상문이 COMPLETED 상태가 아니면 400으로 응답한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "감상문 수정 성공"),
+            @ApiResponse(responseCode = "400", description = "요청 값 검증 실패 또는 완성되지 않은 감상문"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "세션 없음, 소유권 없음, 또는 감상문 없음")
+    })
+    @PutMapping("/sessions/{sessionId}/summary")
+    public ResponseEntity<GlobalApiResponse<SummaryResponse>> editSummary(
+            @CookieValue(name = "user_session") String userSessionId,
+            @PathVariable Long sessionId,
+            @Valid @RequestBody SummaryEditRequest request
+    ) {
+        SummaryResult result = summaryEditService.execute(request.toCommand(userSessionId, sessionId));
         return GlobalApiResponse.ok(SummaryResponse.from(result));
     }
 

@@ -17,6 +17,7 @@ import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.AiChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
+import com.readum.domain.aiChat.service.SummaryEditService;
 import com.readum.domain.aiChat.service.SummarySearchService;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.ConflictException;
@@ -79,6 +80,9 @@ class AiChatControllerTest {
     private SummaryDraftService summaryDraftService;
 
     @Mock
+    private SummaryEditService summaryEditService;
+
+    @Mock
     private SummarySearchService summarySearchService;
 
     @Mock
@@ -97,6 +101,7 @@ class AiChatControllerTest {
                 aiChatMessageSendService,
                 aiChatMessageSearchService,
                 summaryDraftService,
+                summaryEditService,
                 summarySearchService,
                 summaryDraftSearchService,
                 new MessageStreamSseSerializer(objectMapper)
@@ -452,15 +457,14 @@ class AiChatControllerTest {
 
     @Test
     void 감상문_조회_정상_요청시_200과_감상문을_반환한다() throws Exception {
-        SummaryResult result = new SummaryResult("나의 독서 감상", "깊은 울림을 주는 책이었다.", "선택의 기로에서");
+        SummaryResult result = new SummaryResult("나의 독서 감상", "깊은 울림을 주는 책이었다.");
         given(summarySearchService.findBySessionId(eq(1L), any())).willReturn(result);
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("나의 독서 감상"))
-                .andExpect(jsonPath("$.data.body").value("깊은 울림을 주는 책이었다."))
-                .andExpect(jsonPath("$.data.quote").value("선택의 기로에서"));
+                .andExpect(jsonPath("$.data.body").value("깊은 울림을 주는 책이었다."));
     }
 
     @Test
@@ -501,7 +505,7 @@ class AiChatControllerTest {
     @Test
     void eligibility_정상_요청시_200과_eligible_true를_반환한다() throws Exception {
         given(summaryDraftSearchService.findEligibility(eq(1L), any()))
-                .willReturn(new SummaryDraftEligibilityResult(true, null, null));
+                .willReturn(new SummaryDraftEligibilityResult(true, null, null, 100));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility")
                         .cookie(USER_SESSION_COOKIE))
@@ -515,7 +519,8 @@ class AiChatControllerTest {
                 .willReturn(new SummaryDraftEligibilityResult(
                         false,
                         IneligibleReason.SESSION_ALREADY_CLOSED.name(),
-                        AiChatErrorCode.SESSION_ALREADY_CLOSED.getMessage()
+                        AiChatErrorCode.SESSION_ALREADY_CLOSED.getMessage(),
+                        100
                 ));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility")
@@ -532,7 +537,8 @@ class AiChatControllerTest {
                 .willReturn(new SummaryDraftEligibilityResult(
                         false,
                         IneligibleReason.CHAT_VOLUME_NOT_ENOUGH.name(),
-                        AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH.getMessage()
+                        AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH.getMessage(),
+                        20
                 ));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary-draft/eligibility")

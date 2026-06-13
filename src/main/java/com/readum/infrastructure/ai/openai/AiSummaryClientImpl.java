@@ -7,6 +7,8 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.ResponseFormat;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
@@ -15,6 +17,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -42,6 +45,23 @@ public class AiSummaryClientImpl implements AiSummaryClient {
         }
     }
 
+    private static final ResponseFormat SUMMARY_RESPONSE_FORMAT = ResponseFormat.builder()
+            .type(ResponseFormat.Type.JSON_SCHEMA)
+            .jsonSchema(ResponseFormat.JsonSchema.builder()
+                    .name("summary_draft")
+                    .strict(true)
+                    .schema(Map.of(
+                            "type", "object",
+                            "properties", Map.of(
+                                    "title", Map.of("type", "string"),
+                                    "body", Map.of("type", "string")
+                            ),
+                            "required", List.of("title", "body"),
+                            "additionalProperties", false
+                    ))
+                    .build())
+            .build();
+
     @Override
     public SummaryDraftResult generate(List<AiChatMessage> messages) {
         String chatHistory = formatChatHistory(messages);
@@ -49,7 +69,10 @@ public class AiSummaryClientImpl implements AiSummaryClient {
 
         return chatClient.prompt()
                 .system(summaryPromptTemplate)
-                .user("[대화 이력]\n" + chatHistory + "\n\n위 대화 이력을 바탕으로 감상문 초안을 JSON 형식으로 작성해 주세요.")
+                .user("[대화 이력]\n" + chatHistory + "\n\n위 대화 이력을 바탕으로 감상문 초안을 작성해 주세요.")
+                .options(OpenAiChatOptions.builder()
+                        .responseFormat(SUMMARY_RESPONSE_FORMAT)
+                        .build())
                 .call()
                 .entity(SummaryDraftResult.class);
     }

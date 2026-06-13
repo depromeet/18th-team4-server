@@ -23,14 +23,18 @@ class CreateUserSessionServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private NicknameGenerator nicknameGenerator;
+
     @InjectMocks
     private CreateUserSessionService createUserSessionService;
 
     @Test
     void 신규_사용자를_저장하고_세션_식별자를_반환한다() {
+        given(nicknameGenerator.generate()).willReturn("책읽는여우");
         given(userRepository.save(org.mockito.ArgumentMatchers.any(User.class))).willAnswer(invocation -> {
             User input = invocation.getArgument(0);
-            return UserFixture.persistedUser(1L, input.getSessionId());
+            return UserFixture.persistedUser(1L, input.getSessionId(), input.getNickname());
         });
 
         CreateUserSessionResult result = createUserSessionService.execute();
@@ -40,6 +44,7 @@ class CreateUserSessionServiceTest {
 
         User savedArg = captor.getValue();
         assertThat(savedArg.getSessionId()).isEqualTo(result.sessionId().toString());
+        assertThat(savedArg.getNickname()).isEqualTo("책읽는여우");
         assertThat(savedArg.isOnboardingCompleted()).isFalse();
         assertThat(result.userId()).isEqualTo(1L);
         assertThat(result.sessionId()).isInstanceOf(UUID.class);

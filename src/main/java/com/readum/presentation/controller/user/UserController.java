@@ -2,6 +2,7 @@ package com.readum.presentation.controller.user;
 
 import com.readum.domain.user.dto.CompleteOnboardingResult;
 import com.readum.domain.user.dto.CreateUserSessionResult;
+import com.readum.domain.user.dto.UserProfileResult;
 import com.readum.domain.user.dto.UserSessionInfoResult;
 import com.readum.domain.user.service.CompleteOnboardingService;
 import com.readum.domain.user.service.CreateUserSessionService;
@@ -9,6 +10,7 @@ import com.readum.domain.user.service.UserSearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.user.dto.CompleteOnboardingResponse;
 import com.readum.presentation.controller.user.dto.CreateUserSessionResponse;
+import com.readum.presentation.controller.user.dto.UserProfileResponse;
 import com.readum.presentation.controller.user.dto.UserSessionInfoResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -75,6 +77,21 @@ public class UserController {
             @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
         UserSessionInfoResult result = userSearchService.findSessionInfo(sessionId);
         return GlobalApiResponse.ok(UserSessionInfoResponse.from(result));
+    }
+
+    @Operation(
+            summary = "내 프로필 조회",
+            description = "user_session 쿠키로 현재 사용자의 프로필을 조회한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "조회 성공"),
+            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+    })
+    @GetMapping("/me/profile")
+    public ResponseEntity<GlobalApiResponse<UserProfileResponse>> getProfile(
+            @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
+        UserProfileResult result = userSearchService.findProfile(sessionId);
+        return GlobalApiResponse.ok(UserProfileResponse.from(result));
     }
 
     @Operation(
