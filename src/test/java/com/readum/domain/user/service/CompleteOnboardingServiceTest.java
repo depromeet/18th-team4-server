@@ -32,7 +32,7 @@ class CompleteOnboardingServiceTest {
     @Test
     void 미완료_사용자에_대해_온보딩을_완료_상태로_변경한다() {
         UUID sessionId = UUID.randomUUID();
-        User user = User.create(sessionId);
+        User user = User.create(sessionId, "책읽는여우");
 
         given(userRepository.findBySessionId(sessionId.toString())).willReturn(Optional.of(user));
 
@@ -45,7 +45,7 @@ class CompleteOnboardingServiceTest {
     @Test
     void 이미_완료된_사용자에_대해_멱등하게_true_를_반환한다() {
         UUID sessionId = UUID.randomUUID();
-        User user = User.create(sessionId);
+        User user = User.create(sessionId, "책읽는여우");
         user.completeOnboarding();
         LocalDateTime previousUpdatedAt = user.getUpdatedAt();
 

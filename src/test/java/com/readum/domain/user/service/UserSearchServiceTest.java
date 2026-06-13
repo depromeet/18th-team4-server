@@ -1,6 +1,7 @@
 package com.readum.domain.user.service;
 
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.dto.UserProfileResult;
 import com.readum.domain.user.dto.UserSessionInfoResult;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.user.repository.UserBookRepository;
@@ -69,6 +70,41 @@ class UserSearchServiceTest {
         given(userRepository.findBySessionId(unknown)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> userSearchService.findSessionInfo(unknown))
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
+                .isEqualTo(UserErrorCode.INVALID_SESSION);
+    }
+
+    @Test
+    void 유효한_세션이면_프로필_닉네임을_반환한다() {
+        UUID sessionId = UUID.randomUUID();
+        User user = UserFixture.persistedUser(20L, sessionId.toString(), "문장수집가");
+
+        given(userRepository.findBySessionId(sessionId.toString())).willReturn(Optional.of(user));
+
+        UserProfileResult result = userSearchService.findProfile(sessionId.toString());
+
+        assertThat(result.nickname()).isEqualTo("문장수집가");
+    }
+
+    @Test
+    void 닉네임이_없는_기존_사용자의_프로필은_닉네임이_null_이다() {
+        UUID sessionId = UUID.randomUUID();
+        User user = UserFixture.persistedUser(21L, sessionId.toString(), (String) null);
+
+        given(userRepository.findBySessionId(sessionId.toString())).willReturn(Optional.of(user));
+
+        UserProfileResult result = userSearchService.findProfile(sessionId.toString());
+
+        assertThat(result.nickname()).isNull();
+    }
+
+    @Test
+    void 존재하지_않는_세션으로_프로필을_조회하면_INVALID_SESSION_예외가_발생한다() {
+        String unknown = UUID.randomUUID().toString();
+        given(userRepository.findBySessionId(unknown)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userSearchService.findProfile(unknown))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
                 .extracting(UnauthorizedException::getErrorCode)
                 .isEqualTo(UserErrorCode.INVALID_SESSION);
