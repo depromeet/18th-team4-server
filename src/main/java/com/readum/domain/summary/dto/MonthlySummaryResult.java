@@ -13,7 +13,9 @@ public record MonthlySummaryResult(
 ) {
 
     public static MonthlySummaryResult from(Summary summary, String bookTitle) {
+        // 별도 summaryDate 컬럼을 두지 않으므로 "감상문 작성일" 은 생성일(createdAt) 의 날짜로 본다.
         return new MonthlySummaryResult(
-                summary.getId(), summary.getSummaryDate(), summary.getTitle(), summary.getBody(), bookTitle);
+                summary.getId(), summary.getCreatedAt().toLocalDate(),
+                summary.getTitle(), summary.getBody(), bookTitle);
     }
 }

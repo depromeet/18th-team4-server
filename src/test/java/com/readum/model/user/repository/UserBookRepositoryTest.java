@@ -188,7 +188,7 @@ class UserBookRepositoryTest {
 
         persistActiveSession(userBook.getId());
         persistActiveSession(userBook.getId());
-        persistClosedSession(userBook.getId());
+        persistLockedSession(userBook.getId());
 
         List<UserBookListItemProjection> projections =
                 userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
@@ -272,9 +272,9 @@ class UserBookRepositoryTest {
         aiChatSessionRepository.save(AiChatSession.create(userBookId));
     }
 
-    private void persistClosedSession(Long userBookId) {
+    private void persistLockedSession(Long userBookId) {
         AiChatSession session = AiChatSession.create(userBookId);
-        session.close();
+        session.lock();
         aiChatSessionRepository.save(session);
     }
 

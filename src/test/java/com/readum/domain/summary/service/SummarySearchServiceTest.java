@@ -9,10 +9,10 @@ import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.entity.BookFixture;
-import com.readum.model.book.repository.BookRepository;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.entity.SummaryFixture;
 import com.readum.model.summary.repository.SummaryRepository;
+import com.readum.model.book.repository.BookRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.entity.UserBookFixture;
@@ -66,13 +66,16 @@ class SummarySearchServiceTest {
         return UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
     }
 
+    private Summary completedOn(Long id, Long userBookId, Long sessionId, String title, String body, LocalDate date) {
+        return SummaryFixture.persistedSummaryCreatedAt(id, userBookId, sessionId, title, body, date.atTime(12, 0));
+    }
+
     @Test
-    void 월별_조회는_완성된_감상문을_책_제목과_함께_반환한다() {
+    void 월별_조회는_감상문을_생성일_날짜와_책_제목과_함께_반환한다() {
         UserBook userBook = UserBookFixture.persistedUserBook(10L, USER_ID, 100L);
         Book book = BookFixture.persistedBook(
                 100L, "ext-1", "테스트 책", "저자", "출판사", 2024, "http://example.com/c.jpg");
-        Summary summary = SummaryFixture.persistedCompletedSummary(
-                17L, 10L, 1000L, LocalDate.of(2026, 6, 11), "감상문 제목", "감상문 본문");
+        Summary summary = completedOn(17L, 10L, 1000L, "감상문 제목", "감상문 본문", LocalDate.of(2026, 6, 11));
 
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
@@ -119,10 +122,8 @@ class SummarySearchServiceTest {
                 100L, "ext-1", "첫 번째 책", "저자", "출판사", 2024, "http://example.com/a.jpg");
         Book secondBook = BookFixture.persistedBook(
                 200L, "ext-2", "두 번째 책", "저자", "출판사", 2025, "http://example.com/b.jpg");
-        Summary firstSummary = SummaryFixture.persistedCompletedSummary(
-                17L, 10L, 1000L, LocalDate.of(2026, 6, 11), "첫 감상문", "본문1");
-        Summary secondSummary = SummaryFixture.persistedCompletedSummary(
-                18L, 20L, 2000L, LocalDate.of(2026, 6, 12), "둘째 감상문", "본문2");
+        Summary firstSummary = completedOn(17L, 10L, 1000L, "첫 감상문", "본문1", LocalDate.of(2026, 6, 11));
+        Summary secondSummary = completedOn(18L, 20L, 2000L, "둘째 감상문", "본문2", LocalDate.of(2026, 6, 12));
 
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(firstUserBook, secondUserBook));
@@ -140,22 +141,6 @@ class SummarySearchServiceTest {
     }
 
     @Test
-    void 상세_조회는_본인_소유의_완성된_감상문을_반환한다() {
-        Summary summary = SummaryFixture.persistedCompletedSummary(
-                17L, 10L, 1000L, LocalDate.of(2026, 6, 11), "감상문 제목", "감상문 본문");
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
-        given(summaryRepository.findById(17L)).willReturn(Optional.of(summary));
-        given(userBookRepository.findByIdAndUserId(10L, USER_ID))
-                .willReturn(Optional.of(UserBookFixture.persistedUserBook(10L, USER_ID, 100L)));
-
-        SummaryResult result = summarySearchService.findById(17L, USER_SESSION_ID);
-
-        assertThat(result.aiChatSessionId()).isEqualTo(1000L);
-        assertThat(result.title()).isEqualTo("감상문 제목");
-        assertThat(result.body()).isEqualTo("감상문 본문");
-    }
-
-    @Test
     void 해당_월에_감상문이_없으면_책_조회_없이_빈_리스트를_반환한다() {
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID))
@@ -168,6 +153,21 @@ class SummarySearchServiceTest {
 
         assertThat(results).isEmpty();
         verifyNoInteractions(bookRepository);
+    }
+
+    @Test
+    void 상세_조회는_본인_소유의_감상문을_반환한다() {
+        Summary summary = SummaryFixture.persistedSummary(17L, 10L, 1000L, "감상문 제목", "감상문 본문");
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(summaryRepository.findById(17L)).willReturn(Optional.of(summary));
+        given(userBookRepository.findByIdAndUserId(10L, USER_ID))
+                .willReturn(Optional.of(UserBookFixture.persistedUserBook(10L, USER_ID, 100L)));
+
+        SummaryResult result = summarySearchService.findById(17L, USER_SESSION_ID);
+
+        assertThat(result.aiChatSessionId()).isEqualTo(1000L);
+        assertThat(result.title()).isEqualTo("감상문 제목");
+        assertThat(result.body()).isEqualTo("감상문 본문");
     }
 
     @Test
@@ -190,20 +190,8 @@ class SummarySearchServiceTest {
     }
 
     @Test
-    void 미완성_감상문을_상세_조회하면_NotFoundException_을_던진다() {
-        Summary inProgress = SummaryFixture.persistedInProgressSummary(17L, 10L, 1000L);
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
-        given(summaryRepository.findById(17L)).willReturn(Optional.of(inProgress));
-
-        assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
-                .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND));
-    }
-
-    @Test
     void 남의_감상문을_상세_조회하면_NotFoundException_을_던진다() {
-        Summary summary = SummaryFixture.persistedCompletedSummary(
-                17L, 10L, 1000L, LocalDate.of(2026, 6, 11), "감상문 제목", "감상문 본문");
+        Summary summary = SummaryFixture.persistedSummary(17L, 10L, 1000L, "감상문 제목", "감상문 본문");
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(summaryRepository.findById(17L)).willReturn(Optional.of(summary));
         given(userBookRepository.findByIdAndUserId(10L, USER_ID)).willReturn(Optional.empty());

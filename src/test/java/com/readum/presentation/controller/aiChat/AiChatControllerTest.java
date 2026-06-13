@@ -3,27 +3,28 @@ package com.readum.presentation.controller.aiChat;
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionDisplayStatus;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
+import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.dto.AiChatSessionResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.MessageResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
+import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.AiChatSessionSearchService;
+import com.readum.domain.aiChat.service.BookChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.SummaryEditService;
+import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnprocessableEntityException;
-import com.readum.domain.summary.dto.SummaryResult;
-import com.readum.domain.summary.exception.SummaryErrorCode;
-import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.presentation.common.GlobalExceptionHandler;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
@@ -89,6 +90,9 @@ class AiChatControllerTest {
     @Mock
     private SummaryDraftSearchService summaryDraftSearchService;
 
+    @Mock
+    private BookChatSessionSearchService bookChatSessionSearchService;
+
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = JsonMapper.builder()
             .findAndAddModules()
@@ -105,6 +109,7 @@ class AiChatControllerTest {
                 summaryEditService,
                 summarySearchService,
                 summaryDraftSearchService,
+                bookChatSessionSearchService,
                 new MessageStreamSseSerializer(objectMapper)
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
@@ -170,8 +175,7 @@ class AiChatControllerTest {
                         List.of(
                                 new AiChatSessionResult(4L, "최근", AiChatSessionDisplayStatus.SUMMARIZING, today),
                                 new AiChatSessionResult(3L, "활성", AiChatSessionDisplayStatus.ACTIVE, today),
-                                new AiChatSessionResult(2L, "종료", AiChatSessionDisplayStatus.CLOSED, yesterday),
-                                new AiChatSessionResult(1L, "실패", AiChatSessionDisplayStatus.FAILED, yesterday)
+                                new AiChatSessionResult(2L, "감상문 완료", AiChatSessionDisplayStatus.SUMMARIZED, yesterday)
                         ),
                         1,
                         20,
@@ -184,16 +188,15 @@ class AiChatControllerTest {
                         .param("page", "1")
                         .param("size", "20"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.sessions.length()").value(4))
+                .andExpect(jsonPath("$.data.sessions.length()").value(3))
                 .andExpect(jsonPath("$.data.sessions[0].sessionId").value(4))
                 .andExpect(jsonPath("$.data.sessions[0].title").value("최근"))
                 .andExpect(jsonPath("$.data.sessions[0].status").value("SUMMARIZING"))
                 // lastChattedDate 는 LocalDate 직렬화로 yyyy-MM-dd 만 노출 (timestamp/시간 정보 X)
                 .andExpect(jsonPath("$.data.sessions[0].lastChattedDate").value("2026-05-07"))
-                .andExpect(jsonPath("$.data.sessions[3].lastChattedDate").value("2026-05-06"))
+                .andExpect(jsonPath("$.data.sessions[2].lastChattedDate").value("2026-05-06"))
                 .andExpect(jsonPath("$.data.sessions[1].status").value("ACTIVE"))
-                .andExpect(jsonPath("$.data.sessions[2].status").value("CLOSED"))
-                .andExpect(jsonPath("$.data.sessions[3].status").value("FAILED"))
+                .andExpect(jsonPath("$.data.sessions[2].status").value("SUMMARIZED"))
                 .andExpect(jsonPath("$.data.page").value(1))
                 .andExpect(jsonPath("$.data.size").value(20))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
@@ -222,6 +225,45 @@ class AiChatControllerTest {
                         .param("size", "20"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message", containsString("userBookId는 필수")));
+    }
+
+    // ── 책별 대화 세션 목록 조회 ──────────────────────────────────────────────
+
+    @Test
+    void 책별_세션_목록_조회_정상_응답() throws Exception {
+        given(bookChatSessionSearchService.findByUserBook(eq(100L), any()))
+                .willReturn(new BookChatSessionsResult(
+                        new BookChatSessionsResult.BookInfo("데미안", 2020, "민음사", "http://img/x.jpg"),
+                        List.of(
+                                new BookChatSessionsResult.SessionItem(2L, "최신 본문", LocalDate.of(2026, 5, 7)),
+                                new BookChatSessionsResult.SessionItem(1L, null, LocalDate.of(2026, 5, 5))
+                        )
+                ));
+
+        mockMvc.perform(get("/api/v1/ai-chat/books/100/sessions")
+                        .cookie(USER_SESSION_COOKIE))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.book.title").value("데미안"))
+                .andExpect(jsonPath("$.data.book.publishedYear").value(2020))
+                .andExpect(jsonPath("$.data.book.publisher").value("민음사"))
+                .andExpect(jsonPath("$.data.book.coverImageUrl").value("http://img/x.jpg"))
+                .andExpect(jsonPath("$.data.sessions.length()").value(2))
+                .andExpect(jsonPath("$.data.sessions[0].sessionId").value(2))
+                .andExpect(jsonPath("$.data.sessions[0].latestSummaryContent").value("최신 본문"))
+                .andExpect(jsonPath("$.data.sessions[0].lastChattedDate").value("2026-05-07"))
+                .andExpect(jsonPath("$.data.sessions[1].sessionId").value(1))
+                .andExpect(jsonPath("$.data.sessions[1].lastChattedDate").value("2026-05-05"));
+    }
+
+    @Test
+    void 책별_세션_목록_조회_본인_책이_아니면_404() throws Exception {
+        given(bookChatSessionSearchService.findByUserBook(eq(100L), any()))
+                .willThrow(new NotFoundException(AiChatErrorCode.USER_BOOK_NOT_FOUND));
+
+        mockMvc.perform(get("/api/v1/ai-chat/books/100/sessions")
+                        .cookie(USER_SESSION_COOKIE))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.message").value("등록된 도서가 아닙니다."));
     }
 
     @Test
@@ -315,16 +357,16 @@ class AiChatControllerTest {
     }
 
     @Test
-    void 메시지_전송_종료된_세션이면_400() throws Exception {
+    void 메시지_전송_잠긴_세션이면_400() throws Exception {
         given(aiChatMessageSendService.execute(any()))
-                .willThrow(new BadRequestException(AiChatErrorCode.SESSION_CLOSED));
+                .willThrow(new BadRequestException(AiChatErrorCode.SESSION_LOCKED));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .cookie(USER_SESSION_COOKIE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.message").value("종료된 세션에는 메시지를 보낼 수 없습니다."));
+                .andExpect(jsonPath("$.error.message").value("감상문 생성 중에는 메시지를 보낼 수 없습니다."));
     }
 
     @Test
@@ -471,7 +513,7 @@ class AiChatControllerTest {
     @Test
     void 감상문_조회_생성_요청_전이면_404() throws Exception {
         given(summarySearchService.findBySessionId(eq(1L), any()))
-                .willThrow(new NotFoundException(SummaryErrorCode.SUMMARY_NOT_YET_CREATED));
+                .willThrow(new NotFoundException(AiChatErrorCode.SUMMARY_NOT_FOUND));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
                         .cookie(USER_SESSION_COOKIE))
@@ -482,23 +524,12 @@ class AiChatControllerTest {
     @Test
     void 감상문_조회_생성_중이면_409와_SUMMARY_IN_PROGRESS_메시지() throws Exception {
         given(summarySearchService.findBySessionId(eq(1L), any()))
-                .willThrow(new ConflictException(SummaryErrorCode.SUMMARY_IN_PROGRESS));
+                .willThrow(new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.message").value("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."));
-    }
-
-    @Test
-    void 감상문_조회_생성_실패면_409와_SUMMARY_GENERATION_FAILED_메시지() throws Exception {
-        given(summarySearchService.findBySessionId(eq(1L), any()))
-                .willThrow(new ConflictException(SummaryErrorCode.SUMMARY_GENERATION_FAILED));
-
-        mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
-                        .cookie(USER_SESSION_COOKIE))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error.message").value("감상문 생성에 실패했습니다."));
     }
 
     // ── 감상문 초안 생성 가능 여부 조회 ──────────────────────────────────────────────
@@ -515,12 +546,12 @@ class AiChatControllerTest {
     }
 
     @Test
-    void eligibility_종료된_세션이면_200과_SESSION_ALREADY_CLOSED를_반환한다() throws Exception {
+    void eligibility_잠긴_세션이면_200과_SUMMARY_IN_PROGRESS를_반환한다() throws Exception {
         given(summaryDraftSearchService.findEligibility(eq(1L), any()))
                 .willReturn(new SummaryDraftEligibilityResult(
                         false,
-                        IneligibleReason.SESSION_ALREADY_CLOSED.name(),
-                        AiChatErrorCode.SESSION_ALREADY_CLOSED.getMessage(),
+                        IneligibleReason.SUMMARY_IN_PROGRESS.name(),
+                        AiChatErrorCode.SUMMARY_IN_PROGRESS.getMessage(),
                         100
                 ));
 
@@ -528,8 +559,8 @@ class AiChatControllerTest {
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.eligible").value(false))
-                .andExpect(jsonPath("$.data.reason").value("SESSION_ALREADY_CLOSED"))
-                .andExpect(jsonPath("$.data.message").value("이미 감상문이 작성된 세션입니다."));
+                .andExpect(jsonPath("$.data.reason").value("SUMMARY_IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.message").value("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."));
     }
 
     @Test
@@ -582,14 +613,14 @@ class AiChatControllerTest {
     }
 
     @Test
-    void 감상문_초안_이미_닫힌_세션이면_409를_반환한다() throws Exception {
-        org.mockito.Mockito.doThrow(new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED))
+    void 감상문_초안_잠긴_세션이면_409를_반환한다() throws Exception {
+        org.mockito.Mockito.doThrow(new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS))
                 .when(summaryDraftService).execute(eq(1L), any());
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error.message").value("이미 감상문이 작성된 세션입니다."));
+                .andExpect(jsonPath("$.error.message").value("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."));
     }
 
     @Test

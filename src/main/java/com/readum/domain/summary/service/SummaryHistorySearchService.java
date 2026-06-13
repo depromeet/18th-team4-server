@@ -15,7 +15,7 @@ import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 
 /**
- * 사용자 본인의 감상 기록(종료된 세션 + 완성된 감상문) 목록을 최신순으로 Slice 조회한다.
+ * 사용자 본인의 감상 기록 목록을 최신순으로 Slice 조회한다. 세션(=책)당 가장 최근 감상문 1건만 노출한다.
  * 페이지 크기는 20개로 고정한다.
  *
  * 형제 조회 서비스(AiChatSessionSearchService 등)와 동일하게 @Transactional(readOnly) 를 붙이지 않는다.
@@ -35,7 +35,7 @@ public class SummaryHistorySearchService {
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
 
         int pageIndex = Math.max(0, command.page() - 1);
-        Slice<SummaryHistoryProjection> slice = summaryRepository.findCompletedHistoryByUserId(
+        Slice<SummaryHistoryProjection> slice = summaryRepository.findLatestHistoryByUserId(
                 user.getId(), PageRequest.of(pageIndex, PAGE_SIZE));
 
         return new SummaryHistoryListResult(

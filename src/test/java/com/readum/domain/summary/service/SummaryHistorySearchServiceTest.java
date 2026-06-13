@@ -65,7 +65,7 @@ class SummaryHistorySearchServiceTest {
 
     @Test
     void 감상_기록이_없으면_빈_배열과_hasNext_false_를_반환한다() {
-        given(summaryRepository.findCompletedHistoryByUserId(USER_ID, PageRequest.of(0, PAGE_SIZE)))
+        given(summaryRepository.findLatestHistoryByUserId(USER_ID, PageRequest.of(0, PAGE_SIZE)))
                 .willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, PAGE_SIZE), false));
 
         SummaryHistoryListResult result = summaryHistorySearchService.findMyHistory(
@@ -81,7 +81,7 @@ class SummaryHistorySearchServiceTest {
     @Test
     void projection_이_응답용_Result_로_변환된다() {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 7, 9, 0, 0);
-        given(summaryRepository.findCompletedHistoryByUserId(USER_ID, PageRequest.of(0, PAGE_SIZE)))
+        given(summaryRepository.findLatestHistoryByUserId(USER_ID, PageRequest.of(0, PAGE_SIZE)))
                 .willReturn(new SliceImpl<>(List.of(
                         new SummaryHistoryProjection("데미안", "내 안에서 솟아 나오려는 것", createdAt)
                 ), PageRequest.of(0, PAGE_SIZE), false));
@@ -99,7 +99,7 @@ class SummaryHistorySearchServiceTest {
 
     @Test
     void page_파라미터는_1_indexed_에서_0_indexed_로_변환되고_size_는_20_고정이다() {
-        given(summaryRepository.findCompletedHistoryByUserId(USER_ID, PageRequest.of(2, PAGE_SIZE)))
+        given(summaryRepository.findLatestHistoryByUserId(USER_ID, PageRequest.of(2, PAGE_SIZE)))
                 .willReturn(new SliceImpl<>(List.of(), PageRequest.of(2, PAGE_SIZE), false));
 
         SummaryHistoryListResult result = summaryHistorySearchService.findMyHistory(
@@ -112,7 +112,7 @@ class SummaryHistorySearchServiceTest {
 
     @Test
     void 다음_페이지가_있으면_hasNext_true_를_반환한다() {
-        given(summaryRepository.findCompletedHistoryByUserId(USER_ID, PageRequest.of(0, PAGE_SIZE)))
+        given(summaryRepository.findLatestHistoryByUserId(USER_ID, PageRequest.of(0, PAGE_SIZE)))
                 .willReturn(new SliceImpl<>(List.of(
                         new SummaryHistoryProjection("책", "본문", LocalDateTime.now())
                 ), PageRequest.of(0, PAGE_SIZE), true));

@@ -102,7 +102,7 @@ class AiChatSessionSearchServiceTest {
     }
 
     @Test
-    void ACTIVE_SUMMARIZING_CLOSED_FAILED_상태가_그대로_변환된다() {
+    void ACTIVE_SUMMARIZING_SUMMARIZED_상태가_그대로_변환된다() {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
 
         LocalDateTime base = LocalDateTime.of(2026, 5, 7, 12, 0, 0);
@@ -111,8 +111,7 @@ class AiChatSessionSearchServiceTest {
         List<AiChatSessionListProjection> rows = List.of(
                 new AiChatSessionListProjection(4L, "최근", "SUMMARIZING", base.plusMinutes(3)),
                 new AiChatSessionListProjection(3L, "활성", "ACTIVE", base.plusMinutes(2)),
-                new AiChatSessionListProjection(2L, "종료", "CLOSED", base.minusDays(1)),
-                new AiChatSessionListProjection(1L, "실패", "FAILED", base.minusDays(2))
+                new AiChatSessionListProjection(2L, "감상문 완료", "SUMMARIZED", base.minusDays(1))
         );
         given(aiChatSessionRepository.findSessionsByUserBookIdAndOwner(
                 USER_BOOK_ID, USER_ID, PageRequest.of(0, 20)
@@ -122,17 +121,15 @@ class AiChatSessionSearchServiceTest {
                 new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
         );
 
-        assertThat(result.sessions()).hasSize(4);
+        assertThat(result.sessions()).hasSize(3);
         assertThat(result.sessions()).extracting(AiChatSessionResult::status)
                 .containsExactly(
                         AiChatSessionDisplayStatus.SUMMARIZING,
                         AiChatSessionDisplayStatus.ACTIVE,
-                        AiChatSessionDisplayStatus.CLOSED,
-                        AiChatSessionDisplayStatus.FAILED
+                        AiChatSessionDisplayStatus.SUMMARIZED
                 );
         assertThat(result.sessions().get(0).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 7));
         assertThat(result.sessions().get(2).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 6));
-        assertThat(result.sessions().get(3).lastChattedDate()).isEqualTo(java.time.LocalDate.of(2026, 5, 5));
     }
 
     @Test

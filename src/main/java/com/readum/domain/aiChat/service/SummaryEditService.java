@@ -3,7 +3,6 @@ package com.readum.domain.aiChat.service;
 import com.readum.domain.aiChat.dto.SummaryEditCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.summary.dto.SummaryResult;
-import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;
@@ -32,12 +31,9 @@ public class SummaryEditService {
         aiChatSessionRepository.findByIdAndOwner(command.sessionId(), user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        Summary summary = summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDesc(command.sessionId())
+        // 감상문은 성공 기록만 남으므로(write-once, 실패 행 없음) 최신 행이 곧 편집 대상이다.
+        Summary summary = summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(command.sessionId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SUMMARY_NOT_FOUND));
-
-        if (!summary.isCompleted()) {
-            throw new BadRequestException(AiChatErrorCode.SUMMARY_NOT_COMPLETED);
-        }
 
         summary.edit(command.title(), command.body());
 

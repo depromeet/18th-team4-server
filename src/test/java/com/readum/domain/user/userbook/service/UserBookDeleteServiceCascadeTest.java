@@ -186,6 +186,6 @@ class UserBookDeleteServiceCascadeTest {
     }
 
     private Summary persistSummary(Long userBookId, Long sessionId) {
-        return summaryRepository.saveAndFlush(Summary.createInProgress(userBookId, sessionId, java.time.LocalDate.now()));
+        return summaryRepository.saveAndFlush(Summary.createCompleted(userBookId, sessionId, "제목", "본문"));
     }
 }

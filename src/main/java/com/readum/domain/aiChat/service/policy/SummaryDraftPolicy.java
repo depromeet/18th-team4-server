@@ -16,7 +16,7 @@ public class SummaryDraftPolicy {
 
     public SummaryDraftEligibility evaluate(AiChatSession session) {
         return switch (session.getStatus()) {
-            case CLOSED -> SummaryDraftEligibility.fail(IneligibleReason.SESSION_ALREADY_CLOSED);
+            case LOCKED -> SummaryDraftEligibility.fail(IneligibleReason.SUMMARY_IN_PROGRESS);
             case ACTIVE -> session.getAccumulatedTokens() < MIN_ACCUMULATED_TOKENS
                     ? SummaryDraftEligibility.fail(IneligibleReason.CHAT_VOLUME_NOT_ENOUGH)
                     : SummaryDraftEligibility.pass();
@@ -29,7 +29,7 @@ public class SummaryDraftPolicy {
             return;
         }
         throw switch (eligibility.reason()) {
-            case SESSION_ALREADY_CLOSED -> new ConflictException(AiChatErrorCode.SESSION_ALREADY_CLOSED);
+            case SUMMARY_IN_PROGRESS -> new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS);
             case CHAT_VOLUME_NOT_ENOUGH -> new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
         };
     }

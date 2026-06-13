@@ -8,6 +8,7 @@ import com.readum.domain.summary.dto.MonthlySummaryResult;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.exception.SummaryErrorCode;
 import com.readum.domain.user.exception.UserErrorCode;
+import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
@@ -81,10 +82,6 @@ public class SummarySearchService {
         Summary summary = summaryRepository.findById(summaryId)
                 .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_FOUND));
 
-        if (!summary.isCompleted()) {
-            throw new NotFoundException(SummaryErrorCode.SUMMARY_NOT_FOUND);
-        }
-
         userBookRepository.findByIdAndUserId(summary.getUserBookId(), user.getId())
                 .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_FOUND));
 
@@ -96,16 +93,18 @@ public class SummarySearchService {
         User user = userRepository.findBySessionId(userSessionId)
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
 
-        aiChatSessionRepository.findByIdAndOwner(sessionId, user.getId())
+        AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        Summary summary = summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDesc(sessionId)
+        // "생성 중" 은 감상문 행이 아니라 세션 잠금 상태가 표현한다 (재생성 중에도 409 로 폴링 계약 유지).
+        if (session.isLocked()) {
+            throw new ConflictException(SummaryErrorCode.SUMMARY_IN_PROGRESS);
+        }
+
+        // 감상문은 성공 기록만 남는다(실패 시 행 없음). 최신 행이 있으면 "현재 감상문", 없으면 아직 생성 전.
+        Summary summary = summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(sessionId)
                 .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_YET_CREATED));
 
-        return switch (summary.getStatus()) {
-            case COMPLETED -> SummaryResult.from(summary);
-            case IN_PROGRESS -> throw new ConflictException(SummaryErrorCode.SUMMARY_IN_PROGRESS);
-            case FAILED -> throw new ConflictException(SummaryErrorCode.SUMMARY_GENERATION_FAILED);
-        };
+        return SummaryResult.from(summary);
     }
 }
