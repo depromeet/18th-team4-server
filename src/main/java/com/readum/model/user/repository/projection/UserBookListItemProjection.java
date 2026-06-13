@@ -6,6 +6,7 @@ public record UserBookListItemProjection(
         String title,
         String publisher,
         Integer publishedYear,
-        String coverUrl
+        String coverUrl,
+        Long chatSessionCount
 ) {
 }

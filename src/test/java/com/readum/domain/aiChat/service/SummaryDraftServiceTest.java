@@ -96,13 +96,13 @@ class SummaryDraftServiceTest {
     }
 
     @Test
-    void 정상_요청시_COMPLETED_감상문을_새_행으로_저장하고_세션을_다시_활성화한다() {
+    void 정상_요청시_감상문을_새_행으로_저장하고_세션을_다시_활성화한다() {
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
         List<AiChatMessage> messages = List.of(
                 userMessage(SESSION_ID, "이 책에서 가장 인상 깊은 장면은?"),
                 assistantMessage(SESSION_ID, "주인공이 선택의 기로에 서는 장면이 인상적입니다.")
         );
-        SummaryDraftResult expected = new SummaryDraftResult("나의 독서 감상", "깊은 울림을 주는 책이었다.", "선택의 기로에서");
+        SummaryDraftResult expected = new SummaryDraftResult("나의 독서 감상", "깊은 울림을 주는 책이었다.");
 
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
@@ -115,18 +115,16 @@ class SummaryDraftServiceTest {
         ArgumentCaptor<Summary> summaryCaptor = ArgumentCaptor.forClass(Summary.class);
         verify(summaryRepository).save(summaryCaptor.capture());
         Summary saved = summaryCaptor.getValue();
-        assertThat(saved.getStatus()).isEqualTo(Summary.Status.COMPLETED);
         assertThat(saved.getAiChatSessionId()).isEqualTo(SESSION_ID);
         assertThat(saved.getTitle()).isEqualTo("나의 독서 감상");
         assertThat(saved.getBody()).isEqualTo("깊은 울림을 주는 책이었다.");
-        assertThat(saved.getQuote()).isEqualTo("선택의 기로에서");
         assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.ACTIVE);
     }
 
     @Test
     void 생성이_진행되는_동안에는_세션이_잠겨있다() {
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
-        SummaryDraftResult expected = new SummaryDraftResult("제목", "본문", "인용");
+        SummaryDraftResult expected = new SummaryDraftResult("제목", "본문");
 
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
@@ -146,7 +144,7 @@ class SummaryDraftServiceTest {
     }
 
     @Test
-    void AI_호출_실패시_FAILED_감상문을_새_행으로_저장하고_세션을_다시_활성화한다() {
+    void AI_호출_실패시_감상문_행을_저장하지_않고_세션을_다시_활성화한다() {
         AiChatSession session = activeSession(SUFFICIENT_TOKENS);
 
         given(aiChatSessionRepository.findByIdForUpdate(SESSION_ID)).willReturn(Optional.of(session));
@@ -157,12 +155,8 @@ class SummaryDraftServiceTest {
 
         summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
-        ArgumentCaptor<Summary> summaryCaptor = ArgumentCaptor.forClass(Summary.class);
-        verify(summaryRepository).save(summaryCaptor.capture());
-        Summary saved = summaryCaptor.getValue();
-        assertThat(saved.getStatus()).isEqualTo(Summary.Status.FAILED);
-        assertThat(saved.getAiChatSessionId()).isEqualTo(SESSION_ID);
-        assertThat(saved.getTitle()).isNull();
+        // 실패 시엔 감상문 행을 남기지 않는다 — 로그만 남기고 세션은 다시 활성화된다.
+        verify(summaryRepository, never()).save(any());
         assertThat(session.getStatus()).isEqualTo(AiChatSession.Status.ACTIVE);
     }
 

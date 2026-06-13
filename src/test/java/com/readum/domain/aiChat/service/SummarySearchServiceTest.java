@@ -58,17 +58,16 @@ class SummarySearchServiceTest {
     }
 
     @Test
-    void 최신_감상문이_COMPLETED면_내용을_반환한다() {
+    void 최신_감상문이_있으면_내용을_반환한다() {
         givenOwnedSession(activeSession());
-        given(summaryRepository.findTopByAiChatSessionIdOrderByIdDesc(SESSION_ID))
-                .willReturn(Optional.of(SummaryFixture.persistedCompletedSummary(
-                        SUMMARY_ID, USER_BOOK_ID, SESSION_ID, "제목", "본문", "인용")));
+        given(summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
+                .willReturn(Optional.of(SummaryFixture.persistedSummary(
+                        SUMMARY_ID, USER_BOOK_ID, SESSION_ID, "제목", "본문")));
 
         SummaryResult result = summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID);
 
         assertThat(result.title()).isEqualTo("제목");
         assertThat(result.body()).isEqualTo("본문");
-        assertThat(result.quote()).isEqualTo("인용");
     }
 
     @Test
@@ -81,26 +80,13 @@ class SummarySearchServiceTest {
                 .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
 
         // 생성 중에는 감상문 조회 자체를 하지 않는다 (직전 감상문이 있어도 노출하지 않음 — 폴링 계약 유지)
-        verify(summaryRepository, never()).findTopByAiChatSessionIdOrderByIdDesc(any());
-    }
-
-    @Test
-    void 최신_감상문이_FAILED면_생성_실패_ConflictException이_발생한다() {
-        givenOwnedSession(activeSession());
-        given(summaryRepository.findTopByAiChatSessionIdOrderByIdDesc(SESSION_ID))
-                .willReturn(Optional.of(SummaryFixture.persistedFailedSummary(
-                        SUMMARY_ID, USER_BOOK_ID, SESSION_ID)));
-
-        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
-                .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
-                .extracting(ConflictException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.SUMMARY_GENERATION_FAILED);
+        verify(summaryRepository, never()).findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(any());
     }
 
     @Test
     void 감상문이_한_번도_생성되지_않았으면_NotFoundException이_발생한다() {
         givenOwnedSession(activeSession());
-        given(summaryRepository.findTopByAiChatSessionIdOrderByIdDesc(SESSION_ID))
+        given(summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
                 .willReturn(Optional.empty());
 
         assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))

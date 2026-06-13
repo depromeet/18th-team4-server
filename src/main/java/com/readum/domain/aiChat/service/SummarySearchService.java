@@ -31,17 +31,15 @@ public class SummarySearchService {
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         // "생성 중" 은 감상문 행이 아니라 세션 잠금 상태가 표현한다.
-        // 재생성 중에는 직전 감상문이 있어도 409 를 반환해 폴링 계약(생성 요청 → 폴링 → 완료/실패)을 유지한다.
+        // 재생성 중에는 직전 감상문이 있어도 409 를 반환해 폴링 계약(생성 요청 → 폴링 → 완료)을 유지한다.
         if (session.isLocked()) {
             throw new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS);
         }
 
-        Summary summary = summaryRepository.findTopByAiChatSessionIdOrderByIdDesc(sessionId)
+        // 감상문은 성공 기록만 남는다(실패 시 행 없음). 최신 행이 있으면 그게 "현재 감상문", 없으면 404.
+        Summary summary = summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(sessionId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SUMMARY_NOT_FOUND));
 
-        return switch (summary.getStatus()) {
-            case COMPLETED -> SummaryResult.from(summary);
-            case FAILED -> throw new ConflictException(AiChatErrorCode.SUMMARY_GENERATION_FAILED);
-        };
+        return SummaryResult.from(summary);
     }
 }

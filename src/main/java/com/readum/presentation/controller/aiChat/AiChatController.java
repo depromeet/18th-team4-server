@@ -2,6 +2,7 @@ package com.readum.presentation.controller.aiChat;
 
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
+import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.dto.SummaryResult;
@@ -9,18 +10,22 @@ import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.AiChatSessionSearchService;
+import com.readum.domain.aiChat.service.BookChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
+import com.readum.domain.aiChat.service.SummaryEditService;
 import com.readum.domain.aiChat.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionListRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionListResponse;
+import com.readum.presentation.controller.aiChat.dto.BookChatSessionsResponse;
 import com.readum.presentation.controller.aiChat.dto.MessageListRequest;
 import com.readum.presentation.controller.aiChat.dto.MessageListResponse;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
 import com.readum.presentation.controller.aiChat.dto.SummaryDraftEligibilityResponse;
+import com.readum.presentation.controller.aiChat.dto.SummaryEditRequest;
 import com.readum.presentation.controller.aiChat.dto.SummaryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.headers.Header;
@@ -38,6 +43,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -54,8 +60,10 @@ public class AiChatController {
     private final AiChatMessageSendService aiChatMessageSendService;
     private final AiChatMessageSearchService aiChatMessageSearchService;
     private final SummaryDraftService summaryDraftService;
+    private final SummaryEditService summaryEditService;
     private final SummarySearchService summarySearchService;
     private final SummaryDraftSearchService summaryDraftSearchService;
+    private final BookChatSessionSearchService bookChatSessionSearchService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
 
     @Operation(
@@ -80,9 +88,9 @@ public class AiChatController {
     @Operation(
             summary = "AI 채팅 세션 목록 조회",
             description = "선택한 도서(userBookId)에 대한 채팅 세션을 최근 채팅 날짜 내림차순으로 페이지네이션 조회한다. " +
-                    "각 세션은 ACTIVE / SUMMARIZING / SUMMARIZED / FAILED 상태로 구분된다 — " +
-                    "SUMMARIZING 은 감상문 비동기 생성 중(메시지 전송 불가), SUMMARIZED 는 최신 감상문 생성 완료, " +
-                    "FAILED 는 최신 감상문 생성 실패를 의미한다. SUMMARIZING 을 제외한 모든 세션은 대화를 이어갈 수 있다. " +
+                    "각 세션은 ACTIVE / SUMMARIZING / SUMMARIZED 상태로 구분된다 — " +
+                    "SUMMARIZING 은 감상문 비동기 생성 중(메시지 전송 불가), SUMMARIZED 는 감상문이 생성된 세션을 의미한다. " +
+                    "SUMMARIZING 을 제외한 모든 세션은 대화를 이어갈 수 있다. " +
                     "lastChattedDate 는 마지막으로 노출된 메시지(USER/ASSISTANT, COMPLETED) 의 날짜이며, " +
                     "메시지가 없는 세션은 세션 생성 날짜로 fallback 된다. " +
                     "세션이 없으면 빈 배열로 200 응답한다."
@@ -100,6 +108,26 @@ public class AiChatController {
     ) {
         AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(request.toCommand(userSessionId));
         return GlobalApiResponse.ok(AiChatSessionListResponse.from(result));
+    }
+
+    @Operation(
+            summary = "책별 대화 세션 목록 조회",
+            description = "한 권(userBookId)에 대해 만든 모든 채팅 세션을 책 정보(제목·출판연도·출판사·표지) 와 함께 조회한다. " +
+                    "각 세션은 가장 최근 감상문 본문(latestSummaryContent, 없으면 null) 과 마지막 대화일(lastChattedDate, ISO) 을 포함하며, " +
+                    "마지막 대화일 내림차순으로 정렬된다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "조회 성공"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "본인 책장의 책이 아님")
+    })
+    @GetMapping("/books/{userBookId}/sessions")
+    public ResponseEntity<GlobalApiResponse<BookChatSessionsResponse>> getBookChatSessions(
+            @CookieValue(name = "user_session") String userSessionId,
+            @PathVariable Long userBookId
+    ) {
+        BookChatSessionsResult result = bookChatSessionSearchService.findByUserBook(userBookId, userSessionId);
+        return GlobalApiResponse.ok(BookChatSessionsResponse.from(result));
     }
 
     @Operation(
@@ -209,15 +237,15 @@ public class AiChatController {
     @Operation(
             summary = "감상문 조회",
             description = """
-                    세션의 최신 감상문(제목·본문·인상 깊은 구절)을 조회한다.
+                    세션의 최신 감상문(제목·본문)을 조회한다.
 
                     응답 분기:
                     - 세션이 감상문 생성 중(잠김): 409 SUMMARY_IN_PROGRESS — 잠시 후 재시도 필요
-                    - 최신 감상문 COMPLETED: 200 — 감상문 정상 반환
-                    - 최신 감상문 FAILED: 409 SUMMARY_GENERATION_FAILED — AI 생성 실패
+                    - 최신 감상문 존재: 200 — 감상문 정상 반환
                     - 감상문 생성 이력 없음: 404
 
                     감상문 생성이 끝나면(성공/실패 무관) 세션은 자동으로 다시 활성화되어 대화를 이어갈 수 있다.
+                    생성에 실패하면 감상문 행을 남기지 않으므로, 생성 중(409)에서 결과 없음(404)으로 바뀐다.
                     같은 세션에서 감상문을 다시 생성하면 새 감상문이 최신으로 조회된다 (과거 감상문은 DB 에 이력으로 보존).
                     """
     )
@@ -225,7 +253,7 @@ public class AiChatController {
             @ApiResponse(responseCode = "200", description = "감상문 조회 성공"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "세션 없음, 소유권 없음, 또는 감상문 생성 이력 없음"),
-            @ApiResponse(responseCode = "409", description = "감상문 생성 중 또는 최신 감상문이 생성 실패 상태")
+            @ApiResponse(responseCode = "409", description = "감상문 생성 중")
     })
     @GetMapping("/sessions/{sessionId}/summary")
     public ResponseEntity<GlobalApiResponse<SummaryResponse>> getSummary(
@@ -233,6 +261,26 @@ public class AiChatController {
             @PathVariable Long sessionId
     ) {
         SummaryResult result = summarySearchService.findBySessionId(sessionId, userSessionId);
+        return GlobalApiResponse.ok(SummaryResponse.from(result));
+    }
+
+    @Operation(
+            summary = "감상문 수정",
+            description = "세션의 최신 감상문 제목과 본문을 수정한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "감상문 수정 성공"),
+            @ApiResponse(responseCode = "400", description = "요청 값 검증 실패"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
+            @ApiResponse(responseCode = "404", description = "세션 없음, 소유권 없음, 또는 감상문 없음")
+    })
+    @PutMapping("/sessions/{sessionId}/summary")
+    public ResponseEntity<GlobalApiResponse<SummaryResponse>> editSummary(
+            @CookieValue(name = "user_session") String userSessionId,
+            @PathVariable Long sessionId,
+            @Valid @RequestBody SummaryEditRequest request
+    ) {
+        SummaryResult result = summaryEditService.execute(request.toCommand(userSessionId, sessionId));
         return GlobalApiResponse.ok(SummaryResponse.from(result));
     }
 

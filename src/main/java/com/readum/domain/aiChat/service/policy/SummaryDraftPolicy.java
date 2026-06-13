@@ -33,4 +33,12 @@ public class SummaryDraftPolicy {
             case CHAT_VOLUME_NOT_ENOUGH -> new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH);
         };
     }
+
+    public boolean isEligible(int accumulatedTokensSinceLastSummary) {
+        return accumulatedTokensSinceLastSummary >= MIN_ACCUMULATED_TOKENS;
+    }
+
+    public int calculateProgressPercent(int accumulatedTokens) {
+        return Math.min(accumulatedTokens * 100 / MIN_ACCUMULATED_TOKENS, 100);
+    }
 }

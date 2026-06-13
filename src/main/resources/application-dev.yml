@@ -63,7 +63,7 @@ logging:
 
 aladin:
   ttb-key: ${ALADIN_TTB_KEY:}
-  base-url: http://www.aladin.co.kr/ttb/api
+  base-url: https://www.aladin.co.kr/ttb/api
   search-target: Book
   output: JS
   version: 20131101

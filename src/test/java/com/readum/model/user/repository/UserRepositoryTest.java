@@ -27,13 +27,14 @@ class UserRepositoryTest {
     @DisplayName("sessionId 로 저장한 사용자를 조회할 수 있다")
     void sessionId_로_조회() {
         UUID sessionId = UUID.randomUUID();
-        User saved = userRepository.save(User.create(sessionId));
+        User saved = userRepository.save(User.create(sessionId, "책읽는여우"));
 
         Optional<User> found = userRepository.findBySessionId(sessionId.toString());
 
         assertThat(found).isPresent();
         assertThat(found.get().getId()).isEqualTo(saved.getId());
         assertThat(found.get().getSessionId()).isEqualTo(sessionId.toString());
+        assertThat(found.get().getNickname()).isEqualTo("책읽는여우");
         assertThat(found.get().isOnboardingCompleted()).isFalse();
         assertThat(found.get().getLastSelectedUserBookId()).isNull();
     }

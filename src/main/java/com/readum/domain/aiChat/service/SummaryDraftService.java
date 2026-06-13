@@ -59,16 +59,15 @@ public class SummaryDraftService {
 
     /**
      * TX1(검증 + 세션 잠금)을 동기로 완료한 뒤 즉시 반환한다.
-     * LLM 호출과 결과 기록(TX2)은 @Async 메서드에서 백그라운드로 처리된다.
+     * LLM 호출과 결과 기록은 @Async 메서드에서 백그라운드로 처리된다.
      * 감상문 행은 미리 만들지 않는다 — "생성 중" 은 세션 LOCKED 상태가 표현하고,
-     * 감상문(Summary) 은 생성 시도가 끝난 시점에 결과(COMPLETED/FAILED)와 함께 한 번만 기록된다.
+     * 성공했을 때만 COMPLETED 행을 새로 기록한다(write-once). 실패 시엔 행을 만들지 않고 로그만 남긴다.
      * 중복 생성 방지: 비관적 락 + "ACTIVE 일 때만 LOCKED 전이"(SummaryDraftPolicy) 조합이 막는다.
      */
     public void execute(Long sessionId, String userSessionId) {
         User user = userRepository.findBySessionId(userSessionId)
                 .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
 
-        // TX1: 검증 + 세션 잠금 — 커밋 후 즉시 반환
         PreparedContext preparedContext = transactionTemplate.execute(status -> {
             AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
                     .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
@@ -82,45 +81,67 @@ public class SummaryDraftService {
                     aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);
 
             session.lock();
-
             return new PreparedContext(session.getUserBookId(), messages);
         });
 
-        // 백그라운드에서 LLM 호출 + 결과 기록
         generateAsync(sessionId, preparedContext);
     }
 
     /**
-     * TX 밖에서 LLM 을 호출하고 결과를 DB 에 반영한다.
-     * @Async 로 별도 스레드에서 실행되므로 호출자는 즉시 반환된다.
-     *
-     * 성공/실패 모두 "감상문 행 기록 + 세션 잠금 해제(unlock)" 를 한 트랜잭션으로 묶는다 —
-     * 세션은 다시 활성화됐는데 결과 행이 없는 어중간한 상태를 막기 위함.
-     * 알려진 한계: 생성 도중 프로세스가 죽으면 세션이 LOCKED 로 남는다 (복구 정책은 별도 이슈).
+     * 사용자 요청 경로의 백그라운드 생성. @Async 로 별도 스레드에서 실행되므로 호출자는 즉시 반환된다.
      */
     @Async
     public void generateAsync(Long sessionId, PreparedContext preparedContext) {
+        generateAndRecord(sessionId, preparedContext);
+    }
+
+    /**
+     * 스케줄러 전용 독후감 생성. 인증 없이 세션 id 로 동작한다.
+     * 마지막 요약 이후가 아니라 세션 전체 대화 이력으로 매번 다시 요약한다(증분 아님).
+     * 수동 경로와 동일하게 lock → 생성 → 성공 시 새 COMPLETED 행 + unlock / 실패 시 로그 + unlock.
+     * 이미 LOCKED 인 세션(다른 생성이 진행 중)은 건너뛴다.
+     */
+    public void executeForScheduler(Long sessionId) {
+        PreparedContext preparedContext = transactionTemplate.execute(status -> {
+            AiChatSession session = aiChatSessionRepository.findByIdForUpdate(sessionId)
+                    .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+            if (session.isLocked()) {
+                return null;
+            }
+            List<AiChatMessage> messages =
+                    aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);
+            session.lock();
+            return new PreparedContext(session.getUserBookId(), messages);
+        });
+
+        if (preparedContext == null) {
+            return;
+        }
+        generateAndRecord(sessionId, preparedContext);
+    }
+
+    /**
+     * TX 밖에서 LLM 을 호출하고 결과를 반영한다.
+     * 성공: COMPLETED 행 생성 + 세션 잠금 해제(unlock)를 한 트랜잭션으로.
+     * 실패: 원인을 로그로 남기고 세션만 unlock — 감상문 행은 만들지 않는다.
+     * 알려진 한계: 생성 도중 프로세스가 죽으면 세션이 LOCKED 로 남는다 (복구 정책은 별도 이슈).
+     */
+    private void generateAndRecord(Long sessionId, PreparedContext preparedContext) {
         SummaryDraftResult result;
         try {
             result = aiSummaryClient.generate(preparedContext.messages());
         } catch (Exception e) {
-            // 실패 원인을 먼저 기록한다 — 아래 TX2 가 DB 오류로 실패해도 LLM 실패 원인이 남도록.
             log.error("감상문 생성 실패 sessionId={}", sessionId, e);
-            // TX2 (실패 경로): FAILED 행 기록 + 세션 잠금 해제
-            transactionTemplate.executeWithoutResult(status -> {
-                summaryRepository.save(Summary.createFailed(preparedContext.userBookId(), sessionId));
-                aiChatSessionRepository.findById(sessionId).ifPresentOrElse(
-                        AiChatSession::unlock,
-                        () -> log.warn("감상문 생성 종료 후 잠금 해제할 세션을 찾지 못함 sessionId={}", sessionId));
-            });
+            transactionTemplate.executeWithoutResult(status ->
+                    aiChatSessionRepository.findById(sessionId).ifPresentOrElse(
+                            AiChatSession::unlock,
+                            () -> log.warn("감상문 생성 종료 후 잠금 해제할 세션을 찾지 못함 sessionId={}", sessionId)));
             return;
         }
 
-        // TX2 (성공 경로): COMPLETED 행 기록 + 세션 잠금 해제
         transactionTemplate.executeWithoutResult(status -> {
             summaryRepository.save(Summary.createCompleted(
-                    preparedContext.userBookId(), sessionId,
-                    result.title(), result.body(), result.quote()));
+                    preparedContext.userBookId(), sessionId, result.title(), result.body()));
             aiChatSessionRepository.findById(sessionId).ifPresentOrElse(
                     AiChatSession::unlock,
                     () -> log.warn("감상문 생성 종료 후 잠금 해제할 세션을 찾지 못함 sessionId={}", sessionId));

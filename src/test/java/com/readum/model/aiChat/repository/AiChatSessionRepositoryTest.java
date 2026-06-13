@@ -129,7 +129,7 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE 세션은 status='ACTIVE' 로 도출된다 (Summary 없음)")
+    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE 세션은 status='ACTIVE' 로 도출된다 (감상문 없음)")
     void status_ACTIVE_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
@@ -159,12 +159,12 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE + 최신 감상문 COMPLETED 면 'SUMMARIZED' 로 도출")
+    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE + 감상문 있으면 'SUMMARIZED' 로 도출")
     void status_SUMMARIZED_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "summarized-session");
-        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문", "인용"));
+        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문"));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -174,44 +174,28 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE + 최신 감상문 FAILED 면 'FAILED' 로 도출")
-    void status_FAILED_도출() {
-        Long userId = nextUserId();
-        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "failed-session");
-        summaryRepository.save(Summary.createFailed(userBook.getId(), session.getId()));
-
-        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
-                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
-
-        assertThat(slice.getContent()).hasSize(1);
-        assertThat(slice.getContent().get(0).status()).isEqualTo("FAILED");
-    }
-
-    @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: 감상문 여러 건이면 최신 행 기준으로 도출된다 (FAILED 후 COMPLETED → SUMMARIZED)")
-    void status_최신_감상문_기준_도출() {
+    @DisplayName("findSessionsByUserBookIdAndOwner: 감상문 여러 건이어도 세션은 한 번만 'SUMMARIZED' 로 나타난다")
+    void status_감상문_여러건이어도_한번만() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "retried-session");
-        summaryRepository.save(Summary.createFailed(userBook.getId(), session.getId()));
-        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문", "인용"));
+        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "옛 제목", "옛 본문"));
+        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "새 제목", "새 본문"));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
 
         assertThat(slice.getContent()).hasSize(1);
         assertThat(slice.getContent().get(0).status()).isEqualTo("SUMMARIZED");
-        // 행이 2건이어도 최신 한 건만 join 되어 세션은 한 번만 나타난다.
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: 재생성 중(LOCKED)이면 직전 COMPLETED 가 있어도 'SUMMARIZING'")
+    @DisplayName("findSessionsByUserBookIdAndOwner: 재생성 중(LOCKED)이면 직전 감상문이 있어도 'SUMMARIZING'")
     void status_재생성_중에는_SUMMARIZING_우선() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "regenerating-session");
-        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문", "인용"));
+        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문"));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -268,6 +252,43 @@ class AiChatSessionRepositoryTest {
 
         assertThat(slice.getContent()).isEmpty();
         assertThat(slice.hasNext()).isFalse();
+    }
+
+    @Test
+    @DisplayName("findAutoSummaryTargetSessionIds: ACTIVE + 누적토큰≥임계 + 24h 내 메시지 세션만 반환한다")
+    void 자동요약_대상_선정() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime since = now.minusHours(24);
+
+        AiChatSession eligible = saveSessionWithTokens(userBook.getId(), AiChatSession.Status.ACTIVE, 600);
+        saveCompletedUserMessage(eligible.getId(), now.minusHours(1));
+
+        AiChatSession idle = saveSessionWithTokens(userBook.getId(), AiChatSession.Status.ACTIVE, 600);
+        saveCompletedUserMessage(idle.getId(), now.minusDays(3)); // 24h 밖 — 제외
+
+        AiChatSession lowTokens = saveSessionWithTokens(userBook.getId(), AiChatSession.Status.ACTIVE, 100);
+        saveCompletedUserMessage(lowTokens.getId(), now.minusHours(1)); // 토큰 부족 — 제외
+
+        AiChatSession locked = saveSessionWithTokens(userBook.getId(), AiChatSession.Status.LOCKED, 600);
+        saveCompletedUserMessage(locked.getId(), now.minusHours(1)); // ACTIVE 아님 — 제외
+
+        java.util.List<Long> targets = aiChatSessionRepository.findAutoSummaryTargetSessionIds(
+                AiChatSession.Status.ACTIVE, 500, com.readum.model.aiChat.entity.AiChatMessage.Status.COMPLETED, since);
+
+        assertThat(targets).containsExactly(eligible.getId());
+    }
+
+    private AiChatSession saveSessionWithTokens(Long userBookId, AiChatSession.Status status, int tokens) {
+        AiChatSession session = AiChatSession.create(userBookId);
+        if (tokens > 0) {
+            session.addAssistantTokens(tokens);
+        }
+        if (status == AiChatSession.Status.LOCKED) {
+            session.lock();
+        }
+        return aiChatSessionRepository.save(session);
     }
 
     private AiChatSession saveSession(Long userBookId, AiChatSession.Status status, String title) {

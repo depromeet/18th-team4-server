@@ -58,7 +58,7 @@ class UserBookConcurrencyTest {
         );
         // 임시 cookie 인증 패턴 — UserRepository 로 User row 를 만들고 그 session_id 를 명령 인자로 쓴다.
         // session_id unique 제약을 회피하기 위해 매 실행마다 UUID 로 다른 값을 쓴다.
-        User saved = userRepository.save(User.create(UUID.randomUUID()));
+        User saved = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
         userSessionId = saved.getSessionId();
         userId = saved.getId();
     }
