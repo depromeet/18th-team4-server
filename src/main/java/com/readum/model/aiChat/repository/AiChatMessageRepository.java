@@ -4,6 +4,7 @@ import com.readum.model.aiChat.entity.AiChatMessage;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -105,4 +106,22 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
         return countRecentMessagesByRoleStatusAndOwner(
                 AiChatMessage.Role.USER, AiChatMessage.Status.REJECTED, userId, since);
     }
+
+    /**
+     * 등록 도서(UserBook) 삭제 cascade 용 — 그 도서의 모든 세션에 속한 메시지를 일괄 삭제한다.
+     * AiChatMessage 는 userBookId 를 직접 갖지 않으므로 session_id 를 통해 세션을 거치는 서브쿼리로 좁힌다.
+     * 삭제 대상 테이블(ai_chat_message) 과 서브쿼리 테이블(ai_chat_session) 이 달라 MySQL 8.4 의
+     * "삭제 대상 테이블 자기참조 서브쿼리 금지" 제약에 걸리지 않는다.
+     * 반드시 세션 삭제보다 먼저 호출해야 한다 (세션이 사라지면 이 서브쿼리가 메시지를 찾지 못한다).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            delete from AiChatMessage aiChatMessage
+             where aiChatMessage.sessionId in (
+                   select aiChatSession.id
+                     from AiChatSession aiChatSession
+                    where aiChatSession.userBookId = :userBookId
+                 )
+            """)
+    int deleteAllByUserBookId(@Param("userBookId") Long userBookId);
 }
