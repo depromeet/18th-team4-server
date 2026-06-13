@@ -1,6 +1,10 @@
 package com.readum.model.summary.repository;
 
+import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.summary.entity.Summary;
+import com.readum.model.summary.repository.projection.SummaryHistoryProjection;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -25,4 +29,46 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
     Optional<Summary> findFirstByAiChatSessionIdOrderByCreatedAtDesc(Long aiChatSessionId);
 
     List<Summary> findByStatusAndRetryCountLessThan(Summary.Status status, int retryCount);
+
+    /**
+     * 사용자 본인의 감상 기록 목록을 최신순(createdAt DESC, id DESC) 으로 Slice 조회한다.
+     * 종료(CLOSED)된 세션의 완성(COMPLETED)된 감상문만 포함한다 —
+     * 스케줄러가 ACTIVE 세션에 자동 생성한 COMPLETED 감상문은 sessionStatus=CLOSED 필터로 제외된다.
+     *
+     * 호출자 시그니처를 단순하게 유지하기 위해 default 메서드로 감싸고, 내부 @Query 에 enum 파라미터를 바인딩한다.
+     */
+    default Slice<SummaryHistoryProjection> findCompletedHistoryByUserId(Long userId, Pageable pageable) {
+        return findCompletedHistoryByUserIdInternal(
+                userId, Summary.Status.COMPLETED, AiChatSession.Status.CLOSED, pageable);
+    }
+
+    /**
+     * Summary / AiChatSession / UserBook / Book 사이에 JPA 연관관계가 없어 on 절로 직접 join 한다 (Hibernate 6+).
+     * 소유권 확인을 EXISTS 서브쿼리가 아니라 inner join 으로 하는 이유 — book.title 컬럼을 실제로 투영해야 하므로
+     * UserBook/Book join 이 불가피하고, userBook.userId 필터가 곧 소유권 검증을 겸한다.
+     */
+    @Query("""
+            select new com.readum.model.summary.repository.projection.SummaryHistoryProjection(
+                       book.title
+                     , summary.body
+                     , summary.createdAt
+                   )
+              from Summary summary
+              join AiChatSession aiChatSession
+                on aiChatSession.id = summary.aiChatSessionId
+              join UserBook userBook
+                on userBook.id = summary.userBookId
+              join Book book
+                on book.id = userBook.bookId
+             where userBook.userId = :userId
+               and summary.status = :summaryStatus
+               and aiChatSession.status = :sessionStatus
+             order by summary.createdAt desc
+                    , summary.id desc
+            """)
+    Slice<SummaryHistoryProjection> findCompletedHistoryByUserIdInternal(
+            @Param("userId") Long userId,
+            @Param("summaryStatus") Summary.Status summaryStatus,
+            @Param("sessionStatus") AiChatSession.Status sessionStatus,
+            Pageable pageable);
 }
