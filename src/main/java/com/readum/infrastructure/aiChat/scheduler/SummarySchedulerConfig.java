@@ -1,4 +1,4 @@
-package com.readum.domain.aiChat.config;
+package com.readum.infrastructure.aiChat.scheduler;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

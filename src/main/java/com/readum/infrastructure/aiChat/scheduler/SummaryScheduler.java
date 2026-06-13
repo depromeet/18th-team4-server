@@ -1,5 +1,6 @@
-package com.readum.domain.aiChat.service;
+package com.readum.infrastructure.aiChat.scheduler;
 
+import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
