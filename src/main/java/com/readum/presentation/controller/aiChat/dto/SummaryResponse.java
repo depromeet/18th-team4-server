@@ -1,6 +1,6 @@
 package com.readum.presentation.controller.aiChat.dto;
 
-import com.readum.domain.aiChat.dto.SummaryResult;
+import com.readum.domain.summary.dto.SummaryResult;
 
 public record SummaryResponse(
         String title,

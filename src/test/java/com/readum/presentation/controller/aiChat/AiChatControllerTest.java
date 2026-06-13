@@ -9,7 +9,6 @@ import com.readum.domain.aiChat.dto.MessageResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
-import com.readum.domain.aiChat.dto.SummaryResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
@@ -18,11 +17,13 @@ import com.readum.domain.aiChat.service.AiChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.SummaryEditService;
-import com.readum.domain.aiChat.service.SummarySearchService;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnprocessableEntityException;
+import com.readum.domain.summary.dto.SummaryResult;
+import com.readum.domain.summary.exception.SummaryErrorCode;
+import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.presentation.common.GlobalExceptionHandler;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
@@ -457,7 +458,7 @@ class AiChatControllerTest {
 
     @Test
     void 감상문_조회_정상_요청시_200과_감상문을_반환한다() throws Exception {
-        SummaryResult result = new SummaryResult("나의 독서 감상", "깊은 울림을 주는 책이었다.");
+        SummaryResult result = new SummaryResult(1L, "나의 독서 감상", "깊은 울림을 주는 책이었다.");
         given(summarySearchService.findBySessionId(eq(1L), any())).willReturn(result);
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
@@ -470,7 +471,7 @@ class AiChatControllerTest {
     @Test
     void 감상문_조회_생성_요청_전이면_404() throws Exception {
         given(summarySearchService.findBySessionId(eq(1L), any()))
-                .willThrow(new NotFoundException(AiChatErrorCode.SUMMARY_NOT_FOUND));
+                .willThrow(new NotFoundException(SummaryErrorCode.SUMMARY_NOT_YET_CREATED));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
                         .cookie(USER_SESSION_COOKIE))
@@ -481,7 +482,7 @@ class AiChatControllerTest {
     @Test
     void 감상문_조회_생성_중이면_409와_SUMMARY_IN_PROGRESS_메시지() throws Exception {
         given(summarySearchService.findBySessionId(eq(1L), any()))
-                .willThrow(new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS));
+                .willThrow(new ConflictException(SummaryErrorCode.SUMMARY_IN_PROGRESS));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
                         .cookie(USER_SESSION_COOKIE))
@@ -492,7 +493,7 @@ class AiChatControllerTest {
     @Test
     void 감상문_조회_생성_실패면_409와_SUMMARY_GENERATION_FAILED_메시지() throws Exception {
         given(summarySearchService.findBySessionId(eq(1L), any()))
-                .willThrow(new ConflictException(AiChatErrorCode.SUMMARY_GENERATION_FAILED));
+                .willThrow(new ConflictException(SummaryErrorCode.SUMMARY_GENERATION_FAILED));
 
         mockMvc.perform(get("/api/v1/ai-chat/sessions/1/summary")
                         .cookie(USER_SESSION_COOKIE))

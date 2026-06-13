@@ -15,6 +15,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -150,7 +151,7 @@ class AiChatSessionRepositoryTest {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "summarizing-session");
-        summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), java.time.LocalDate.now()));
+        summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), LocalDate.now()));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
@@ -165,7 +166,7 @@ class AiChatSessionRepositoryTest {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "completed-session");
-        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), java.time.LocalDate.now()));
+        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), LocalDate.now()));
         summary.complete("title", "body");
         summaryRepository.saveAndFlush(summary);
 
@@ -182,7 +183,7 @@ class AiChatSessionRepositoryTest {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "failed-session");
-        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), java.time.LocalDate.now()));
+        Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), LocalDate.now()));
         summary.fail();
         summaryRepository.saveAndFlush(summary);
 

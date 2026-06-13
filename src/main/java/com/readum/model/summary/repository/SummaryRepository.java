@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,6 +30,20 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
     Optional<Summary> findFirstByAiChatSessionIdOrderByCreatedAtDesc(Long aiChatSessionId);
 
     List<Summary> findByStatusAndRetryCountLessThan(Summary.Status status, int retryCount);
+
+    /**
+     * 월별 달력용 — 사용자의 등록 도서들에 속한 완성된 감상문을 summaryDate 기간으로 좁혀
+     * 최신순(summaryDate DESC, createdAt DESC, id DESC) 으로 반환한다.
+     * 조건이 모두 Summary 자기 컬럼(userBookId/status/summaryDate)이라 join 없이 derived query 로 표현한다.
+     */
+    List<Summary> findByUserBookIdInAndStatusAndSummaryDateBetweenOrderBySummaryDateDescCreatedAtDescIdDesc(
+            Collection<Long> userBookIds, Summary.Status status, LocalDate startDate, LocalDate endDate);
+
+    default List<Summary> findMonthlyCompleted(
+            Collection<Long> userBookIds, LocalDate startDate, LocalDate endDate) {
+        return findByUserBookIdInAndStatusAndSummaryDateBetweenOrderBySummaryDateDescCreatedAtDescIdDesc(
+                userBookIds, Summary.Status.COMPLETED, startDate, endDate);
+    }
 
     /**
      * 사용자 본인의 감상 기록 목록을 최신순(createdAt DESC, id DESC) 으로 Slice 조회한다.

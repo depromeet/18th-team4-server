@@ -35,6 +35,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/user-books/**").permitAll()
                         .requestMatchers("/api/v1/users/**").permitAll()
                         .requestMatchers("/api/v1/books/**").permitAll()
+                        .requestMatchers("/api/v1/summaries/**").permitAll()
                         .requestMatchers(
                                 "/v3/api-docs",
                                 "/v3/api-docs/**",

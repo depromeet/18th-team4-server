@@ -23,6 +23,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestCookieException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -172,6 +173,13 @@ public class GlobalExceptionHandler {
         String message = String.format("'%s'에 잘못된 값이 전달되었습니다: %s", ex.getName(), ex.getValue());
         log.debug("Type mismatch: {}", message);
         return GlobalApiResponse.error(HttpStatus.BAD_REQUEST, message);
+    }
+
+    // 필수 쿼리 파라미터 누락 (?yearMonth= 미전달 등)
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<GlobalApiResponse<?>> handleMissingParameter(MissingServletRequestParameterException ex) {
+        log.warn("Missing parameter: {}", ex.getParameterName());
+        return GlobalApiResponse.error(HttpStatus.BAD_REQUEST, "필수 요청 값이 없습니다: " + ex.getParameterName());
     }
 
     // 요청 바디 JSON 파싱 실패 (잘못된 형식 또는 타입 불일치)
