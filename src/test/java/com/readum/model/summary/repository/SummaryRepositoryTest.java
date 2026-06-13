@@ -187,7 +187,7 @@ class SummaryRepositoryTest {
     private Summary persistCompletedSummary(Long userBookId, Long sessionId, String body) {
         Summary summary = summaryRepository.save(
                 Summary.createInProgress(userBookId, sessionId, LocalDate.now()));
-        summary.complete("제목", body, "인용");
+        summary.complete("제목", body);
         return summaryRepository.saveAndFlush(summary);
     }
 
