@@ -23,4 +23,14 @@ public final class SummaryFixture {
         LocalDateTime now = LocalDateTime.now();
         return new Summary(id, userBookId, aiChatSessionId, null, title, body, now, now);
     }
+
+    /**
+     * createdAt 을 지정해 만드는 감상문. 생성일 기준 조회(월별 달력)처럼 createdAt 을 제어해야 할 때 쓴다.
+     * id 에 null 을 넘기면 저장 시 IDENTITY 가 생성한다 (DAO 테스트용).
+     */
+    public static Summary persistedSummaryCreatedAt(
+            Long id, Long userBookId, Long aiChatSessionId, String title, String body, LocalDateTime createdAt
+    ) {
+        return new Summary(id, userBookId, aiChatSessionId, null, title, body, createdAt, createdAt);
+    }
 }

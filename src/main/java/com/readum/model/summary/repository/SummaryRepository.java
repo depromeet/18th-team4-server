@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +24,21 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from Summary summary where summary.userBookId = :userBookId")
     int deleteAllByUserBookId(@Param("userBookId") Long userBookId);
+
+    /**
+     * 월별 달력용 — 사용자의 등록 도서들에 속한 감상문을 생성일(createdAt) 기간으로 좁혀
+     * 최신순(createdAt DESC, id DESC) 으로 반환한다.
+     * 감상문은 성공 기록만 남으므로(write-once) 상태 필터가 필요 없다. 별도 summaryDate 컬럼을 두지 않고
+     * "생성된 날짜" 는 createdAt 으로 본다. 기간은 [startDate 00:00, endDate+1일 00:00) 반열림으로 좁힌다.
+     */
+    List<Summary> findByUserBookIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
+            Collection<Long> userBookIds, LocalDateTime startInclusive, LocalDateTime endExclusive);
+
+    default List<Summary> findMonthlyCompleted(
+            Collection<Long> userBookIds, LocalDate startDate, LocalDate endDate) {
+        return findByUserBookIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
+                userBookIds, startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay());
+    }
 
     /**
      * 세션의 가장 최근 감상문(= 현재 감상문). 세션당 여러 건(재생성 이력)이 쌓이므로 최신 한 건을 고른다.

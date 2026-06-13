@@ -1,8 +1,8 @@
 package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.dto.SummaryEditCommand;
-import com.readum.domain.aiChat.dto.SummaryResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.exception.UserErrorCode;

@@ -5,6 +5,7 @@ import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.summary.entity.Summary;
+import com.readum.model.summary.entity.SummaryFixture;
 import com.readum.model.summary.repository.projection.SummaryHistoryProjection;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
@@ -16,6 +17,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,8 +39,18 @@ class SummaryRepositoryTest {
     @Autowired
     private BookRepository bookRepository;
 
+    private static long sessionIdSeq = 900_000L;
+    private static long userBookIdSeq = 800_000L;
     private static long userIdSeq = 9_200_000L;
     private static long externalSeq = 9_200_000L;
+
+    private static synchronized long nextSessionId() {
+        return sessionIdSeq++;
+    }
+
+    private static synchronized Long nextUserBookId() {
+        return userBookIdSeq++;
+    }
 
     private static synchronized Long nextUserId() {
         userIdSeq += 1;
@@ -49,6 +61,61 @@ class SummaryRepositoryTest {
         externalSeq += 1;
         return "ext-" + externalSeq;
     }
+
+    // ===== 월별 달력 조회 (findMonthlyCompleted) — 생성일(createdAt) 기간으로 좁히는 derived query =====
+
+    private Summary persistOn(Long userBookId, LocalDate date) {
+        return summaryRepository.save(SummaryFixture.persistedSummaryCreatedAt(
+                null, userBookId, nextSessionId(), "제목", "본문", date.atTime(12, 0)));
+    }
+
+    @Test
+    @DisplayName("findMonthlyCompleted: 월 범위(월초·월말 포함)의 감상문만 반환한다")
+    void findMonthlyCompleted_월_경계_포함() {
+        Long userBookId = nextUserBookId();
+        Summary firstDay = persistOn(userBookId, LocalDate.of(2026, 6, 1));
+        Summary lastDay = persistOn(userBookId, LocalDate.of(2026, 6, 30));
+        persistOn(userBookId, LocalDate.of(2026, 5, 31));
+        persistOn(userBookId, LocalDate.of(2026, 7, 1));
+
+        List<Summary> found = summaryRepository.findMonthlyCompleted(
+                List.of(userBookId), LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30));
+
+        assertThat(found).extracting(Summary::getId)
+                .containsExactly(lastDay.getId(), firstDay.getId());   // 최신순: 6/30 이 먼저
+    }
+
+    @Test
+    @DisplayName("findMonthlyCompleted: 조회 대상 userBookId 가 아닌 감상문은 반환하지 않는다")
+    void findMonthlyCompleted_다른_userBook_제외() {
+        Long mine = nextUserBookId();
+        Long others = nextUserBookId();
+        LocalDate date = LocalDate.of(2026, 6, 10);
+        Summary myRecord = persistOn(mine, date);
+        persistOn(others, date);
+
+        List<Summary> found = summaryRepository.findMonthlyCompleted(
+                List.of(mine), LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30));
+
+        assertThat(found).extracting(Summary::getId).containsExactly(myRecord.getId());
+    }
+
+    @Test
+    @DisplayName("findMonthlyCompleted: 생성일 최신순(createdAt DESC, id DESC)으로 정렬한다")
+    void findMonthlyCompleted_최신순_정렬() {
+        Long userBookId = nextUserBookId();
+        Summary later = persistOn(userBookId, LocalDate.of(2026, 6, 20));
+        Summary middle = persistOn(userBookId, LocalDate.of(2026, 6, 10));
+        Summary earlier = persistOn(userBookId, LocalDate.of(2026, 6, 5));
+
+        List<Summary> found = summaryRepository.findMonthlyCompleted(
+                List.of(userBookId), LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30));
+
+        assertThat(found).extracting(Summary::getId)
+                .containsExactly(later.getId(), middle.getId(), earlier.getId());
+    }
+
+    // ===== 세션 최신 감상문 / 기록 목록 =====
 
     @Test
     @DisplayName("findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc: 같은 세션의 여러 감상문 중 가장 최근 행을 반환한다")
@@ -133,7 +200,7 @@ class SummaryRepositoryTest {
     }
 
     @Test
-    @DisplayName("findLatestHistoryByUserId: 세션(=책)별 최신 1건이 최신순(생성일·id 내림차순)으로 정렬된다")
+    @DisplayName("findLatestHistoryByUserId: 세션(=책)별 최신 1건이 최신순으로 정렬된다")
     void 최신순으로_정렬된다() {
         Long userId = nextUserId();
         Long userBookId = persistUserBook(userId, "한권");

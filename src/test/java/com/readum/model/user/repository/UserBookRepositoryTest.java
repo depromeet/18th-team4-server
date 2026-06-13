@@ -164,6 +164,21 @@ class UserBookRepositoryTest {
     }
 
     @Test
+    @DisplayName("findByUserId 는 해당 사용자의 등록 도서만 전부 반환한다")
+    void findByUserId_본인_등록_도서만_반환() {
+        Long userId = nextUserId();
+        Long otherUserId = nextUserId();
+        UserBook first = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        UserBook second = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        userBookRepository.save(UserBook.create(otherUserId, nextBookId()));
+
+        List<UserBook> found = userBookRepository.findByUserId(userId);
+
+        assertThat(found).extracting(UserBook::getId)
+                .containsExactlyInAnyOrder(first.getId(), second.getId());
+    }
+
+    @Test
     @DisplayName("chatSessionCount 는 세션 상태(ACTIVE/CLOSED)와 무관하게 해당 도서의 전체 채팅 세션 수를 센다")
     void chatSessionCount_상태_무관_전체_세션_수를_센다() {
         Long userId = nextUserId();
