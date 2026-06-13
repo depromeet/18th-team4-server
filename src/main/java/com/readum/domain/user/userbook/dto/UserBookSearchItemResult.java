@@ -8,7 +8,8 @@ public record UserBookSearchItemResult(
         String title,
         String publisher,
         Integer publishedYear,
-        String coverUrl
+        String coverUrl,
+        long chatSessionCount
 ) {
 
     public static UserBookSearchItemResult from(UserBookListItemProjection projection) {
@@ -18,7 +19,8 @@ public record UserBookSearchItemResult(
                 projection.title(),
                 projection.publisher(),
                 projection.publishedYear(),
-                projection.coverUrl()
+                projection.coverUrl(),
+                projection.chatSessionCount()
         );
     }
 }

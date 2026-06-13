@@ -1,5 +1,7 @@
 package com.readum.model.user.repository;
 
+import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.user.entity.UserBook;
@@ -27,6 +29,9 @@ class UserBookRepositoryTest {
 
     @Autowired
     private BookRepository bookRepository;
+
+    @Autowired
+    private AiChatSessionRepository aiChatSessionRepository;
 
     @Test
     @DisplayName("등록된 도서가 있으면 existsByUserId 가 true 를 반환한다")
@@ -156,6 +161,106 @@ class UserBookRepositoryTest {
                 userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
 
         assertThat(projections).isEmpty();
+    }
+
+    @Test
+    @DisplayName("chatSessionCount 는 세션 상태(ACTIVE/CLOSED)와 무관하게 해당 도서의 전체 채팅 세션 수를 센다")
+    void chatSessionCount_상태_무관_전체_세션_수를_센다() {
+        Long userId = nextUserId();
+        Book book = bookRepository.save(Book.create(
+                uniqueExternalId(), "채팅한 책", "저자", "출판사", 2024, "http://example.com/x.jpg"));
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, book.getId()));
+
+        persistActiveSession(userBook.getId());
+        persistActiveSession(userBook.getId());
+        persistClosedSession(userBook.getId());
+
+        List<UserBookListItemProjection> projections =
+                userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
+
+        assertThat(projections).hasSize(1);
+        assertThat(projections.get(0).userBookId()).isEqualTo(userBook.getId());
+        assertThat(projections.get(0).chatSessionCount()).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("chatSessionCount 는 채팅 세션이 없는 도서에 대해 0 을 반환한다")
+    void chatSessionCount_세션_없으면_0() {
+        Long userId = nextUserId();
+        Book book = bookRepository.save(Book.create(
+                uniqueExternalId(), "대화 없는 책", "저자", "출판사", 2024, "http://example.com/y.jpg"));
+        userBookRepository.save(UserBook.create(userId, book.getId()));
+
+        List<UserBookListItemProjection> projections =
+                userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
+
+        assertThat(projections).hasSize(1);
+        assertThat(projections.get(0).chatSessionCount()).isEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("chatSessionCount 는 다른 사용자의 userBook 에 달린 세션을 포함하지 않는다")
+    void chatSessionCount_다른_사용자_세션_격리() {
+        Long userId = nextUserId();
+        Long otherUserId = nextUserId();
+
+        Book myBook = bookRepository.save(Book.create(
+                uniqueExternalId(), "내 책", "저자", "출판사", 2024, "http://example.com/m.jpg"));
+        Book otherBook = bookRepository.save(Book.create(
+                uniqueExternalId(), "남의 책", "저자", "출판사", 2023, "http://example.com/o.jpg"));
+
+        UserBook myUserBook = userBookRepository.save(UserBook.create(userId, myBook.getId()));
+        UserBook otherUserBook = userBookRepository.save(UserBook.create(otherUserId, otherBook.getId()));
+
+        persistActiveSession(myUserBook.getId());
+        persistActiveSession(otherUserBook.getId());
+        persistActiveSession(otherUserBook.getId());
+
+        List<UserBookListItemProjection> projections =
+                userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
+
+        assertThat(projections).hasSize(1);
+        assertThat(projections.get(0).userBookId()).isEqualTo(myUserBook.getId());
+        assertThat(projections.get(0).chatSessionCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("chatSessionCount 는 한 사용자의 도서마다 자신의 세션 수를 독립적으로 세고, 기존 정렬을 유지한다")
+    void chatSessionCount_도서별_독립_카운트와_정렬_유지() {
+        Long userId = nextUserId();
+
+        Book olderBook = bookRepository.save(Book.create(
+                uniqueExternalId(), "이전에 등록한 책", "저자", "출판사", 2024, "http://example.com/a.jpg"));
+        Book newerBook = bookRepository.save(Book.create(
+                uniqueExternalId(), "최근 등록한 책", "저자", "출판사", 2025, "http://example.com/b.jpg"));
+
+        LocalDateTime baseTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+        UserBook olderUserBook = userBookRepository.save(
+                UserBookFixture.userBookRegisteredAt(userId, olderBook.getId(), baseTime));
+        UserBook newerUserBook = userBookRepository.save(
+                UserBookFixture.userBookRegisteredAt(userId, newerBook.getId(), baseTime.plusMinutes(1)));
+
+        persistActiveSession(newerUserBook.getId());
+        persistActiveSession(newerUserBook.getId());
+
+        List<UserBookListItemProjection> projections =
+                userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(userId);
+
+        assertThat(projections).hasSize(2);
+        assertThat(projections.get(0).userBookId()).isEqualTo(newerUserBook.getId());
+        assertThat(projections.get(0).chatSessionCount()).isEqualTo(2L);
+        assertThat(projections.get(1).userBookId()).isEqualTo(olderUserBook.getId());
+        assertThat(projections.get(1).chatSessionCount()).isEqualTo(0L);
+    }
+
+    private void persistActiveSession(Long userBookId) {
+        aiChatSessionRepository.save(AiChatSession.create(userBookId));
+    }
+
+    private void persistClosedSession(Long userBookId) {
+        AiChatSession session = AiChatSession.create(userBookId);
+        session.close();
+        aiChatSessionRepository.save(session);
     }
 
     private static synchronized Long nextUserId() {
