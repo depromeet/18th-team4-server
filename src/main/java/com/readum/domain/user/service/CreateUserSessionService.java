@@ -14,11 +14,13 @@ import java.util.UUID;
 public class CreateUserSessionService {
 
     private final UserRepository userRepository;
+    private final NicknameGenerator nicknameGenerator;
 
     @Transactional
     public CreateUserSessionResult execute() {
         UUID sessionId = UUID.randomUUID();
-        User saved = userRepository.save(User.create(sessionId));
+        String nickname = nicknameGenerator.generate();
+        User saved = userRepository.save(User.create(sessionId, nickname));
         return CreateUserSessionResult.from(saved, sessionId);
     }
 }
