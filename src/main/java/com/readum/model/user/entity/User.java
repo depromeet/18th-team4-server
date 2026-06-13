@@ -61,4 +61,9 @@ public class User {
         this.lastSelectedUserBookId = userBookId;
         this.updatedAt = LocalDateTime.now();
     }
+
+    public void updateNickname(String nickname) {
+        this.nickname = nickname;
+        this.updatedAt = LocalDateTime.now();
+    }
 }
