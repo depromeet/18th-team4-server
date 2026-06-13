@@ -17,6 +17,7 @@ import com.readum.domain.aiChat.service.AiChatSessionCreateService;
 import com.readum.domain.aiChat.service.AiChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
+import com.readum.domain.aiChat.service.SummaryEditService;
 import com.readum.domain.aiChat.service.SummarySearchService;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.ConflictException;
@@ -79,6 +80,9 @@ class AiChatControllerTest {
     private SummaryDraftService summaryDraftService;
 
     @Mock
+    private SummaryEditService summaryEditService;
+
+    @Mock
     private SummarySearchService summarySearchService;
 
     @Mock
@@ -97,6 +101,7 @@ class AiChatControllerTest {
                 aiChatMessageSendService,
                 aiChatMessageSearchService,
                 summaryDraftService,
+                summaryEditService,
                 summarySearchService,
                 summaryDraftSearchService,
                 new MessageStreamSseSerializer(objectMapper)
