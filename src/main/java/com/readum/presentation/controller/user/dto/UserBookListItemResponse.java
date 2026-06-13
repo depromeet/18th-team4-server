@@ -8,7 +8,8 @@ public record UserBookListItemResponse(
         String title,
         String publisher,
         Integer publishedYear,
-        String coverUrl
+        String coverUrl,
+        long chatSessionCount
 ) {
 
     public static UserBookListItemResponse from(UserBookSearchItemResult item) {
@@ -18,7 +19,8 @@ public record UserBookListItemResponse(
                 item.title(),
                 item.publisher(),
                 item.publishedYear(),
-                item.coverUrl()
+                item.coverUrl(),
+                item.chatSessionCount()
         );
     }
 }

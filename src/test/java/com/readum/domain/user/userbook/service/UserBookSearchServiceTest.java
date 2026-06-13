@@ -46,8 +46,8 @@ class UserBookSearchServiceTest {
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(USER_ID))
                 .willReturn(List.of(
-                        new UserBookListItemProjection(20L, 2L, "최근 등록한 책", "출판사B", 2025, "http://example.com/b.jpg"),
-                        new UserBookListItemProjection(10L, 1L, "이전에 등록한 책", "출판사A", 2024, "http://example.com/a.jpg")
+                        new UserBookListItemProjection(20L, 2L, "최근 등록한 책", "출판사B", 2025, "http://example.com/b.jpg", 3L),
+                        new UserBookListItemProjection(10L, 1L, "이전에 등록한 책", "출판사A", 2024, "http://example.com/a.jpg", 0L)
                 ));
 
         UserBookSearchResult result = userBookSearchService.findMyBooks(USER_SESSION_ID);
@@ -59,9 +59,11 @@ class UserBookSearchServiceTest {
         assertThat(result.books().get(0).publisher()).isEqualTo("출판사B");
         assertThat(result.books().get(0).publishedYear()).isEqualTo(2025);
         assertThat(result.books().get(0).coverUrl()).isEqualTo("http://example.com/b.jpg");
+        assertThat(result.books().get(0).chatSessionCount()).isEqualTo(3L);
         assertThat(result.books().get(1).userBookId()).isEqualTo(10L);
         assertThat(result.books().get(1).bookId()).isEqualTo(1L);
         assertThat(result.books().get(1).title()).isEqualTo("이전에 등록한 책");
+        assertThat(result.books().get(1).chatSessionCount()).isEqualTo(0L);
     }
 
     @Test
