@@ -99,7 +99,7 @@ public class SummarySearchService {
         aiChatSessionRepository.findByIdAndOwner(sessionId, user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        Summary summary = summaryRepository.findByAiChatSessionId(sessionId)
+        Summary summary = summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDesc(sessionId)
                 .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_YET_CREATED));
 
         return switch (summary.getStatus()) {

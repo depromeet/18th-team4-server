@@ -12,19 +12,28 @@ import java.time.LocalDateTime;
 @TestOnly
 public final class UserFixture {
 
+    private static final String DEFAULT_NICKNAME = "책읽는여우";
+
     private UserFixture() {
     }
 
     /**
      * 저장되어 id 가 부여된, 온보딩 미완료의 평범한 사용자.
-     * deviceId/lastSelectedUserBookId 는 없는 상태.
+     * deviceId/lastSelectedUserBookId 는 없는 상태이며 닉네임은 기본값.
      */
     public static User persistedUser(Long id, String sessionId) {
-        return persistedUser(id, sessionId, null, false);
+        return persistedUser(id, sessionId, DEFAULT_NICKNAME, null, false);
     }
 
     /**
-     * 저장되어 id 가 부여된 사용자. 마지막 선택 도서와 온보딩 완료 여부를 지정한다.
+     * 저장되어 id 가 부여된 사용자. 닉네임을 지정한다 (닉네임 없는 기존 사용자 재현 시 null 전달).
+     */
+    public static User persistedUser(Long id, String sessionId, String nickname) {
+        return persistedUser(id, sessionId, nickname, null, false);
+    }
+
+    /**
+     * 저장되어 id 가 부여된 사용자. 마지막 선택 도서와 온보딩 완료 여부를 지정한다 (닉네임은 기본값).
      */
     public static User persistedUser(
             Long id,
@@ -32,7 +41,20 @@ public final class UserFixture {
             Long lastSelectedUserBookId,
             boolean onboardingCompleted
     ) {
+        return persistedUser(id, sessionId, DEFAULT_NICKNAME, lastSelectedUserBookId, onboardingCompleted);
+    }
+
+    /**
+     * 저장되어 id 가 부여된 사용자. 닉네임 / 마지막 선택 도서 / 온보딩 완료 여부를 모두 지정한다.
+     */
+    public static User persistedUser(
+            Long id,
+            String sessionId,
+            String nickname,
+            Long lastSelectedUserBookId,
+            boolean onboardingCompleted
+    ) {
         LocalDateTime now = LocalDateTime.now();
-        return new User(id, null, sessionId, lastSelectedUserBookId, onboardingCompleted, now, now);
+        return new User(id, null, sessionId, nickname, lastSelectedUserBookId, onboardingCompleted, now, now);
     }
 }

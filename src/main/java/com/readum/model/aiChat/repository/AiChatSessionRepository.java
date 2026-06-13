@@ -9,9 +9,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Long> {
@@ -130,4 +133,15 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
             @Param("messageCompletedStatus") AiChatMessage.Status messageCompletedStatus,
             Pageable pageable
     );
+
+    /**
+     * 등록 도서(UserBook) 삭제 cascade 용 — 그 도서의 모든 채팅 세션을 일괄 삭제한다.
+     * 세션에 속한 메시지(AiChatMessage) 를 먼저 삭제한 뒤 호출해야 메시지 고아가 남지 않는다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from AiChatSession aiChatSession where aiChatSession.userBookId = :userBookId")
+    int deleteAllByUserBookId(@Param("userBookId") Long userBookId);
+
+    List<AiChatSession> findByStatusAndAccumulatedTokensGreaterThanEqualAndUpdatedAtAfter(
+            AiChatSession.Status status, int accumulatedTokens, LocalDateTime updatedAt);
 }

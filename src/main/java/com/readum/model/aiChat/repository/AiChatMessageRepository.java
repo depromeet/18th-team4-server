@@ -4,6 +4,7 @@ import com.readum.model.aiChat.entity.AiChatMessage;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -64,6 +65,19 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
     List<AiChatMessage> findValidMessagesBySessionIdOrderByCreatedAtAsc(@Param("sessionId") Long sessionId);
 
     /**
+     * 마지막 요약 이후 유효 메시지 조회.
+     * 스케줄러가 요약 대상 메시지를 추출할 때 사용한다.
+     * since 시점 이후(초과) COMPLETED 메시지만 createdAt 오름차순으로 반환한다.
+     */
+    default List<AiChatMessage> findValidMessagesSince(Long sessionId, LocalDateTime since) {
+        return findBySessionIdAndStatusAndCreatedAtAfterOrderByCreatedAtAsc(
+                sessionId, AiChatMessage.Status.COMPLETED, since);
+    }
+
+    List<AiChatMessage> findBySessionIdAndStatusAndCreatedAtAfterOrderByCreatedAtAsc(
+            Long sessionId, AiChatMessage.Status status, LocalDateTime createdAt);
+
+    /**
      * 사용자별 burst rate-limit 검사를 위한 카운트.
      * since 이후 생성된, 특정 role + status 메시지 수를 소유자(userId) 가 자신의 UserBook 으로 만든 모든 세션에서 합산한다.
      * AiChatSessionRepository.findByIdAndOwner 와 동일한 패턴으로 EXISTS 서브쿼리를 거쳐
@@ -105,4 +119,22 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
         return countRecentMessagesByRoleStatusAndOwner(
                 AiChatMessage.Role.USER, AiChatMessage.Status.REJECTED, userId, since);
     }
+
+    /**
+     * 등록 도서(UserBook) 삭제 cascade 용 — 그 도서의 모든 세션에 속한 메시지를 일괄 삭제한다.
+     * AiChatMessage 는 userBookId 를 직접 갖지 않으므로 session_id 를 통해 세션을 거치는 서브쿼리로 좁힌다.
+     * 삭제 대상 테이블(ai_chat_message) 과 서브쿼리 테이블(ai_chat_session) 이 달라 MySQL 8.4 의
+     * "삭제 대상 테이블 자기참조 서브쿼리 금지" 제약에 걸리지 않는다.
+     * 반드시 세션 삭제보다 먼저 호출해야 한다 (세션이 사라지면 이 서브쿼리가 메시지를 찾지 못한다).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            delete from AiChatMessage aiChatMessage
+             where aiChatMessage.sessionId in (
+                   select aiChatSession.id
+                     from AiChatSession aiChatSession
+                    where aiChatSession.userBookId = :userBookId
+                 )
+            """)
+    int deleteAllByUserBookId(@Param("userBookId") Long userBookId);
 }

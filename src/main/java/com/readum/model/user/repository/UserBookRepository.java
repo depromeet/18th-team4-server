@@ -28,6 +28,9 @@ public interface UserBookRepository extends JpaRepository<UserBook, Long> {
                      , book.publisher
                      , book.publishedYear
                      , book.coverUrl
+                     , (select count(aiChatSession.id)
+                          from AiChatSession aiChatSession
+                         where aiChatSession.userBookId = userBook.id)
                    )
               from UserBook userBook
               join Book book

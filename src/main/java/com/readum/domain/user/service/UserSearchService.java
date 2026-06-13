@@ -1,6 +1,7 @@
 package com.readum.domain.user.service;
 
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.dto.UserProfileResult;
 import com.readum.domain.user.dto.UserSessionInfoResult;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.user.repository.UserBookRepository;
@@ -17,11 +18,20 @@ public class UserSearchService {
     private final UserBookRepository userBookRepository;
 
     public UserSessionInfoResult findSessionInfo(String sessionId) {
-        User user = userRepository.findBySessionId(sessionId)
-                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
+        User user = getUserBySessionIdOrThrow(sessionId);
 
         boolean hasRegisteredBooks = userBookRepository.existsByUserId(user.getId());
 
         return UserSessionInfoResult.from(user, hasRegisteredBooks);
+    }
+
+    public UserProfileResult findProfile(String sessionId) {
+        User user = getUserBySessionIdOrThrow(sessionId);
+        return UserProfileResult.from(user);
+    }
+
+    private User getUserBySessionIdOrThrow(String sessionId) {
+        return userRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
     }
 }

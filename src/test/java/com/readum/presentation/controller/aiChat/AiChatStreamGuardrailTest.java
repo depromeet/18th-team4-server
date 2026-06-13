@@ -90,7 +90,7 @@ class AiChatStreamGuardrailTest {
 
     @BeforeEach
     void setUp() {
-        User user = userRepository.save(User.create(UUID.randomUUID()));
+        User user = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
         cookie = new Cookie("user_session", user.getSessionId());
 
         Book book = bookRepository.save(BookFixture.persistedBook(

@@ -33,6 +33,7 @@ public class SummaryDraftSearchService {
         userBookRepository.findByIdAndUserId(session.getUserBookId(), user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        return SummaryDraftEligibilityResult.from(summaryDraftPolicy.evaluate(session));
+        int progressPercent = summaryDraftPolicy.calculateProgressPercent(session.getAccumulatedTokens());
+        return SummaryDraftEligibilityResult.from(summaryDraftPolicy.evaluate(session), progressPercent);
     }
 }

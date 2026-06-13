@@ -31,6 +31,10 @@ public class User {
     @Column(name = "session_id", nullable = false, unique = true, length = 36)
     private String sessionId;
 
+    // 기존 사용자 데이터에는 닉네임이 없을 수 있어 nullable 허용. 신규 가입부터 서버가 임의 배정한다.
+    @Column(name = "nickname", length = 10)
+    private String nickname;
+
     @Column(name = "last_selected_user_book_id")
     private Long lastSelectedUserBookId;
 
@@ -43,9 +47,9 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    public static User create(UUID sessionId) {
+    public static User create(UUID sessionId, String nickname) {
         LocalDateTime now = LocalDateTime.now();
-        return new User(null, null, sessionId.toString(), null, false, now, now);
+        return new User(null, null, sessionId.toString(), nickname, null, false, now, now);
     }
 
     public void completeOnboarding() {

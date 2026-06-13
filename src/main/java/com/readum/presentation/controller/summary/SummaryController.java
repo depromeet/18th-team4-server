@@ -1,19 +1,25 @@
 package com.readum.presentation.controller.summary;
 
 import com.readum.domain.summary.dto.MonthlySummaryResult;
+import com.readum.domain.summary.dto.SummaryHistoryListResult;
 import com.readum.domain.summary.dto.SummaryResult;
+import com.readum.domain.summary.service.SummaryHistorySearchService;
 import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.summary.dto.MonthlySummariesResponse;
 import com.readum.presentation.controller.summary.dto.SummaryDetailResponse;
+import com.readum.presentation.controller.summary.dto.SummaryHistoryListRequest;
+import com.readum.presentation.controller.summary.dto.SummaryHistoryListResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -22,16 +28,39 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.YearMonth;
 import java.util.List;
 
-@Tag(name = "감상 기록", description = "홈 캘린더에서 보는 날짜별 감상 기록(완성된 감상문) 조회")
+@Tag(name = "감상 기록", description = "완성된 감상문 조회 — 전체 목록(무한스크롤), 홈 캘린더의 월별·날짜별 조회, 단건 상세")
 @RestController
 @RequestMapping("/api/v1/summaries")
 @RequiredArgsConstructor
 public class SummaryController {
 
+    private final SummaryHistorySearchService summaryHistorySearchService;
     private final SummarySearchService summarySearchService;
 
     @Operation(
-            summary = "월별 감상 기록 조회",
+            summary = "내 감상 기록 목록 조회",
+            description = "로그인한 사용자 본인의 감상 기록을 생성일 내림차순(최신순)으로 페이지네이션 조회한다. " +
+                    "채팅 세션이 종료(CLOSED)되었고 감상문이 완성(COMPLETED)된 기록만 포함한다 — " +
+                    "아직 대화 중인 세션에 자동 생성된 감상문은 제외된다. " +
+                    "감상문 내용은 100자까지만 노출하고 초과분은 \"...\" 로 줄여 응답한다. " +
+                    "한 번에 20개씩 조회하며, 기록이 없으면 빈 배열로 200 응답한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "조회 성공"),
+            @ApiResponse(responseCode = "400", description = "page 검증 실패"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
+    })
+    @GetMapping
+    public ResponseEntity<GlobalApiResponse<SummaryHistoryListResponse>> getMyHistory(
+            @CookieValue(name = "user_session") String userSessionId,
+            @Valid @ModelAttribute SummaryHistoryListRequest request
+    ) {
+        SummaryHistoryListResult result = summaryHistorySearchService.findMyHistory(request.toCommand(userSessionId));
+        return GlobalApiResponse.ok(SummaryHistoryListResponse.from(result));
+    }
+
+    @Operation(
+            summary = "월별 감상 기록 조회 (홈 캘린더)",
             description = """
                     한 달치 완성된 감상문을 평탄한 리스트로 반환한다.
                     최신순 정렬 — summaryDate 내림차순, 같은 날짜 안에서는 생성 시각 내림차순.
@@ -44,7 +73,7 @@ public class SummaryController {
             @ApiResponse(responseCode = "400", description = "yearMonth 형식 오류 또는 누락 (YYYY-MM)"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
-    @GetMapping
+    @GetMapping("/calendar")
     public ResponseEntity<GlobalApiResponse<MonthlySummariesResponse>> getMonthlySummaries(
             @CookieValue(name = "user_session") String userSessionId,
             @RequestParam YearMonth yearMonth

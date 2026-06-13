@@ -26,7 +26,10 @@ import java.time.LocalDateTime;
                 @Index(name = "idx_summary_user_book", columnList = "user_book_id")
         },
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_summary_ai_chat_session", columnNames = "ai_chat_session_id")
+                @UniqueConstraint(
+                        name = "uk_summary_session_date",
+                        columnNames = {"ai_chat_session_id", "summary_date"}
+                )
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -54,6 +57,9 @@ public class Summary {
     @Column(name = "status", nullable = false, length = 20)
     private Status status;
 
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount;
+
     @Column(name = "quote", columnDefinition = "TEXT")
     private String quote;
 
@@ -72,20 +78,18 @@ public class Summary {
     /**
      * 감상문 생성 시작 시점에 IN_PROGRESS 상태로 레코드를 먼저 생성한다.
      * content(title/body/quote)는 AI 응답 후 complete() 로 채운다.
-     * summaryDate 는 요약 생성을 요청한(수동/자동) 날짜 (캘린더 표시 기준).
      */
     public static Summary createInProgress(Long userBookId, Long aiChatSessionId, LocalDate summaryDate) {
         LocalDateTime now = LocalDateTime.now();
         return new Summary(
                 null, userBookId, aiChatSessionId, summaryDate,
-                Status.IN_PROGRESS, null, null, null, now, now
+                Status.IN_PROGRESS, 0, null, null, null, now, now
         );
     }
 
-    public void complete(String title, String body, String quote) {
+    public void complete(String title, String body) {
         this.title = title;
         this.body = body;
-        this.quote = quote;
         this.status = Status.COMPLETED;
         this.updatedAt = LocalDateTime.now();
     }
@@ -95,7 +99,21 @@ public class Summary {
         this.updatedAt = LocalDateTime.now();
     }
 
+    public void resetToInProgress() {
+        this.status = Status.IN_PROGRESS;
+        this.retryCount++;
+        this.title = null;
+        this.body = null;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     public boolean isCompleted() {
         return this.status == Status.COMPLETED;
+    }
+
+    public void edit(String title, String body) {
+        this.title = title;
+        this.body = body;
+        this.updatedAt = LocalDateTime.now();
     }
 }

@@ -167,7 +167,7 @@ class AiChatSessionRepositoryTest {
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.CLOSED, "completed-session");
         Summary summary = summaryRepository.save(Summary.createInProgress(userBook.getId(), session.getId(), LocalDate.now()));
-        summary.complete("title", "body", "quote");
+        summary.complete("title", "body");
         summaryRepository.saveAndFlush(summary);
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
