@@ -21,7 +21,8 @@ public enum AiChatErrorCode implements ErrorCode {
     AI_STREAM_INTERRUPTED("AI 응답이 중단되었습니다."),
     SUMMARY_NOT_FOUND("아직 생성된 감상문이 없습니다."),
     SUMMARY_IN_PROGRESS("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."),
-    SUMMARY_GENERATION_FAILED("감상문 생성에 실패했습니다.");
+    SUMMARY_GENERATION_FAILED("감상문 생성에 실패했습니다."),
+    SUMMARY_NOT_COMPLETED("완성된 감상문만 수정할 수 있습니다.");
 
     private final String message;
 

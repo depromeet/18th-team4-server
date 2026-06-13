@@ -102,10 +102,18 @@ public class Summary {
     public void resetToInProgress() {
         this.status = Status.IN_PROGRESS;
         this.retryCount++;
+        this.title = null;
+        this.body = null;
         this.updatedAt = LocalDateTime.now();
     }
 
     public boolean isCompleted() {
         return this.status == Status.COMPLETED;
+    }
+
+    public void edit(String title, String body) {
+        this.title = title;
+        this.body = body;
+        this.updatedAt = LocalDateTime.now();
     }
 }

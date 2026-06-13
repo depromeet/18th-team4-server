@@ -165,7 +165,7 @@ class UserBookDeleteServiceCascadeTest {
     }
 
     private User persistUser() {
-        return userRepository.saveAndFlush(User.create(UUID.randomUUID()));
+        return userRepository.saveAndFlush(User.create(UUID.randomUUID(), "테스트유저"));
     }
 
     private Book persistBook(String externalId) {
@@ -186,6 +186,6 @@ class UserBookDeleteServiceCascadeTest {
     }
 
     private Summary persistSummary(Long userBookId, Long sessionId) {
-        return summaryRepository.saveAndFlush(Summary.createInProgress(userBookId, sessionId));
+        return summaryRepository.saveAndFlush(Summary.createInProgress(userBookId, sessionId, java.time.LocalDate.now()));
     }
 }

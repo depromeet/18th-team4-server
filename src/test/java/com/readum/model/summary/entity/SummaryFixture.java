@@ -31,4 +31,32 @@ public final class SummaryFixture {
                 Summary.Status.IN_PROGRESS, 0, null, null, null, now, now
         );
     }
+
+    /**
+     * 저장되어 id 가 부여된, COMPLETED 상태의 감상문.
+     * AI 가 생성한 제목·본문이 채워져 있다.
+     */
+    public static Summary persistedCompletedSummary(
+            Long id, Long userBookId, Long aiChatSessionId,
+            String title, String body
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Summary(
+                id, userBookId, aiChatSessionId, LocalDate.now(),
+                Summary.Status.COMPLETED, 0, null, title, body, now, now
+        );
+    }
+
+    /**
+     * 저장되어 id 가 부여된, FAILED 상태의 감상문.
+     */
+    public static Summary persistedFailedSummary(
+            Long id, Long userBookId, Long aiChatSessionId
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Summary(
+                id, userBookId, aiChatSessionId, LocalDate.now(),
+                Summary.Status.FAILED, 1, null, null, null, now, now
+        );
+    }
 }
