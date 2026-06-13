@@ -110,4 +110,10 @@ public class Summary {
     public boolean isCompleted() {
         return this.status == Status.COMPLETED;
     }
+
+    public void edit(String title, String body) {
+        this.title = title;
+        this.body = body;
+        this.updatedAt = LocalDateTime.now();
+    }
 }
