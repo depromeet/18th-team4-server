@@ -5,6 +5,7 @@ import com.readum.domain.user.dto.UserProfileResult;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.user.service.CompleteOnboardingService;
 import com.readum.domain.user.service.CreateUserSessionService;
+import com.readum.domain.user.service.UpdateNicknameService;
 import com.readum.domain.user.service.UserSearchService;
 import com.readum.presentation.common.GlobalExceptionHandler;
 import jakarta.servlet.http.Cookie;
@@ -36,12 +37,15 @@ class UserControllerTest {
     @Mock
     private CompleteOnboardingService completeOnboardingService;
 
+    @Mock
+    private UpdateNicknameService updateNicknameService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         UserController controller = new UserController(
-                createUserSessionService, userSearchService, completeOnboardingService);
+                createUserSessionService, userSearchService, completeOnboardingService, updateNicknameService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

@@ -2,14 +2,18 @@ package com.readum.presentation.controller.user;
 
 import com.readum.domain.user.dto.CompleteOnboardingResult;
 import com.readum.domain.user.dto.CreateUserSessionResult;
+import com.readum.domain.user.dto.UpdateNicknameResult;
 import com.readum.domain.user.dto.UserProfileResult;
 import com.readum.domain.user.dto.UserSessionInfoResult;
 import com.readum.domain.user.service.CompleteOnboardingService;
 import com.readum.domain.user.service.CreateUserSessionService;
+import com.readum.domain.user.service.UpdateNicknameService;
 import com.readum.domain.user.service.UserSearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.controller.user.dto.CompleteOnboardingResponse;
 import com.readum.presentation.controller.user.dto.CreateUserSessionResponse;
+import com.readum.presentation.controller.user.dto.UpdateNicknameRequest;
+import com.readum.presentation.controller.user.dto.UpdateNicknameResponse;
 import com.readum.presentation.controller.user.dto.UserProfileResponse;
 import com.readum.presentation.controller.user.dto.UserSessionInfoResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,7 +28,9 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -42,6 +48,7 @@ public class UserController {
     private final CreateUserSessionService createUserSessionService;
     private final UserSearchService userSearchService;
     private final CompleteOnboardingService completeOnboardingService;
+    private final UpdateNicknameService updateNicknameService;
 
     @Value("${user.session-cookie-secure:true}")
     private boolean sessionCookieSecure;
@@ -107,6 +114,24 @@ public class UserController {
             @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
         CompleteOnboardingResult result = completeOnboardingService.execute(sessionId);
         return GlobalApiResponse.ok(CompleteOnboardingResponse.from(result));
+    }
+
+    @Operation(
+            summary = "닉네임 수정",
+            description = "현재 세션 사용자의 닉네임을 변경한다. " +
+                    "닉네임은 영문 대/소문자, 한글, 숫자로 구성된 1~10자여야 한다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "닉네임 수정 성공"),
+            @ApiResponse(responseCode = "400", description = "닉네임 형식이 올바르지 않음"),
+            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+    })
+    @PutMapping("/me/nickname")
+    public ResponseEntity<GlobalApiResponse<UpdateNicknameResponse>> updateNickname(
+            @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId,
+            @RequestBody UpdateNicknameRequest request) {
+        UpdateNicknameResult result = updateNicknameService.execute(request.toCommand(sessionId));
+        return GlobalApiResponse.ok(UpdateNicknameResponse.from(result));
     }
 
     private ResponseCookie buildSessionCookie(String value, long maxAgeSeconds) {
