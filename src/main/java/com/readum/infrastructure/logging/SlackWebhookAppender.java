@@ -3,6 +3,8 @@ package com.readum.infrastructure.logging;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.AppenderBase;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -23,6 +25,8 @@ import java.util.concurrent.ConcurrentMap;
  * <p>Slack 으로 보내기 전 같은 오류(logger + level + 예외 클래스 + 메시지)는 일정 시간 동안
  * 중복 전송을 억제하고, 토큰/Authorization 등 민감 문자열은 마스킹한다.
  */
+@Slf4j
+@Setter
 public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
 
     private String webhookUrl;
@@ -37,32 +41,14 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
 
     private final ConcurrentMap<String, Long> lastSentAt = new ConcurrentHashMap<>();
 
-    public void setWebhookUrl(String webhookUrl) {
-        this.webhookUrl = webhookUrl;
-    }
-
-    public void setAppName(String appName) {
-        this.appName = appName;
-    }
-
-    public void setEnv(String env) {
-        this.env = env;
-    }
-
-    public void setDuplicateSuppressMillis(long duplicateSuppressMillis) {
-        this.duplicateSuppressMillis = duplicateSuppressMillis;
-    }
-
-    public void setMaxStackTraceChars(int maxStackTraceChars) {
-        this.maxStackTraceChars = maxStackTraceChars;
-    }
-
     @Override
     public void start() {
         if (webhookUrl == null || webhookUrl.isBlank()) {
             addWarn("Slack webhookUrl is empty. SlackWebhookAppender will not start.");
             return;
         }
+        log.info("Starting SlackWebhookAppender with webhookUrl: {}", webhookUrl);
+
         super.start();
     }
 

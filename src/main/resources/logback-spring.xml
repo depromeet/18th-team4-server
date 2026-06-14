@@ -7,8 +7,7 @@
         Slack 알림 / AI 감사 로그와 같은 키로 한 요청을 추적할 수 있다.
         include 보다 먼저 정의해야 Spring Boot 의 ${FILE_LOG_PATTERN:-기본값} 가 이 값을 채택한다.
     -->
-    <property name="FILE_LOG_PATTERN"
-              value="[%d{yyyy-MM-dd HH:mm:ss}:%-3relative] %-5level ${PID:-} --- [%15.15thread] traceId=%X{traceId:-} spanId=%X{spanId:-} %-40.40logger{36} : %msg%n"/>
+    <property name="FILE_LOG_PATTERN" value="[%d{yyyy-MM-dd HH:mm:ss}:%-3relative] %-5level ${PID:-} --- [%15.15thread] traceId=%X{traceId:-} spanId=%X{spanId:-} %-40.40logger{36} : %msg%n"/>
 
     <!--
         Spring Boot 가 제공하는 기본 설정을 가져온다.
@@ -19,33 +18,22 @@
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
     <!-- application.yml 값 / 환경 변수 참조 -->
-    <springProperty scope="context" name="LOG_PATH" source="log.config.path" defaultValue="/var/log/readum"/>
-    <springProperty scope="context" name="LOG_FILE_NAME" source="log.config.filename" defaultValue="readum"/>
-    <springProperty scope="context" name="LOG_MAX_FILE_SIZE" source="log.config.max-file-size" defaultValue="20MB"/>
-    <springProperty scope="context" name="LOG_MAX_HISTORY" source="log.config.max-history" defaultValue="7"/>
-    <springProperty scope="context" name="LOG_TOTAL_SIZE_CAP" source="log.config.total-size-cap" defaultValue="500MB"/>
+    <springProperty scope="context" name="LOG_PATH" source="log.config.path"/>
+    <springProperty scope="context" name="LOG_FILE_NAME" source="log.config.filename"/>
+    <springProperty scope="context" name="LOG_MAX_FILE_SIZE" source="log.config.max-file-size"/>
+    <springProperty scope="context" name="LOG_MAX_HISTORY" source="log.config.max-history"/>
+    <springProperty scope="context" name="LOG_TOTAL_SIZE_CAP" source="log.config.total-size-cap"/>
 
-    <springProperty scope="context" name="AI_AUDIT_MAX_FILE_SIZE" source="log.config.ai-audit.max-file-size" defaultValue="20MB"/>
-    <springProperty scope="context" name="AI_AUDIT_MAX_HISTORY" source="log.config.ai-audit.max-history" defaultValue="7"/>
-    <springProperty scope="context" name="AI_AUDIT_TOTAL_SIZE_CAP" source="log.config.ai-audit.total-size-cap" defaultValue="300MB"/>
+    <springProperty scope="context" name="AI_AUDIT_MAX_FILE_SIZE" source="log.config.ai-audit.max-file-size"/>
+    <springProperty scope="context" name="AI_AUDIT_MAX_HISTORY" source="log.config.ai-audit.max-history"/>
+    <springProperty scope="context" name="AI_AUDIT_TOTAL_SIZE_CAP" source="log.config.ai-audit.total-size-cap"/>
 
-    <springProperty scope="context" name="SLACK_WEBHOOK_URL" source="SLACK_WEBHOOK_URL" defaultValue=""/>
-    <springProperty scope="context" name="APP_ENV" source="APP_ENV" defaultValue="unknown"/>
-    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="readum"/>
+    <springProperty scope="context" name="SLACK_WEBHOOK_URL" source="slack.webhook-url" defaultValue=""/>
+    <springProperty scope="context" name="APP_ENV" source="APP_ENV"/>
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name"/>
 
-    <!-- 콘솔 출력 (모든 환경 공통, 색상 포함) -->
+    <!-- 콘솔 출력 (모든 환경 공통, 색상 포함). 자체 필터 없음 → root 레벨(DEBUG)까지 그대로 출력 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <charset>UTF-8</charset>
-            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
-        </encoder>
-    </appender>
-
-    <!-- INFO 이상만 콘솔 출력 (운영 환경에서 콘솔을 조용하게 유지) -->
-    <appender name="CONSOLE_INFO_ONLY" class="ch.qos.logback.core.ConsoleAppender">
-        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <level>INFO</level>
-        </filter>
         <encoder>
             <charset>UTF-8</charset>
             <pattern>${CONSOLE_LOG_PATTERN}</pattern>
@@ -54,7 +42,7 @@
 
     <!-- ================= local : 콘솔만 ================= -->
     <springProfile name="local">
-        <root level="INFO">
+        <root level="DEBUG">
             <appender-ref ref="CONSOLE"/>
         </root>
     </springProfile>
@@ -64,6 +52,10 @@
         <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
             <file>${LOG_PATH}/${LOG_FILE_NAME}.log</file>
             <append>true</append>
+            <!-- root 가 DEBUG 라도 파일에는 INFO 이상만 남긴다 (DEBUG 는 콘솔에서만 확인) -->
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>INFO</level>
+            </filter>
             <encoder>
                 <charset>UTF-8</charset>
                 <pattern>${FILE_LOG_PATTERN}</pattern>
@@ -116,18 +108,22 @@
             <appender-ref ref="AI_PROMPT_AUDIT_FILE"/>
         </logger>
 
-        <root level="INFO">
+        <root level="DEBUG">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
             <appender-ref ref="ASYNC_SLACK_ERROR"/>
         </root>
     </springProfile>
 
-    <!-- ================= prod : 콘솔(INFO+) + 롤링 파일 + Slack + AI 감사 ================= -->
+    <!-- ================= prod : 콘솔(DEBUG) + 롤링 파일(INFO+) + Slack + AI 감사 ================= -->
     <springProfile name="prod">
         <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
             <file>${LOG_PATH}/${LOG_FILE_NAME}.log</file>
             <append>true</append>
+            <!-- root 가 DEBUG 라도 파일에는 INFO 이상만 남긴다 (DEBUG 는 콘솔에서만 확인) -->
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>INFO</level>
+            </filter>
             <encoder>
                 <charset>UTF-8</charset>
                 <pattern>${FILE_LOG_PATTERN}</pattern>
@@ -178,8 +174,8 @@
             <appender-ref ref="AI_PROMPT_AUDIT_FILE"/>
         </logger>
 
-        <root level="INFO">
-            <appender-ref ref="CONSOLE_INFO_ONLY"/>
+        <root level="DEBUG">
+            <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
             <appender-ref ref="ASYNC_SLACK_ERROR"/>
         </root>
@@ -187,7 +183,7 @@
 
     <!-- ===== 그 외(프로파일 미지정: 테스트 등) : 콘솔만 — /var/log 접근 안 함 ===== -->
     <springProfile name="!local &amp; !dev &amp; !prod">
-        <root level="INFO">
+        <root level="DEBUG">
             <appender-ref ref="CONSOLE"/>
         </root>
     </springProfile>

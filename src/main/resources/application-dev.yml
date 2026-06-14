@@ -32,7 +32,6 @@ readum:
     moderation:
       model: omni-moderation-latest
       # 책 맥락 유무와 무관하게 항상 차단. 카테고리 이름 정본은 OpenAiInputModerationClientImpl 레지스트리.
-      # (Spring AI 2.0.0-M4 Categories 에 illicit-violent getter 가 없어 dangerous-and-criminal-content 로 대체)
       always-block-categories:
         - self-harm
         - self-harm-intent

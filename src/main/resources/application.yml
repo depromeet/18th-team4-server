@@ -4,8 +4,6 @@ spring:
   ai:
     chat:
       observations:
-        # AI 관측 데이터(메트릭/트레이스)에 prompt·completion 원문을 내보내지 않는다.
-        # (Spring AI 기본값도 false 이지만 운영 안전을 위해 명시한다.)
         log-prompt: false
         log-completion: false
         include-error-logging: true
@@ -74,3 +72,6 @@ management:
     metrics:
       export:
         enabled: true
+
+slack:
+  webhook-url: ${SLACK_WEBHOOK_URL}
