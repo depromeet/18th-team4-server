@@ -1,6 +1,7 @@
 package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.repository.projection.SessionLastChattedProjection;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -9,9 +10,27 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Long> {
+
+    /**
+     * 여러 세션의 마지막 COMPLETED 메시지 시각을 한 번에 집계 — 책별 세션 목록의 "마지막 대화일" 합성용.
+     */
+    @Query("""
+            select new com.readum.model.aiChat.repository.projection.SessionLastChattedProjection(
+                       aiChatMessage.sessionId
+                     , max(aiChatMessage.createdAt)
+                   )
+              from AiChatMessage aiChatMessage
+             where aiChatMessage.sessionId in :sessionIds
+               and aiChatMessage.status = :status
+             group by aiChatMessage.sessionId
+            """)
+    List<SessionLastChattedProjection> findLastChattedAtBySessionIds(
+            @Param("sessionIds") Collection<Long> sessionIds,
+            @Param("status") AiChatMessage.Status status);
 
     /**
      * 사용자에게 노출할 메시지 이력 조회.

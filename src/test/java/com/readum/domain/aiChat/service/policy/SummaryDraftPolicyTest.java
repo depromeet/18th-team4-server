@@ -33,23 +33,23 @@ class SummaryDraftPolicyTest {
     }
 
     @Test
-    void 종료된_세션이면_SESSION_ALREADY_CLOSED_사유로_evaluate된다() {
-        AiChatSession session = closedSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS + 100);
+    void 잠긴_세션이면_SUMMARY_IN_PROGRESS_사유로_evaluate된다() {
+        AiChatSession session = lockedSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS + 100);
 
         SummaryDraftEligibility result = summaryDraftPolicy.evaluate(session);
 
         assertThat(result.eligible()).isFalse();
-        assertThat(result.reason()).isEqualTo(IneligibleReason.SESSION_ALREADY_CLOSED);
+        assertThat(result.reason()).isEqualTo(IneligibleReason.SUMMARY_IN_PROGRESS);
     }
 
     @Test
-    void 종료된_세션에_assertEligible하면_ConflictException이_발생한다() {
-        AiChatSession session = closedSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS + 100);
+    void 잠긴_세션에_assertEligible하면_ConflictException이_발생한다() {
+        AiChatSession session = lockedSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS + 100);
 
         assertThatThrownBy(() -> summaryDraftPolicy.assertEligible(session))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.SESSION_ALREADY_CLOSED);
+                .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
     }
 
     @Test
@@ -82,12 +82,12 @@ class SummaryDraftPolicyTest {
     }
 
     @Test
-    void 종료_상태가_토큰_부족보다_먼저_평가된다() {
-        AiChatSession session = closedSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS - 1);
+    void 잠김_상태가_토큰_부족보다_먼저_평가된다() {
+        AiChatSession session = lockedSession(SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS - 1);
 
         SummaryDraftEligibility result = summaryDraftPolicy.evaluate(session);
 
-        assertThat(result.reason()).isEqualTo(IneligibleReason.SESSION_ALREADY_CLOSED);
+        assertThat(result.reason()).isEqualTo(IneligibleReason.SUMMARY_IN_PROGRESS);
     }
 
     private AiChatSession activeSession(int accumulatedTokens) {
@@ -96,8 +96,8 @@ class SummaryDraftPolicyTest {
         );
     }
 
-    private AiChatSession closedSession(int accumulatedTokens) {
-        return AiChatSessionFixture.persistedClosedSession(
+    private AiChatSession lockedSession(int accumulatedTokens) {
+        return AiChatSessionFixture.persistedLockedSession(
                 SESSION_ID, USER_BOOK_ID, 0, accumulatedTokens, null
         );
     }

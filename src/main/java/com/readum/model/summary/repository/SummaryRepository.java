@@ -1,6 +1,5 @@
 package com.readum.model.summary.repository;
 
-import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.repository.projection.SummaryHistoryProjection;
 import org.springframework.data.domain.Pageable;
@@ -11,6 +10,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,28 +25,48 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
     @Query("delete from Summary summary where summary.userBookId = :userBookId")
     int deleteAllByUserBookId(@Param("userBookId") Long userBookId);
 
-    Optional<Summary> findByAiChatSessionIdAndSummaryDate(Long aiChatSessionId, LocalDate summaryDate);
-
-    Optional<Summary> findFirstByAiChatSessionIdOrderByCreatedAtDesc(Long aiChatSessionId);
-
-    List<Summary> findByStatusAndRetryCountLessThan(Summary.Status status, int retryCount);
-
     /**
-     * 사용자 본인의 감상 기록 목록을 최신순(createdAt DESC, id DESC) 으로 Slice 조회한다.
-     * 종료(CLOSED)된 세션의 완성(COMPLETED)된 감상문만 포함한다 —
-     * 스케줄러가 ACTIVE 세션에 자동 생성한 COMPLETED 감상문은 sessionStatus=CLOSED 필터로 제외된다.
-     *
-     * 호출자 시그니처를 단순하게 유지하기 위해 default 메서드로 감싸고, 내부 @Query 에 enum 파라미터를 바인딩한다.
+     * 월별 달력용 — 사용자의 등록 도서들에 속한 감상문을 생성일(createdAt) 기간으로 좁혀
+     * 최신순(createdAt DESC, id DESC) 으로 반환한다.
+     * 감상문은 성공 기록만 남으므로(write-once) 상태 필터가 필요 없다. 별도 summaryDate 컬럼을 두지 않고
+     * "생성된 날짜" 는 createdAt 으로 본다. 기간은 [startDate 00:00, endDate+1일 00:00) 반열림으로 좁힌다.
      */
-    default Slice<SummaryHistoryProjection> findCompletedHistoryByUserId(Long userId, Pageable pageable) {
-        return findCompletedHistoryByUserIdInternal(
-                userId, Summary.Status.COMPLETED, AiChatSession.Status.CLOSED, pageable);
+    List<Summary> findByUserBookIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
+            Collection<Long> userBookIds, LocalDateTime startInclusive, LocalDateTime endExclusive);
+
+    default List<Summary> findMonthlyCompleted(
+            Collection<Long> userBookIds, LocalDate startDate, LocalDate endDate) {
+        return findByUserBookIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
+                userBookIds, startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay());
     }
 
     /**
+     * 세션의 가장 최근 감상문(= 현재 감상문). 세션당 여러 건(재생성 이력)이 쌓이므로 최신 한 건을 고른다.
+     * 같은 createdAt 동시 생성 대비 id 로 tiebreak.
+     */
+    Optional<Summary> findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(Long aiChatSessionId);
+
+    /**
+     * 여러 세션의 최신 감상문을 한 번에 — 책별 세션 목록·표시상태 합성용.
+     * 세션별 max(id) 행만 추린다.
+     */
+    @Query("""
+            select summary
+              from Summary summary
+             where summary.aiChatSessionId in :sessionIds
+               and summary.id = (
+                     select max(latest.id)
+                       from Summary latest
+                      where latest.aiChatSessionId = summary.aiChatSessionId
+                   )
+            """)
+    List<Summary> findLatestByAiChatSessionIdIn(@Param("sessionIds") Collection<Long> sessionIds);
+
+    /**
+     * 사용자 본인의 감상 기록 목록 — 세션(=책)당 가장 최근 감상문 1건만, 최신순(createdAt DESC, id DESC) Slice.
+     * 세션당 여러 건(매일 자동 생성 등)이 쌓이므로 세션별 최신 행만 골라야 목록이 도배되지 않는다.
      * Summary / AiChatSession / UserBook / Book 사이에 JPA 연관관계가 없어 on 절로 직접 join 한다 (Hibernate 6+).
-     * 소유권 확인을 EXISTS 서브쿼리가 아니라 inner join 으로 하는 이유 — book.title 컬럼을 실제로 투영해야 하므로
-     * UserBook/Book join 이 불가피하고, userBook.userId 필터가 곧 소유권 검증을 겸한다.
+     * book.title 을 투영해야 하므로 UserBook/Book join 이 불가피하고, userBook.userId 필터가 소유권 검증을 겸한다.
      */
     @Query("""
             select new com.readum.model.summary.repository.projection.SummaryHistoryProjection(
@@ -61,14 +82,13 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
               join Book book
                 on book.id = userBook.bookId
              where userBook.userId = :userId
-               and summary.status = :summaryStatus
-               and aiChatSession.status = :sessionStatus
+               and summary.id = (
+                     select max(latest.id)
+                       from Summary latest
+                      where latest.aiChatSessionId = summary.aiChatSessionId
+                   )
              order by summary.createdAt desc
                     , summary.id desc
             """)
-    Slice<SummaryHistoryProjection> findCompletedHistoryByUserIdInternal(
-            @Param("userId") Long userId,
-            @Param("summaryStatus") Summary.Status summaryStatus,
-            @Param("sessionStatus") AiChatSession.Status sessionStatus,
-            Pageable pageable);
+    Slice<SummaryHistoryProjection> findLatestHistoryByUserId(@Param("userId") Long userId, Pageable pageable);
 }

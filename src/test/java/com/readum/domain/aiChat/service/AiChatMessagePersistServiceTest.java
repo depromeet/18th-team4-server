@@ -73,18 +73,19 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void loadHistory_종료된_세션이면_BadRequest_SESSION_CLOSED_를_던진다() {
+    void loadHistory_잠긴_세션이면_BadRequest_SESSION_LOCKED_를_던진다() {
+        // 감상문 생성이 도는 동안(LOCKED) 메시지 전송이 차단되는 계약.
         Long userId = 1L;
         Long sessionId = 7L;
-        AiChatSession closed = AiChatSessionFixture.persistedClosedSession(
+        AiChatSession locked = AiChatSessionFixture.persistedLockedSession(
                 sessionId, 100L, 0, 0, null
         );
-        given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(closed));
+        given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(locked));
 
         assertThatThrownBy(() -> persistService.loadHistory(sessionId, userId))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
                 .extracting(BadRequestException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.SESSION_CLOSED);
+                .isEqualTo(AiChatErrorCode.SESSION_LOCKED);
 
         verify(aiChatMessageRepository, never()).save(any());
     }

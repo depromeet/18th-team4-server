@@ -35,6 +35,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/user-books/**").permitAll()
                         .requestMatchers("/api/v1/users/**").permitAll()
                         .requestMatchers("/api/v1/books/**").permitAll()
+                        .requestMatchers("/api/v1/summaries/**").permitAll()
                         // 운영 모니터링: Prometheus 스크래핑·헬스체크용 actuator 엔드포인트만 허용.
                         // (/actuator/metrics 는 인증을 유지한다.) 외부 노출 차단은 네트워크 레벨에서 책임진다.
                         .requestMatchers(
