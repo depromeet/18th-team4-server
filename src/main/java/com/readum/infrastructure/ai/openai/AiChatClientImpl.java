@@ -5,6 +5,8 @@ import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.exception.BusinessException;
+import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
+import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,13 +27,20 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AiChatClientImpl implements AiChatClient {
 
+    // 감사 로그용 프롬프트 식별자. reading-assistant-system.st 프롬프트를 바꾸면 버전을 올려
+    // 변경 전후의 토큰/지연/품질 변화를 감사 로그에서 구분할 수 있게 한다.
+    private static final String PROMPT_TEMPLATE_ID = "reading-assistant-system";
+    private static final String PROMPT_TEMPLATE_VERSION = "v1";
+
     private final ChatClient chatClient;
+    private final AiPromptAuditLogger auditLogger;
 
     @Value("classpath:prompts/reading-assistant-system.st")
     private Resource systemPromptResource;
@@ -51,13 +60,47 @@ public class AiChatClientImpl implements AiChatClient {
                 .map(this::toSpringMessage)
                 .toList();
 
+        // 감사 로그: 호출 직전에 알 수 있는 식별 정보만 먼저 잡아두고, 모델/토큰/지연은 종료 시점에 덧채운다.
+        AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
+                conversationIdHash(command.conversationId()),
+                PROMPT_TEMPLATE_ID,
+                PROMPT_TEMPLATE_VERSION,
+                promptHash(command.history())
+        );
+        long startNanos = System.nanoTime();
+        // 토큰 사용량은 스트림 마지막 청크에만 실려 오므로, 그 청크의 ChatResponse 를 잡아 둔다.
+        AtomicReference<ChatResponse> usageResponseRef = new AtomicReference<>();
+
         return chatClient.prompt()
                 .system(buildSystemPrompt(command.bookContext()))
                 .messages(messages)
                 .stream()
                 .chatResponse()
-                .concatMap(this::toChunks)
-                .doOnError(this::logUnexpectedError);
+                .concatMap(chatResponse -> toChunks(chatResponse, usageResponseRef))
+                .doOnComplete(() -> auditLogger.success(
+                        ChatResponseAuditMapper.applyResult(baseEvent, usageResponseRef.get(), elapsedMillis(startNanos))))
+                .doOnError(error -> {
+                    logUnexpectedError(error);
+                    auditLogger.failure(
+                            ChatResponseAuditMapper.applyResult(baseEvent, usageResponseRef.get(), elapsedMillis(startNanos)),
+                            error);
+                });
+    }
+
+    private String conversationIdHash(Long conversationId) {
+        return conversationId == null ? null : auditLogger.sha256(String.valueOf(conversationId));
+    }
+
+    // 직전 USER 질문 원문은 저장하지 않고 해시(지문)만 남겨 동일 질문 반복 등을 식별할 수 있게 한다.
+    private String promptHash(List<HistoryMessage> history) {
+        if (history == null || history.isEmpty()) {
+            return null;
+        }
+        return auditLogger.sha256(history.get(history.size() - 1).content());
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
     private String buildSystemPrompt(AiChatStreamCommand.BookContext ctx) {
@@ -83,7 +126,7 @@ public class AiChatClientImpl implements AiChatClient {
         };
     }
 
-    private Flux<AiChatChunk> toChunks(ChatResponse chatResponse) {
+    private Flux<AiChatChunk> toChunks(ChatResponse chatResponse, AtomicReference<ChatResponse> usageResponseRef) {
         String text = Optional.ofNullable(chatResponse.getResult())
                 .map(result -> result.getOutput())
                 .map(output -> output.getText())
@@ -98,6 +141,8 @@ public class AiChatClientImpl implements AiChatClient {
                 && usage.getTotalTokens() > 0;
 
         if (hasUsage) {
+            // 종료 시점 감사 로그가 토큰/모델 메타데이터를 읽을 수 있도록 이 청크의 응답을 보관한다.
+            usageResponseRef.set(chatResponse);
             AiChatChunk completion = new AiChatChunk.Completion(
                     toIntOrNull(usage.getPromptTokens()),
                     toIntOrNull(usage.getCompletionTokens()),

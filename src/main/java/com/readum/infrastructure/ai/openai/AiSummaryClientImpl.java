@@ -2,11 +2,15 @@ package com.readum.infrastructure.ai.openai;
 
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.out.AiSummaryClient;
+import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
+import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ResponseEntity;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.ResponseFormat;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,7 +33,12 @@ public class AiSummaryClientImpl implements AiSummaryClient {
     private static final String USER_TURN_PREFIX = "User: ";
     private static final String ASSISTANT_TURN_PREFIX = "Assistant: ";
 
+    // 감사 로그용 프롬프트 식별자. summary-generation.st 프롬프트를 바꾸면 버전을 올린다.
+    private static final String PROMPT_TEMPLATE_ID = "summary-generation";
+    private static final String PROMPT_TEMPLATE_VERSION = "v1";
+
     private final ChatClient chatClient;
+    private final AiPromptAuditLogger auditLogger;
 
     @Value("classpath:prompts/summary-generation.st")
     private Resource summaryPromptResource;
@@ -67,14 +76,42 @@ public class AiSummaryClientImpl implements AiSummaryClient {
         String chatHistory = formatChatHistory(messages);
         log.debug("[Summary] 대화 이력 포맷 완료 - 메시지 수: {}", messages.size());
 
-        return chatClient.prompt()
-                .system(summaryPromptTemplate)
-                .user("[대화 이력]\n" + chatHistory + "\n\n위 대화 이력을 바탕으로 감상문 초안을 작성해 주세요.")
-                .options(OpenAiChatOptions.builder()
-                        .responseFormat(SUMMARY_RESPONSE_FORMAT)
-                        .build())
-                .call()
-                .entity(SummaryDraftResult.class);
+        AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
+                conversationIdHash(messages),
+                PROMPT_TEMPLATE_ID,
+                PROMPT_TEMPLATE_VERSION,
+                auditLogger.sha256(chatHistory)
+        );
+        long startNanos = System.nanoTime();
+        try {
+            // entity() 대신 responseEntity() 로 받아 구조화 결과와 함께 토큰/모델 메타데이터를 감사 로그에 남긴다.
+            ResponseEntity<ChatResponse, SummaryDraftResult> responseEntity = chatClient.prompt()
+                    .system(summaryPromptTemplate)
+                    .user("[대화 이력]\n" + chatHistory + "\n\n위 대화 이력을 바탕으로 감상문 초안을 작성해 주세요.")
+                    .options(OpenAiChatOptions.builder()
+                            .responseFormat(SUMMARY_RESPONSE_FORMAT)
+                            .build())
+                    .call()
+                    .responseEntity(SummaryDraftResult.class);
+            auditLogger.success(ChatResponseAuditMapper.applyResult(
+                    baseEvent, responseEntity.getResponse(), elapsedMillis(startNanos)));
+            return responseEntity.getEntity();
+        } catch (RuntimeException e) {
+            auditLogger.failure(baseEvent.completed(null, 0, 0, 0, elapsedMillis(startNanos)), e);
+            throw e;
+        }
+    }
+
+    private String conversationIdHash(List<AiChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return null;
+        }
+        Long sessionId = messages.get(0).getSessionId();
+        return sessionId == null ? null : auditLogger.sha256(String.valueOf(sessionId));
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
     private String formatChatHistory(List<AiChatMessage> messages) {
