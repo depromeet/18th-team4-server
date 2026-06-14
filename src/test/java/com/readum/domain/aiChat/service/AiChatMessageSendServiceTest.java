@@ -267,15 +267,15 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 사전_단계에서_BadRequestException_SESSION_CLOSED_도_그대로_전파된다() {
+    void 사전_단계에서_BadRequestException_SESSION_LOCKED_도_그대로_전파된다() {
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, 7L, "질문");
         given(persistService.loadHistory(7L, 1L))
-                .willThrow(new BadRequestException(AiChatErrorCode.SESSION_CLOSED));
+                .willThrow(new BadRequestException(AiChatErrorCode.SESSION_LOCKED));
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
                 .extracting(BadRequestException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.SESSION_CLOSED);
+                .isEqualTo(AiChatErrorCode.SESSION_LOCKED);
     }
 
     @Test

@@ -2,120 +2,66 @@ package com.readum.infrastructure.aiChat.scheduler;
 
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
+import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
-import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
-import com.readum.model.summary.entity.Summary;
-import com.readum.model.summary.repository.SummaryRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
+/**
+ * 매일 오전 6시, 최근 대화한 세션의 독후감을 자동 생성한다.
+ * 대상 = ACTIVE + 누적 토큰 ≥ 임계값 + 마지막 채팅이 24시간 이내(실제 메시지 시각 기준).
+ * 자동 생성도 수동과 동일하게 세션 전체 대화로 매번 다시 요약하고(증분 아님),
+ * 성공 시에만 새 감상문 행을 남기며 세션을 잠갔다 푼다. 실패 시엔 행을 남기지 않으므로
+ * 같은 날 재시도 스케줄러는 두지 않는다 — 복구는 다음 날 정기 실행과 사용자 수동 재생성으로 한다.
+ */
 @Slf4j
 @Component
 public class SummaryScheduler {
 
-    private static final int MAX_RETRY_COUNT = 3;
-
     private final AiChatSessionRepository aiChatSessionRepository;
-    private final AiChatMessageRepository aiChatMessageRepository;
-    private final SummaryRepository summaryRepository;
-    private final SummaryDraftPolicy summaryDraftPolicy;
     private final SummaryDraftService summaryDraftService;
     private final Executor summaryExecutor;
 
     public SummaryScheduler(
             AiChatSessionRepository aiChatSessionRepository,
-            AiChatMessageRepository aiChatMessageRepository,
-            SummaryRepository summaryRepository,
-            SummaryDraftPolicy summaryDraftPolicy,
             SummaryDraftService summaryDraftService,
             @Qualifier("summaryExecutor") Executor summaryExecutor
     ) {
         this.aiChatSessionRepository = aiChatSessionRepository;
-        this.aiChatMessageRepository = aiChatMessageRepository;
-        this.summaryRepository = summaryRepository;
-        this.summaryDraftPolicy = summaryDraftPolicy;
         this.summaryDraftService = summaryDraftService;
         this.summaryExecutor = summaryExecutor;
     }
 
     @Scheduled(cron = "0 0 6 * * *")
     public void generateDailySummaries() {
-        LocalDate today = LocalDate.now();
-        log.info("독후감 자동 생성 스케줄러 시작 summaryDate={}", today);
+        LocalDateTime since = LocalDateTime.now().minusHours(24);
+        List<Long> targetSessionIds = aiChatSessionRepository.findAutoSummaryTargetSessionIds(
+                AiChatSession.Status.ACTIVE,
+                SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS,
+                AiChatMessage.Status.COMPLETED,
+                since);
+        log.info("독후감 자동 생성 스케줄러 시작 대상 {}건", targetSessionIds.size());
 
-        List<Long> eligibleSessionIds = findEligibleSessionIds();
-        log.info("요약 대상 세션 {}건", eligibleSessionIds.size());
-
-        List<CompletableFuture<Void>> futures = eligibleSessionIds.stream()
+        List<CompletableFuture<Void>> futures = targetSessionIds.stream()
                 .map(sessionId -> CompletableFuture.runAsync(
-                        () -> executeSafely(sessionId, today), summaryExecutor))
+                        () -> executeSafely(sessionId), summaryExecutor))
                 .toList();
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        log.info("독후감 자동 생성 스케줄러 완료 summaryDate={}", today);
+        log.info("독후감 자동 생성 스케줄러 완료");
     }
 
-    @Scheduled(cron = "0 */10 * * * *")
-    public void retryFailedSummaries() {
-        List<Summary> failedSummaries = summaryRepository
-                .findByStatusAndRetryCountLessThan(Summary.Status.FAILED, MAX_RETRY_COUNT);
-
-        if (failedSummaries.isEmpty()) {
-            return;
-        }
-
-        log.info("실패 독후감 재시도 {}건", failedSummaries.size());
-
-        for (Summary summary : failedSummaries) {
-            try {
-                summaryDraftService.retryForScheduler(summary.getId());
-            } catch (Exception e) {
-                log.error("독후감 재시도 실패 summaryId={} sessionId={}",
-                        summary.getId(), summary.getAiChatSessionId(), e);
-            }
-        }
-    }
-
-    private List<Long> findEligibleSessionIds() {
-        LocalDateTime yesterday = LocalDateTime.now().minusDays(1);
-
-        return aiChatSessionRepository
-                .findByStatusAndAccumulatedTokensGreaterThanEqualAndUpdatedAtAfter(
-                        AiChatSession.Status.ACTIVE,
-                        SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS,
-                        yesterday)
-                .stream()
-                .filter(session -> {
-                    LocalDateTime since = summaryRepository
-                            .findFirstByAiChatSessionIdOrderByCreatedAtDesc(session.getId())
-                            .map(Summary::getCreatedAt)
-                            .orElse(session.getCreatedAt());
-
-                    int accumulatedTokens = aiChatMessageRepository
-                            .findValidMessagesSince(session.getId(), since)
-                            .stream()
-                            .mapToInt(message -> message.getOutputTokens() != null
-                                    ? message.getOutputTokens() : 0)
-                            .sum();
-
-                    return summaryDraftPolicy.isEligible(accumulatedTokens);
-                })
-                .map(AiChatSession::getId)
-                .toList();
-    }
-
-    private void executeSafely(Long sessionId, LocalDate summaryDate) {
+    private void executeSafely(Long sessionId) {
         try {
-            summaryDraftService.executeForScheduler(sessionId, summaryDate);
+            summaryDraftService.executeForScheduler(sessionId);
         } catch (Exception e) {
             log.error("독후감 자동 생성 실패 sessionId={}", sessionId, e);
         }
