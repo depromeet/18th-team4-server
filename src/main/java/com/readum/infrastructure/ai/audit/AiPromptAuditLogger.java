@@ -1,11 +1,11 @@
 package com.readum.infrastructure.ai.audit;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -19,9 +19,9 @@ import java.util.Map;
  * <p>"AI_PROMPT_AUDIT" 로거로 기록하며, 이 로거는 logback-spring.xml 의 dev/prod 프로파일에서
  * 전용 롤링 파일 appender 로 연결되어 있다.
  *
- * <p>이 컴포넌트는 곧바로 동작하는 빌딩 블록이다. 실제 감사 로그가 쌓이려면 AI 호출부(ChatClient 호출 서비스)에서
- * 호출 전후로 {@link #success}/{@link #failure} 를 불러 주어야 한다. 연결 방법은
- * docs/monitoring-setup-guide.md 의 "AI 감사 로그 연결" 절을 참고한다.
+ * <p>AI 호출 어댑터(infrastructure/ai/openai 의 {@code *ClientImpl}) 가 호출 전후로
+ * {@link #success}/{@link #failure} 를 불러 실제 감사 로그를 남긴다. prompt/completion 원문은
+ * 절대 담지 않고, 식별이 필요한 값은 {@link #sha256} 해시로만 보관한다.
  */
 @Component
 public class AiPromptAuditLogger {
@@ -74,7 +74,7 @@ public class AiPromptAuditLogger {
             );
 
             AI_AUDIT_LOGGER.info(objectMapper.writeValueAsString(payload));
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             AI_AUDIT_LOGGER.info("{\"event\":\"ai.prompt.call\",\"status\":\"audit_log_json_failed\"}");
         }
     }
