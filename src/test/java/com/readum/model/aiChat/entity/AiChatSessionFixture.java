@@ -31,9 +31,9 @@ public final class AiChatSessionFixture {
     }
 
     /**
-     * 저장되어 id 가 부여된, 감상문 생성 중 잠긴(LOCKED) 세션.
+     * 저장되어 id 가 부여된, 감상문이 완성되어 종료(LOCKED)된 세션.
      */
-    public static AiChatSession persistedLockedSession(
+    public static AiChatSession persistedSummarizedSession(
             Long id,
             Long userBookId,
             int userMessageCount,

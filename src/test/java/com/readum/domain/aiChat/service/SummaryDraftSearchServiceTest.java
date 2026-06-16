@@ -160,7 +160,7 @@ class SummaryDraftSearchServiceTest {
     }
 
     private AiChatSession lockedSession(int accumulatedTokens) {
-        return AiChatSessionFixture.persistedLockedSession(
+        return AiChatSessionFixture.persistedSummarizedSession(
                 SESSION_ID, USER_BOOK_ID, 10, accumulatedTokens, "마지막 메시지"
         );
     }

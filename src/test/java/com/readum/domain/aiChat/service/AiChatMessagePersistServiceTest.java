@@ -74,10 +74,10 @@ class AiChatMessagePersistServiceTest {
 
     @Test
     void loadHistory_잠긴_세션이면_BadRequest_SESSION_LOCKED_를_던진다() {
-        // 감상문 생성이 도는 동안(LOCKED) 메시지 전송이 차단되는 계약.
+        // 감상문이 완성되어 종료(LOCKED)된 세션에는 메시지 전송이 차단되는 계약.
         Long userId = 1L;
         Long sessionId = 7L;
-        AiChatSession locked = AiChatSessionFixture.persistedLockedSession(
+        AiChatSession locked = AiChatSessionFixture.persistedSummarizedSession(
                 sessionId, 100L, 0, 0, null
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(locked));

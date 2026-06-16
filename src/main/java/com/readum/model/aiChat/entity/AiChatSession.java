@@ -74,14 +74,6 @@ public class AiChatSession {
         this.updatedAt = LocalDateTime.now();
     }
 
-    /**
-     * 감상문 생성이 끝나면(성공/실패 무관) 세션을 다시 활성화해 대화를 이어갈 수 있게 한다.
-     */
-    public void unlock() {
-        this.status = Status.ACTIVE;
-        this.updatedAt = LocalDateTime.now();
-    }
-
     public void appendUserMessage() {
         this.userMessageCount += 1;
         this.updatedAt = LocalDateTime.now();
