@@ -10,6 +10,7 @@ import com.readum.domain.summary.exception.SummaryErrorCode;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.summary.entity.Summary;
@@ -22,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +41,7 @@ public class SummarySearchService {
     private final UserRepository userRepository;
     private final AiChatSessionRepository aiChatSessionRepository;
     private final SummaryRepository summaryRepository;
+    private final SummaryJobRepository summaryJobRepository;
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
 
@@ -96,13 +99,12 @@ public class SummarySearchService {
         AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        // "생성 중" 은 감상문 행이 아니라 세션 잠금 상태가 표현한다 (재생성 중에도 409 로 폴링 계약 유지).
-        if (session.isLocked()) {
+        // "생성 중" 은 유효 PROCESSING 작업으로 판정(폴링 계약: 409 유지)
+        if (summaryJobRepository.existsActiveProcessingJob(sessionId, LocalDateTime.now())) {
             throw new ConflictException(SummaryErrorCode.SUMMARY_IN_PROGRESS);
         }
 
-        // 감상문은 성공 기록만 남는다(실패 시 행 없음). 최신 행이 있으면 "현재 감상문", 없으면 아직 생성 전.
-        Summary summary = summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(sessionId)
+        Summary summary = summaryRepository.findByAiChatSessionId(sessionId)
                 .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_YET_CREATED));
 
         return SummaryResult.from(summary);

@@ -1,16 +1,21 @@
 package com.readum.domain.summary.service;
 
+import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.summary.dto.MonthlySummaryResult;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.exception.SummaryErrorCode;
 import com.readum.domain.user.exception.UserErrorCode;
+import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.entity.BookFixture;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.entity.SummaryFixture;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.user.entity.User;
@@ -27,6 +32,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +40,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -48,6 +56,9 @@ class SummarySearchServiceTest {
 
     @Mock
     private SummaryRepository summaryRepository;
+
+    @Mock
+    private SummaryJobRepository summaryJobRepository;
 
     @Mock
     private UserBookRepository userBookRepository;
@@ -199,5 +210,61 @@ class SummarySearchServiceTest {
         assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND));
+    }
+
+    private static final Long SESSION_ID = 1000L;
+
+    @Test
+    void 세션_ID로_조회는_감상문을_반환한다() {
+        AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
+        Summary summary = SummaryFixture.persistedSummary(17L, 10L, SESSION_ID, "감상문 제목", "감상문 본문");
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
+        given(summaryJobRepository.existsActiveProcessingJob(eq(SESSION_ID), any(LocalDateTime.class)))
+                .willReturn(false);
+        given(summaryRepository.findByAiChatSessionId(SESSION_ID)).willReturn(Optional.of(summary));
+
+        SummaryResult result = summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID);
+
+        assertThat(result.title()).isEqualTo("감상문 제목");
+        assertThat(result.body()).isEqualTo("감상문 본문");
+        assertThat(result.aiChatSessionId()).isEqualTo(SESSION_ID);
+    }
+
+    @Test
+    void 세션_ID로_조회_시_PROCESSING_작업이_있으면_ConflictException_을_던진다() {
+        AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
+        given(summaryJobRepository.existsActiveProcessingJob(eq(SESSION_ID), any(LocalDateTime.class)))
+                .willReturn(true);
+
+        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
+                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_IN_PROGRESS));
+    }
+
+    @Test
+    void 세션_ID로_조회_시_감상문이_없으면_NotFoundException_을_던진다() {
+        AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
+        given(summaryJobRepository.existsActiveProcessingJob(eq(SESSION_ID), any(LocalDateTime.class)))
+                .willReturn(false);
+        given(summaryRepository.findByAiChatSessionId(SESSION_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
+                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_YET_CREATED));
+    }
+
+    @Test
+    void 세션_ID로_조회_시_세션이_없거나_소유권이_없으면_NotFoundException_을_던진다() {
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
+                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND));
     }
 }
