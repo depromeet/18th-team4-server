@@ -92,6 +92,20 @@ public class SummaryJobTxService {
         job.markSucceeded();
     }
 
+    /**
+     * lease 만료된 고아 작업을 PENDING 으로 되돌린다(즉시 재선점 가능). 세션은 건드리지 않는다 —
+     * 차단은 PROCESSING 의 유효 lease 가 사라지면 자동 해제되기 때문.
+     * @return 회수한 작업 수
+     */
+    @Transactional
+    public int reclaimOrphans(int batchSize) {
+        LocalDateTime now = LocalDateTime.now();
+        List<SummaryJob> orphans = summaryJobRepository.findOrphaned(
+                now, PageRequest.of(0, batchSize));
+        orphans.forEach(job -> job.releaseAfterOrphan(now));
+        return orphans.size();
+    }
+
     /** 실패 기록 — 재시도 가능하고 상한 미만이면 백오프 재시도, 아니면 FAILED. 세션은 건드리지 않는다. */
     @Transactional
     public void recordFailure(

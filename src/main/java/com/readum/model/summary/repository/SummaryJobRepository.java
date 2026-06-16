@@ -37,6 +37,8 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
             Pageable pageable);
 
     /** lease 가 만료된 PROCESSING(고아) 작업. 회수기가 PENDING 으로 되돌릴 대상. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
     @Query("""
             select summaryJob
               from SummaryJob summaryJob
