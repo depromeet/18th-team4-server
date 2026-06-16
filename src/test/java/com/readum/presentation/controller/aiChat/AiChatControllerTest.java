@@ -546,12 +546,12 @@ class AiChatControllerTest {
     }
 
     @Test
-    void eligibility_잠긴_세션이면_200과_SUMMARY_IN_PROGRESS를_반환한다() throws Exception {
+    void eligibility_잠긴_세션이면_200과_ALREADY_SUMMARIZED를_반환한다() throws Exception {
         given(summaryDraftSearchService.findEligibility(eq(1L), any()))
                 .willReturn(new SummaryDraftEligibilityResult(
                         false,
-                        IneligibleReason.SUMMARY_IN_PROGRESS.name(),
-                        AiChatErrorCode.SUMMARY_IN_PROGRESS.getMessage(),
+                        IneligibleReason.ALREADY_SUMMARIZED.name(),
+                        AiChatErrorCode.SESSION_ALREADY_SUMMARIZED.getMessage(),
                         100
                 ));
 
@@ -559,8 +559,8 @@ class AiChatControllerTest {
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.eligible").value(false))
-                .andExpect(jsonPath("$.data.reason").value("SUMMARY_IN_PROGRESS"))
-                .andExpect(jsonPath("$.data.message").value("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."));
+                .andExpect(jsonPath("$.data.reason").value("ALREADY_SUMMARIZED"))
+                .andExpect(jsonPath("$.data.message").value("이미 감상문이 생성되어 종료된 세션입니다."));
     }
 
     @Test
@@ -613,14 +613,14 @@ class AiChatControllerTest {
     }
 
     @Test
-    void 감상문_초안_잠긴_세션이면_409를_반환한다() throws Exception {
-        org.mockito.Mockito.doThrow(new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS))
+    void 감상문_초안_종료된_세션이면_409를_반환한다() throws Exception {
+        org.mockito.Mockito.doThrow(new ConflictException(AiChatErrorCode.SESSION_ALREADY_SUMMARIZED))
                 .when(summaryDraftService).execute(eq(1L), any());
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error.message").value("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."));
+                .andExpect(jsonPath("$.error.message").value("이미 감상문이 생성되어 종료된 세션입니다."));
     }
 
     @Test

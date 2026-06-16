@@ -19,7 +19,8 @@ public enum AiChatErrorCode implements ErrorCode {
     AI_PROVIDER_TRANSIENT("일시적인 AI 응답 오류입니다. 잠시 후 다시 시도해 주세요."),
     AI_STREAM_INTERRUPTED("AI 응답이 중단되었습니다."),
     SUMMARY_NOT_FOUND("아직 생성된 감상문이 없습니다."),
-    SUMMARY_IN_PROGRESS("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요.");
+    SUMMARY_IN_PROGRESS("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."),
+    SESSION_ALREADY_SUMMARIZED("이미 감상문이 생성되어 종료된 세션입니다.");
 
     private final String message;
 

@@ -115,7 +115,7 @@ class SummaryDraftSearchServiceTest {
     }
 
     @Test
-    void 잠긴_세션이면_eligible_false와_SUMMARY_IN_PROGRESS를_반환한다() {
+    void 잠긴_세션이면_eligible_false와_ALREADY_SUMMARIZED를_반환한다() {
         AiChatSession session = lockedSession(SUFFICIENT_TOKENS);
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
@@ -123,8 +123,8 @@ class SummaryDraftSearchServiceTest {
         SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(SESSION_ID, USER_SESSION_ID);
 
         assertThat(result.eligible()).isFalse();
-        assertThat(result.reason()).isEqualTo(IneligibleReason.SUMMARY_IN_PROGRESS.name());
-        assertThat(result.message()).isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS.getMessage());
+        assertThat(result.reason()).isEqualTo(IneligibleReason.ALREADY_SUMMARIZED.name());
+        assertThat(result.message()).isEqualTo(AiChatErrorCode.SESSION_ALREADY_SUMMARIZED.getMessage());
     }
 
     @Test
