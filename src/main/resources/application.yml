@@ -75,3 +75,11 @@ management:
 
 slack:
   webhook-url: ${SLACK_WEBHOOK_URL}
+
+summary-job:
+  pool-size: 3
+  dispatch-interval-ms: 2000
+  reaper-interval-ms: 60000
+  lease-seconds: 300        # 5분 lease
+  max-attempts: 5
+  base-backoff-seconds: 60  # 1분 → 2분 → 4분 …

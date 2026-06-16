@@ -48,3 +48,11 @@ aladin:
   cover: Big
   request-timeout: PT1S
   search-result-limit: 200
+
+summary-job:
+  pool-size: 3
+  dispatch-interval-ms: 2000
+  reaper-interval-ms: 60000
+  lease-seconds: 300
+  max-attempts: 5
+  base-backoff-seconds: 60
