@@ -40,6 +40,9 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
                 userBookIds, startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay());
     }
 
+    /** 세션의 감상문(1:1). 종료 모델에서 세션당 최대 한 행이다. */
+    Optional<Summary> findByAiChatSessionId(Long aiChatSessionId);
+
     /**
      * 세션의 가장 최근 감상문(= 현재 감상문). 세션당 여러 건(재생성 이력)이 쌓이므로 최신 한 건을 고른다.
      * 같은 createdAt 동시 생성 대비 id 로 tiebreak.

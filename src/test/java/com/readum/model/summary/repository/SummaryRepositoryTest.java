@@ -21,7 +21,10 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.dao.DataIntegrityViolationException;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Transactional
@@ -118,21 +121,21 @@ class SummaryRepositoryTest {
     // ===== 세션 최신 감상문 / 기록 목록 =====
 
     @Test
-    @DisplayName("findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc: 같은 세션의 여러 감상문 중 가장 최근 행을 반환한다")
+    @DisplayName("findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc: 세션의 감상문을 반환한다")
     void 최신_감상문_조회() {
         Long userBookId = persistUserBook(nextUserId(), "데미안");
         AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
 
-        summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "옛 제목", "옛 본문"));
-        Summary latest = summaryRepository.save(
-                Summary.createCompleted(userBookId, session.getId(), "새 제목", "새 본문"));
+        // 1:1 모델 — 세션당 감상문은 한 행이다
+        Summary saved = summaryRepository.save(
+                Summary.createCompleted(userBookId, session.getId(), "제목", "본문"));
 
         Optional<Summary> found =
                 summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(session.getId());
 
         assertThat(found).isPresent();
-        assertThat(found.get().getId()).isEqualTo(latest.getId());
-        assertThat(found.get().getBody()).isEqualTo("새 본문");
+        assertThat(found.get().getId()).isEqualTo(saved.getId());
+        assertThat(found.get().getBody()).isEqualTo("본문");
     }
 
     @Test
@@ -146,14 +149,14 @@ class SummaryRepositoryTest {
     }
 
     @Test
-    @DisplayName("findLatestByAiChatSessionIdIn: 여러 세션의 최신 감상문을 세션별로 한 건씩 반환한다")
+    @DisplayName("findLatestByAiChatSessionIdIn: 여러 세션의 감상문을 세션별로 한 건씩 반환한다")
     void 세션별_최신_감상문_일괄조회() {
         Long userBookId = persistUserBook(nextUserId(), "여러세션책");
         AiChatSession sessionA = aiChatSessionRepository.save(AiChatSession.create(userBookId));
         AiChatSession sessionB = aiChatSessionRepository.save(AiChatSession.create(userBookId));
 
-        summaryRepository.save(Summary.createCompleted(userBookId, sessionA.getId(), "A 옛", "A 옛 본문"));
-        summaryRepository.save(Summary.createCompleted(userBookId, sessionA.getId(), "A 새", "A 새 본문"));
+        // 1:1 모델 — 세션당 감상문은 한 행이다
+        summaryRepository.save(Summary.createCompleted(userBookId, sessionA.getId(), "A 제목", "A 본문"));
         summaryRepository.save(Summary.createCompleted(userBookId, sessionB.getId(), "B 하나", "B 본문"));
 
         List<Summary> latest = summaryRepository.findLatestByAiChatSessionIdIn(
@@ -162,16 +165,16 @@ class SummaryRepositoryTest {
         assertThat(latest)
                 .hasSize(2)
                 .extracting(Summary::getBody)
-                .containsExactlyInAnyOrder("A 새 본문", "B 본문");
+                .containsExactlyInAnyOrder("A 본문", "B 본문");
     }
 
     @Test
-    @DisplayName("findLatestHistoryByUserId: 세션당 최신 감상문 1건을 책 제목·본문·생성일과 함께 조회한다")
+    @DisplayName("findLatestHistoryByUserId: 세션의 감상문 1건을 책 제목·본문·생성일과 함께 조회한다")
     void 세션당_최신_감상문을_조회한다() {
         Long userId = nextUserId();
         Long userBookId = persistUserBook(userId, "데미안");
         AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
-        summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "옛 제목", "옛 본문"));
+        // 1:1 모델 — 세션당 감상문은 한 행이다
         summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "새 제목", "내 안에서 솟아 나오려는 것"));
 
         Slice<SummaryHistoryProjection> slice =
@@ -248,6 +251,30 @@ class SummaryRepositoryTest {
 
         assertThat(slice.getContent()).isEmpty();
         assertThat(slice.hasNext()).isFalse();
+    }
+
+    @Test
+    void findByAiChatSessionId_는_세션의_감상문_단건을_반환한다() {
+        long sessionId = nextSessionId();
+        Long userBookId = nextUserBookId();
+        summaryRepository.save(SummaryFixture.persistedSummary(null, userBookId, sessionId, "제목", "본문"));
+
+        Optional<Summary> found = summaryRepository.findByAiChatSessionId(sessionId);
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getTitle()).isEqualTo("제목");
+    }
+
+    @Test
+    void 한_세션에_감상문은_하나만_저장된다() {
+        long sessionId = nextSessionId();
+        Long userBookId = nextUserBookId();
+        summaryRepository.saveAndFlush(SummaryFixture.persistedSummary(null, userBookId, sessionId, "t1", "b1"));
+
+        assertThatThrownBy(() ->
+                        summaryRepository.saveAndFlush(
+                                SummaryFixture.persistedSummary(null, userBookId, sessionId, "t2", "b2")))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     private Long persistUserBook(Long userId, String bookTitle) {

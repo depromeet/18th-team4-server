@@ -174,13 +174,13 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: 감상문 여러 건이어도 세션은 한 번만 'SUMMARIZED' 로 나타난다")
+    @DisplayName("findSessionsByUserBookIdAndOwner: 감상문이 있으면 세션은 'SUMMARIZED' 로 나타난다 (1:1 모델 — 세션당 감상문 한 건)")
     void status_감상문_여러건이어도_한번만() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
         AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "retried-session");
-        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "옛 제목", "옛 본문"));
-        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "새 제목", "새 본문"));
+        // 1:1 모델 — unique 제약으로 세션당 감상문은 한 행이며, 중복은 DB 에서 거부된다
+        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문"));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
