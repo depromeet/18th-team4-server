@@ -61,4 +61,17 @@ public final class SummaryJobFixture {
                 null, null, openAiBatchId, 0, now, null, null, now, now
         );
     }
+
+    /**
+     * 이미 처리 완료(SUCCEEDED)된 BATCH 작업. collector 멱등성 테스트용 —
+     * "수집 완료 후 재수집해도 작업을 다시 건드리지 않는다" 시나리오의 준비 상태를 표현한다.
+     * activeSessionId=null: 완료 시 활성 해제됨.
+     */
+    public static SummaryJob persistedSucceeded(Long id, Long sessionId) {
+        LocalDateTime now = LocalDateTime.now();
+        return new SummaryJob(
+                id, sessionId, null, SummaryJob.ExecutionMode.BATCH, SummaryJob.Status.SUCCEEDED,
+                null, null, null, 1, now, null, null, now, now
+        );
+    }
 }

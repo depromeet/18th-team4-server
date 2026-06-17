@@ -105,4 +105,7 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
 
     /** 세션에 미완료(활성) 작업이 이미 있는지 — 적재 멱등성 사전 확인용. */
     boolean existsByActiveSessionId(Long activeSessionId);
+
+    /** batch 전체 실패 시 해당 batch 에 묶인 SUBMITTED 작업 목록 조회 — 재큐 대상. */
+    List<SummaryJob> findByOpenAiBatchIdAndStatus(Long openAiBatchId, SummaryJob.Status status);
 }

@@ -3,6 +3,7 @@ package com.readum.domain.summary.service;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryBatchBuildItem;
+import com.readum.domain.summary.dto.SummaryBatchResultItem;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatMessageFixture;
@@ -301,6 +302,102 @@ class SummaryJobLifecycleServiceTest {
         summaryJobLifecycleService.releaseBuilding(List.of(41L), "owner-r");
 
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.BATCH_BUILDING); // 변하지 않음
+    }
+
+    // ─── applyBatchResult ─────────────────────────────────────────────────────
+
+    @Test
+    void applyBatchResult_는_작업이_SUBMITTED가_아니면_아무것도_하지_않는다() {
+        // 준비: 이미 처리 완료(SUCCEEDED) — 재수집 시나리오. SUBMITTED 가 아니므로 건너뛰어야 한다.
+        SummaryJob alreadySucceeded = SummaryJobFixture.persistedSucceeded(50L, 1L);
+        given(summaryJobRepository.findByIdForUpdate(50L)).willReturn(Optional.of(alreadySucceeded));
+
+        SummaryBatchResultItem resultItem = SummaryBatchResultItem.success(
+                "summaryjob-50", new SummaryDraftResult("제목", "본문"));
+
+        summaryJobLifecycleService.applyBatchResult(99L, resultItem);
+
+        // 이미 완료된 작업이므로 감상문 저장·세션 잠금이 일어나지 않는다
+        verify(summaryRepository, never()).save(any());
+        verify(aiChatSessionRepository, never()).findByIdForUpdate(any());
+        assertThat(alreadySucceeded.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
+    }
+
+    @Test
+    void applyBatchResult_성공_결과는_감상문을_저장하고_세션을_잠그고_작업을_성공처리한다() {
+        SummaryJob job = SummaryJobFixture.persistedSubmitted(51L, 2L, 10L);
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(2L, 7L, 2, 600, "제목");
+        given(summaryJobRepository.findByIdForUpdate(51L)).willReturn(Optional.of(job));
+        given(aiChatSessionRepository.findByIdForUpdate(2L)).willReturn(Optional.of(session));
+
+        SummaryBatchResultItem resultItem = SummaryBatchResultItem.success(
+                "summaryjob-51", new SummaryDraftResult("감상문 제목", "감상문 본문"));
+
+        summaryJobLifecycleService.applyBatchResult(10L, resultItem);
+
+        verify(summaryRepository).save(any(Summary.class));
+        assertThat(session.isLocked()).isTrue();
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
+    }
+
+    @Test
+    void applyBatchResult_재시도_가능_실패는_PENDING으로_재큐한다() {
+        SummaryJob job = SummaryJobFixture.persistedSubmitted(52L, 3L, 10L);
+        given(summaryJobRepository.findByIdForUpdate(52L)).willReturn(Optional.of(job));
+        given(properties.maxAttempts()).willReturn(5);
+        given(properties.nextAttemptFrom(any(), anyInt())).willReturn(LocalDateTime.now().plusMinutes(2));
+
+        SummaryBatchResultItem resultItem = SummaryBatchResultItem.failure(
+                "summaryjob-52", true, "BATCH_HTTP_429", "호출 허용량 초과");
+
+        summaryJobLifecycleService.applyBatchResult(10L, resultItem);
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
+        assertThat(job.getAttemptCount()).isEqualTo(1);
+        verify(summaryRepository, never()).save(any());
+    }
+
+    @Test
+    void applyBatchResult_재시도_불가_실패는_즉시_FAILED로_처리한다() {
+        SummaryJob job = SummaryJobFixture.persistedSubmitted(53L, 4L, 10L);
+        given(summaryJobRepository.findByIdForUpdate(53L)).willReturn(Optional.of(job));
+
+        // retryable=false 이므로 maxAttempts 조회 없이 즉시 FAILED
+        SummaryBatchResultItem resultItem = SummaryBatchResultItem.failure(
+                "summaryjob-53", false, "BATCH_HTTP_400", "잘못된 요청");
+
+        summaryJobLifecycleService.applyBatchResult(10L, resultItem);
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.FAILED);
+        verify(summaryRepository, never()).save(any());
+    }
+
+    @Test
+    void applyBatchResult_는_세션이_없으면_감상문_저장_없이_작업만_성공처리한다() {
+        SummaryJob job = SummaryJobFixture.persistedSubmitted(54L, 5L, 10L);
+        given(summaryJobRepository.findByIdForUpdate(54L)).willReturn(Optional.of(job));
+        given(aiChatSessionRepository.findByIdForUpdate(5L)).willReturn(Optional.empty());
+
+        SummaryBatchResultItem resultItem = SummaryBatchResultItem.success(
+                "summaryjob-54", new SummaryDraftResult("제목", "본문"));
+
+        summaryJobLifecycleService.applyBatchResult(10L, resultItem);
+
+        verify(summaryRepository, never()).save(any());
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
+    }
+
+    // ─── completeBatch ────────────────────────────────────────────────────────
+
+    @Test
+    void completeBatch_는_배치를_COMPLETED로_전이한다() {
+        OpenAiBatch batch = OpenAiBatchFixture.submitted(20L, "batch_Z", 2);
+        given(openAiBatchRepository.findById(20L)).willReturn(Optional.of(batch));
+
+        summaryJobLifecycleService.completeBatch(20L, "file_out", "file_err");
+
+        assertThat(batch.getStatus()).isEqualTo(OpenAiBatch.Status.COMPLETED);
+        assertThat(batch.getOutputFileId()).isEqualTo("file_out");
     }
 
 }

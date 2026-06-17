@@ -3,6 +3,7 @@ package com.readum.domain.summary.service;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryBatchBuildItem;
+import com.readum.domain.summary.dto.SummaryBatchResultItem;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
@@ -198,6 +199,111 @@ public class SummaryJobLifecycleService {
             if (job != null && job.isOwnedBy(owner)) {
                 job.releaseAfterOrphan(now);
             }
+        }
+    }
+
+    /**
+     * Batch 결과 항목 하나를 해당 SummaryJob 에 적용한다. customId 형식: "summaryjob-{jobId}".
+     * <p>
+     * 멱등성 보장: 작업 상태가 SUBMITTED 가 아니면 아무것도 하지 않는다. JVM 재시작이나
+     * collector 재실행으로 같은 batch 를 다시 수집해도 이미 처리된 작업은 안전하게 건너뛴다.
+     * </p>
+     */
+    @Transactional
+    public void applyBatchResult(Long batchEntityId, SummaryBatchResultItem resultItem) {
+        Long jobId = parseJobId(resultItem.customId());
+        if (jobId == null) {
+            log.warn("감상문 batch 결과 customId 파싱 실패 — customId={}", resultItem.customId());
+            return;
+        }
+        SummaryJob job = summaryJobRepository.findByIdForUpdate(jobId).orElse(null);
+        if (job == null) {
+            log.warn("감상문 batch 결과 적용 대상 작업 없음 jobId={}", jobId);
+            return;
+        }
+        // 멱등성: SUBMITTED 상태가 아닌 작업은 건너뛴다(이미 처리 완료 or 재큐됨).
+        if (job.getStatus() != SummaryJob.Status.SUBMITTED) {
+            return;
+        }
+        if (resultItem.failed()) {
+            boolean canRetry = resultItem.retryable()
+                    && job.getAttemptCount() + 1 < properties.maxAttempts();
+            if (canRetry) {
+                LocalDateTime nextAttemptAt = properties.nextAttemptFrom(
+                        LocalDateTime.now(), job.getAttemptCount());
+                job.scheduleRetry(nextAttemptAt, resultItem.errorCode(), resultItem.errorMessage());
+            } else {
+                job.markFailed(resultItem.errorCode(), resultItem.errorMessage());
+            }
+            return;
+        }
+        // 성공 결과 — 세션이 ACTIVE 이면 감상문 저장 + 세션 잠금.
+        AiChatSession session = aiChatSessionRepository.findByIdForUpdate(job.getAiChatSessionId()).orElse(null);
+        if (session == null || session.getStatus() != AiChatSession.Status.ACTIVE) {
+            // 세션이 이미 종료됐거나 없으면 생성 불필요 — 무해 종료.
+            job.markSucceeded();
+            return;
+        }
+        summaryRepository.save(Summary.createCompleted(
+                session.getUserBookId(), session.getId(),
+                resultItem.result().title(), resultItem.result().body()));
+        session.lock();
+        job.markSucceeded();
+    }
+
+    /**
+     * batch 의 모든 결과 항목이 적용된 뒤 OpenAiBatch 를 COMPLETED 로 전이한다.
+     * <p>
+     * completeBatch 는 batch 내 모든 항목이 applyBatchResult 를 통해 적용된 후에만 호출된다.
+     * JVM 재시작이나 중간 실패로 batch 가 SUBMITTED 에 머물더라도, 재수집 시 applyBatchResult 의
+     * 멱등성 검사(SUBMITTED 가 아닌 작업 건너뜀)가 이미 처리된 항목을 안전하게 건너뛰므로 재수집은 무해하다.
+     * </p>
+     */
+    @Transactional
+    public void completeBatch(Long batchEntityId, String outputFileId, String errorFileId) {
+        OpenAiBatch batch = openAiBatchRepository.findById(batchEntityId).orElse(null);
+        if (batch == null) {
+            log.warn("감상문 batch 완료 처리 대상 배치 없음 batchEntityId={}", batchEntityId);
+            return;
+        }
+        batch.markCompleted(outputFileId, errorFileId);
+    }
+
+    /**
+     * batch 전체 실패(OpenAI 측 오류) 시 OpenAiBatch 를 FAILED 로 전이하고,
+     * 이 batch 에 묶인 SUBMITTED 작업을 재시도 대상(PENDING)으로 되돌린다.
+     */
+    @Transactional
+    public void failBatch(Long batchEntityId) {
+        OpenAiBatch batch = openAiBatchRepository.findById(batchEntityId).orElse(null);
+        if (batch == null) {
+            log.warn("감상문 batch 실패 처리 대상 배치 없음 batchEntityId={}", batchEntityId);
+            return;
+        }
+        batch.markFailed();
+        List<SummaryJob> submittedJobs = summaryJobRepository.findByOpenAiBatchIdAndStatus(
+                batchEntityId, SummaryJob.Status.SUBMITTED);
+        LocalDateTime now = LocalDateTime.now();
+        for (SummaryJob job : submittedJobs) {
+            boolean canRetry = job.getAttemptCount() + 1 < properties.maxAttempts();
+            if (canRetry) {
+                LocalDateTime nextAttemptAt = properties.nextAttemptFrom(now, job.getAttemptCount());
+                job.scheduleRetry(nextAttemptAt, "BATCH_FAILED", "OpenAI batch 전체 실패");
+            } else {
+                job.markFailed("BATCH_FAILED", "OpenAI batch 전체 실패 — 시도 상한 초과");
+            }
+        }
+    }
+
+    /** customId "summaryjob-{jobId}" 에서 jobId 를 추출한다. 파싱 불가이면 null. */
+    private Long parseJobId(String customId) {
+        if (customId == null || !customId.startsWith("summaryjob-")) {
+            return null;
+        }
+        try {
+            return Long.parseLong(customId.substring("summaryjob-".length()));
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
