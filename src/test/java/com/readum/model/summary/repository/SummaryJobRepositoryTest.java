@@ -43,16 +43,21 @@ class SummaryJobRepositoryTest {
     }
 
     @Test
-    void findOrphaned_은_lease가_만료된_PROCESSING만_가져온다() {
+    void findOrphaned_은_lease가_만료된_PROCESSING과_BATCH_BUILDING을_가져온다() {
         LocalDateTime now = LocalDateTime.now();
-        SummaryJob orphan = summaryJobRepository.save(
+        SummaryJob expiredProcessing = summaryJobRepository.save(
                 SummaryJobFixture.persistedProcessing(null, nextSessionId(), "dead", now.minusMinutes(1)));
+        SummaryJob expiredBatchBuilding = summaryJobRepository.save(
+                SummaryJobFixture.persistedBatchBuilding(null, nextSessionId(), "dead-batch", now.minusMinutes(1)));
         summaryJobRepository.save(
                 SummaryJobFixture.persistedProcessing(null, nextSessionId(), "alive", now.plusMinutes(5)));
+        summaryJobRepository.save(
+                SummaryJobFixture.persistedBatchBuilding(null, nextSessionId(), "alive-batch", now.plusMinutes(5)));
 
         List<SummaryJob> orphans = summaryJobRepository.findOrphaned(now, PageRequest.of(0, 10));
 
-        assertThat(orphans).extracting(SummaryJob::getId).contains(orphan.getId());
+        assertThat(orphans).extracting(SummaryJob::getId)
+                .contains(expiredProcessing.getId(), expiredBatchBuilding.getId());
         assertThat(orphans).allMatch(job -> job.getLockedUntil().isBefore(now));
     }
 

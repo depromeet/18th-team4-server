@@ -33,7 +33,6 @@ import java.time.LocalDateTime;
                 @UniqueConstraint(name = "uk_summary_job_active_session", columnNames = "active_session_id")
         },
         indexes = {
-                @Index(name = "idx_summary_job_claim", columnList = "status, next_attempt_at"),
                 @Index(name = "idx_summary_job_session", columnList = "ai_chat_session_id, status"),
                 @Index(name = "idx_summary_job_mode_claim", columnList = "execution_mode, status, next_attempt_at")
         }
