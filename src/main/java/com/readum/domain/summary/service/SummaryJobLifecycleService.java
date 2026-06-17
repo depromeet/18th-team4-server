@@ -225,6 +225,13 @@ public class SummaryJobLifecycleService {
         if (job.getStatus() != SummaryJob.Status.SUBMITTED) {
             return;
         }
+        // batch 소속 검증: 이 결과 항목이 실제로 이 batch 에 속하는 작업인지 확인한다.
+        // customId 파싱으로 jobId 를 꺼낸 뒤 그 작업의 openAiBatchId 가 batchEntityId 와 다르면 건너뛴다.
+        if (job.getOpenAiBatchId() == null || !job.getOpenAiBatchId().equals(batchEntityId)) {
+            log.warn("감상문 batch 결과 적용 — 작업이 이 batch 소속 아님 jobId={} batchEntityId={}",
+                    jobId, batchEntityId);
+            return;
+        }
         if (resultItem.failed()) {
             boolean canRetry = resultItem.retryable()
                     && job.getAttemptCount() + 1 < properties.maxAttempts();

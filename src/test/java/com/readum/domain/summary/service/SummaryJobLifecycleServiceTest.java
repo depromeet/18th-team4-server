@@ -373,6 +373,23 @@ class SummaryJobLifecycleServiceTest {
     }
 
     @Test
+    void applyBatchResult_는_작업이_다른_batch_소속이면_건너뛴다() {
+        // 준비: openAiBatchId=99 인 SUBMITTED 작업 — batchEntityId=1 로 호출하면 소속 불일치
+        SummaryJob job = SummaryJobFixture.persistedSubmitted(55L, 6L, 99L);
+        given(summaryJobRepository.findByIdForUpdate(55L)).willReturn(Optional.of(job));
+
+        SummaryBatchResultItem resultItem = SummaryBatchResultItem.success(
+                "summaryjob-55", new SummaryDraftResult("제목", "본문"));
+
+        summaryJobLifecycleService.applyBatchResult(1L, resultItem);
+
+        // 소속 불일치 — 감상문 저장도, 상태 변경도 없어야 한다
+        verify(summaryRepository, never()).save(any());
+        verify(aiChatSessionRepository, never()).findByIdForUpdate(any());
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUBMITTED);
+    }
+
+    @Test
     void applyBatchResult_는_세션이_없으면_감상문_저장_없이_작업만_성공처리한다() {
         SummaryJob job = SummaryJobFixture.persistedSubmitted(54L, 5L, 10L);
         given(summaryJobRepository.findByIdForUpdate(54L)).willReturn(Optional.of(job));
