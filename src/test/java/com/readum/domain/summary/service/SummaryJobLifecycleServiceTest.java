@@ -2,11 +2,16 @@ package com.readum.domain.summary.service;
 
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.summary.config.SummaryJobProperties;
+import com.readum.domain.summary.dto.SummaryBatchBuildItem;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
+import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.entity.OpenAiBatch;
+import com.readum.model.summary.entity.OpenAiBatchFixture;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.summary.entity.SummaryJobFixture;
@@ -15,6 +20,7 @@ import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -176,6 +182,125 @@ class SummaryJobLifecycleServiceTest {
         assertThat(context).isNotNull();
         assertThat(context.sessionId()).isEqualTo(1L);
         assertThat(context.userBookId()).isEqualTo(7L);
+    }
+
+    // ─── claimBatchChunk ──────────────────────────────────────────────────────
+
+    @Test
+    void claimBatchChunk_는_ACTIVE_세션인_BATCH_작업을_BATCH_BUILDING으로_점유하고_빌드_아이템으로_반환한다() {
+        SummaryJob job = SummaryJobFixture.persistedBatchPending(20L, 1L, LocalDateTime.now());
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(1L, 5L, 2, 600, "제목");
+        List<AiChatMessage> messages = List.of(
+                AiChatMessageFixture.persistedUserMessage(1L, 1L, "안녕"),
+                AiChatMessageFixture.persistedAssistantMessage(2L, 1L, "반갑습니다")
+        );
+        given(summaryJobRepository.findClaimableBatch(any(), any())).willReturn(List.of(job));
+        given(aiChatSessionRepository.findByIdForUpdate(1L)).willReturn(Optional.of(session));
+        given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(1L))
+                .willReturn(messages);
+
+        List<SummaryBatchBuildItem> buildItems = summaryJobLifecycleService.claimBatchChunk(
+                "owner-batch", 10, Duration.ofMinutes(5));
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.BATCH_BUILDING);
+        assertThat(buildItems).hasSize(1);
+        SummaryBatchBuildItem item = buildItems.get(0);
+        assertThat(item.jobId()).isEqualTo(20L);
+        assertThat(item.sessionId()).isEqualTo(1L);
+        assertThat(item.userBookId()).isEqualTo(5L);
+        assertThat(item.messages()).hasSize(2);
+    }
+
+    @Test
+    void claimBatchChunk_는_세션이_없으면_해당_작업을_SUCCEEDED로_처리하고_빌드_아이템에서_제외한다() {
+        SummaryJob job = SummaryJobFixture.persistedBatchPending(21L, 2L, LocalDateTime.now());
+        given(summaryJobRepository.findClaimableBatch(any(), any())).willReturn(List.of(job));
+        given(aiChatSessionRepository.findByIdForUpdate(2L)).willReturn(Optional.empty());
+
+        List<SummaryBatchBuildItem> buildItems = summaryJobLifecycleService.claimBatchChunk(
+                "owner-batch", 10, Duration.ofMinutes(5));
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
+        assertThat(buildItems).isEmpty();
+    }
+
+    @Test
+    void claimBatchChunk_는_세션이_ACTIVE가_아니면_해당_작업을_SUCCEEDED로_처리하고_빌드_아이템에서_제외한다() {
+        SummaryJob job = SummaryJobFixture.persistedBatchPending(22L, 3L, LocalDateTime.now());
+        AiChatSession lockedSession = AiChatSessionFixture.persistedActiveSession(3L, 7L, 2, 600, "제목");
+        lockedSession.lock();
+        given(summaryJobRepository.findClaimableBatch(any(), any())).willReturn(List.of(job));
+        given(aiChatSessionRepository.findByIdForUpdate(3L)).willReturn(Optional.of(lockedSession));
+
+        List<SummaryBatchBuildItem> buildItems = summaryJobLifecycleService.claimBatchChunk(
+                "owner-batch", 10, Duration.ofMinutes(5));
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
+        assertThat(buildItems).isEmpty();
+    }
+
+    // ─── recordSubmission ─────────────────────────────────────────────────────
+
+    @Test
+    void recordSubmission_은_openAiBatch를_저장하고_소유권_일치_작업을_SUBMITTED로_전이한다() {
+        SummaryJob job1 = SummaryJobFixture.persistedBatchBuilding(30L, 1L, "owner-s", LocalDateTime.now().plusMinutes(5));
+        SummaryJob job2 = SummaryJobFixture.persistedBatchBuilding(31L, 2L, "owner-s", LocalDateTime.now().plusMinutes(5));
+        OpenAiBatch savedBatch = OpenAiBatchFixture.submitted(99L, "batch_X", 2);
+        given(openAiBatchRepository.save(any(OpenAiBatch.class))).willReturn(savedBatch);
+        given(summaryJobRepository.findByIdForUpdate(30L)).willReturn(Optional.of(job1));
+        given(summaryJobRepository.findByIdForUpdate(31L)).willReturn(Optional.of(job2));
+
+        summaryJobLifecycleService.recordSubmission(List.of(30L, 31L), "owner-s", "batch_X", "file_in_1");
+
+        ArgumentCaptor<OpenAiBatch> batchCaptor = ArgumentCaptor.forClass(OpenAiBatch.class);
+        verify(openAiBatchRepository).save(batchCaptor.capture());
+        assertThat(batchCaptor.getValue().getJobCount()).isEqualTo(2);
+
+        assertThat(job1.getStatus()).isEqualTo(SummaryJob.Status.SUBMITTED);
+        assertThat(job1.getOpenAiBatchId()).isEqualTo(99L);
+        assertThat(job2.getStatus()).isEqualTo(SummaryJob.Status.SUBMITTED);
+        assertThat(job2.getOpenAiBatchId()).isEqualTo(99L);
+    }
+
+    @Test
+    void recordSubmission_은_소유권_불일치_작업은_건드리지_않는다() {
+        SummaryJob ownedJob = SummaryJobFixture.persistedBatchBuilding(32L, 1L, "owner-s", LocalDateTime.now().plusMinutes(5));
+        SummaryJob otherJob = SummaryJobFixture.persistedBatchBuilding(33L, 2L, "other-owner", LocalDateTime.now().plusMinutes(5));
+        OpenAiBatch savedBatch = OpenAiBatchFixture.submitted(100L, "batch_Y", 1);
+        given(openAiBatchRepository.save(any(OpenAiBatch.class))).willReturn(savedBatch);
+        given(summaryJobRepository.findByIdForUpdate(32L)).willReturn(Optional.of(ownedJob));
+        given(summaryJobRepository.findByIdForUpdate(33L)).willReturn(Optional.of(otherJob));
+
+        summaryJobLifecycleService.recordSubmission(List.of(32L, 33L), "owner-s", "batch_Y", "file_in_2");
+
+        assertThat(ownedJob.getStatus()).isEqualTo(SummaryJob.Status.SUBMITTED);
+        assertThat(otherJob.getStatus()).isEqualTo(SummaryJob.Status.BATCH_BUILDING); // 변하지 않음
+        assertThat(otherJob.getOpenAiBatchId()).isNull();
+    }
+
+    // ─── releaseBuilding ──────────────────────────────────────────────────────
+
+    @Test
+    void releaseBuilding_은_소유권_일치_작업을_PENDING으로_되돌리고_attemptCount는_증가시키지_않는다() {
+        SummaryJob job = SummaryJobFixture.persistedBatchBuilding(40L, 1L, "owner-r", LocalDateTime.now().plusMinutes(5));
+
+        given(summaryJobRepository.findByIdForUpdate(40L)).willReturn(Optional.of(job));
+
+        summaryJobLifecycleService.releaseBuilding(List.of(40L), "owner-r");
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
+        assertThat(job.getAttemptCount()).isZero();
+    }
+
+    @Test
+    void releaseBuilding_은_소유권_불일치_작업은_건드리지_않는다() {
+        SummaryJob job = SummaryJobFixture.persistedBatchBuilding(41L, 1L, "other-owner", LocalDateTime.now().plusMinutes(5));
+
+        given(summaryJobRepository.findByIdForUpdate(41L)).willReturn(Optional.of(job));
+
+        summaryJobLifecycleService.releaseBuilding(List.of(41L), "owner-r");
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.BATCH_BUILDING); // 변하지 않음
     }
 
 }

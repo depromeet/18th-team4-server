@@ -139,6 +139,13 @@ public class SummaryJobLifecycleService {
     /**
      * BATCH PENDING 작업을 maxJobs 만큼 후보로 선점(BATCH_BUILDING)하고 빌드 아이템 리스트를 반환한다.
      * 세션이 없거나 ACTIVE 가 아니면 해당 작업을 성공 처리하고 목록에서 제외한다(대화가 없으니 생성 불필요).
+     * <p>
+     * 루프 안에서 작업마다 세션·메시지를 각각 조회하는 것은 의도적인 구조다.
+     * findClaimableBatch 가 SKIP LOCKED 으로 한 번에 여러 행을 선점한 뒤, 각 작업에 대해
+     * claimOne + prepareGeneration 의 단계(세션 상태 확인 → 메시지 수집 → BATCH_BUILDING 전이)를
+     * 한 트랜잭션 안에서 N 번 반복하는 패턴이다. N+1 문제가 아니라 "단일 작업 점유(claimOne)" 를
+     * 청크 크기만큼 한 트랜잭션으로 묶은 것이므로 쿼리 수가 늘어나는 것은 설계 의도다.
+     * </p>
      */
     @Transactional
     public List<SummaryBatchBuildItem> claimBatchChunk(String owner, int maxJobs, Duration buildLease) {

@@ -17,7 +17,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -72,7 +71,7 @@ class SummaryBatchSubmitServiceTest {
 
     @Test
     void maxJobsPerBatch_건수에_닿으면_건수로_청크를_끊는다() {
-        // 준비: maxJobsPerBatch=2, claimBatchChunk 가 5개를 선점했지만 토큰 상한은 크게 설정 → 2개만 제출
+        // 준비: 선점된 2개 모두 토큰 상한 이내 → 전부 제출, 초과분 없음
         given(batchProperties.maxJobsPerBatch()).willReturn(2);
         given(batchProperties.buildLease()).willReturn(Duration.ofMinutes(5));
         given(batchProperties.chunkTokenLimit()).willReturn(1_000_000L);
