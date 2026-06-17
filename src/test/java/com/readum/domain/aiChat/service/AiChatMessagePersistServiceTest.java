@@ -105,7 +105,7 @@ class AiChatMessagePersistServiceTest {
                 sessionId, 100L, 0, 0, null
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(active));
-        given(summaryJobRepository.existsActiveProcessingJob(eq(sessionId), any(LocalDateTime.class)))
+        given(summaryJobRepository.existsBlockingSummaryJob(eq(sessionId), any(LocalDateTime.class)))
                 .willReturn(true);
 
         assertThatThrownBy(() -> persistService.loadHistory(sessionId, userId))
@@ -124,7 +124,7 @@ class AiChatMessagePersistServiceTest {
                 sessionId, 100L, 0, 0, null
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(active));
-        given(summaryJobRepository.existsActiveProcessingJob(eq(sessionId), any(LocalDateTime.class)))
+        given(summaryJobRepository.existsBlockingSummaryJob(eq(sessionId), any(LocalDateTime.class)))
                 .willReturn(false);
         given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of(
                 new HistoryMessage(HistoryMessage.Role.USER, "이전 질문"),

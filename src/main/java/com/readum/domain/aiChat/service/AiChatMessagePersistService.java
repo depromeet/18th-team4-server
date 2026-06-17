@@ -54,7 +54,7 @@ public class AiChatMessagePersistService {
             // 감상문이 완성되어 종료된 세션 — 영구히 대화 불가
             throw new BadRequestException(AiChatErrorCode.SESSION_ALREADY_SUMMARIZED);
         }
-        if (summaryJobRepository.existsActiveProcessingJob(sessionId, LocalDateTime.now())) {
+        if (summaryJobRepository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())) {
             // 지금 생성 중 — 일시적으로 전송 불가
             throw new BadRequestException(AiChatErrorCode.SESSION_LOCKED);
         }

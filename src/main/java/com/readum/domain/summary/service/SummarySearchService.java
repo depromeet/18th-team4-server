@@ -99,8 +99,8 @@ public class SummarySearchService {
         AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        // "생성 중" 은 유효 PROCESSING 작업으로 판정(폴링 계약: 409 유지)
-        if (summaryJobRepository.existsActiveProcessingJob(sessionId, LocalDateTime.now())) {
+        // "생성 중" 은 차단 판정 조건(유효 점유 PROCESSING/BATCH_BUILDING 또는 SUBMITTED)으로 판정(폴링 계약: 409 유지)
+        if (summaryJobRepository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())) {
             throw new ConflictException(SummaryErrorCode.SUMMARY_IN_PROGRESS);
         }
 

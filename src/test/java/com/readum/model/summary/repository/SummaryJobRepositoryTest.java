@@ -62,7 +62,7 @@ class SummaryJobRepositoryTest {
     }
 
     @Test
-    void existsActiveProcessingJob_은_유효_lease의_PROCESSING이_있을때만_true() {
+    void existsBlockingSummaryJob_은_유효_lease의_PROCESSING이_있을때_true() {
         LocalDateTime now = LocalDateTime.now();
         long withValid = nextSessionId();
         long withExpired = nextSessionId();
@@ -71,9 +71,9 @@ class SummaryJobRepositoryTest {
         summaryJobRepository.save(
                 SummaryJobFixture.persistedProcessing(null, withExpired, "w", now.minusMinutes(1)));
 
-        assertThat(summaryJobRepository.existsActiveProcessingJob(withValid, now)).isTrue();
-        assertThat(summaryJobRepository.existsActiveProcessingJob(withExpired, now)).isFalse();
-        assertThat(summaryJobRepository.existsActiveProcessingJob(nextSessionId(), now)).isFalse();
+        assertThat(summaryJobRepository.existsBlockingSummaryJob(withValid, now)).isTrue();
+        assertThat(summaryJobRepository.existsBlockingSummaryJob(withExpired, now)).isFalse();
+        assertThat(summaryJobRepository.existsBlockingSummaryJob(nextSessionId(), now)).isFalse();
     }
 
     @Test

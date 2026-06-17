@@ -93,8 +93,13 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                                     select 1
                                       from SummaryJob summaryJob
                                      where summaryJob.aiChatSessionId = aiChatSession.id
-                                       and summaryJob.status = com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
-                                       and summaryJob.lockedUntil > :now
+                                       and (
+                                             (summaryJob.status in (
+                                                    com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
+                                                  , com.readum.model.summary.entity.SummaryJob.Status.BATCH_BUILDING
+                                              ) and summaryJob.lockedUntil > :now)
+                                          or summaryJob.status = com.readum.model.summary.entity.SummaryJob.Status.SUBMITTED
+                                       )
                                 ) then 'SUMMARIZING'
                            else 'ACTIVE'
                        end

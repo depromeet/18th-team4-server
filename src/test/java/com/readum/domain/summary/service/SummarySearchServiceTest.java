@@ -220,7 +220,7 @@ class SummarySearchServiceTest {
         Summary summary = SummaryFixture.persistedSummary(17L, 10L, SESSION_ID, "감상문 제목", "감상문 본문");
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
-        given(summaryJobRepository.existsActiveProcessingJob(eq(SESSION_ID), any(LocalDateTime.class)))
+        given(summaryJobRepository.existsBlockingSummaryJob(eq(SESSION_ID), any(LocalDateTime.class)))
                 .willReturn(false);
         given(summaryRepository.findByAiChatSessionId(SESSION_ID)).willReturn(Optional.of(summary));
 
@@ -236,7 +236,7 @@ class SummarySearchServiceTest {
         AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
-        given(summaryJobRepository.existsActiveProcessingJob(eq(SESSION_ID), any(LocalDateTime.class)))
+        given(summaryJobRepository.existsBlockingSummaryJob(eq(SESSION_ID), any(LocalDateTime.class)))
                 .willReturn(true);
 
         assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
@@ -249,7 +249,7 @@ class SummarySearchServiceTest {
         AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
-        given(summaryJobRepository.existsActiveProcessingJob(eq(SESSION_ID), any(LocalDateTime.class)))
+        given(summaryJobRepository.existsBlockingSummaryJob(eq(SESSION_ID), any(LocalDateTime.class)))
                 .willReturn(false);
         given(summaryRepository.findByAiChatSessionId(SESSION_ID)).willReturn(Optional.empty());
 

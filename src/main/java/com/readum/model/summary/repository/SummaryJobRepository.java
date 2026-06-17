@@ -66,15 +66,24 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
             """)
     Optional<SummaryJob> findByIdForUpdate(@Param("id") Long id);
 
-    /** "지금 생성 중" 판정 — 유효 lease 의 PROCESSING 작업이 그 세션에 있는가. */
+    /**
+     * "지금 생성 중(차단)" 판정 — 그 세션에 아래 조건을 만족하는 작업이 하나라도 있는가.
+     * - 유효 점유(lockedUntil > now) 상태의 PROCESSING 또는 BATCH_BUILDING
+     * - 또는 SUBMITTED (OpenAI Batch 에 제출되어 결과를 기다리는 중)
+     */
     @Query("""
             select case when count(summaryJob) > 0 then true else false end
               from SummaryJob summaryJob
              where summaryJob.aiChatSessionId = :sessionId
-               and summaryJob.status = com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
-               and summaryJob.lockedUntil > :now
+               and (
+                     (summaryJob.status in (
+                            com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
+                          , com.readum.model.summary.entity.SummaryJob.Status.BATCH_BUILDING
+                      ) and summaryJob.lockedUntil > :now)
+                  or summaryJob.status = com.readum.model.summary.entity.SummaryJob.Status.SUBMITTED
+               )
             """)
-    boolean existsActiveProcessingJob(@Param("sessionId") Long sessionId, @Param("now") LocalDateTime now);
+    boolean existsBlockingSummaryJob(@Param("sessionId") Long sessionId, @Param("now") LocalDateTime now);
 
     /** 세션에 미완료(활성) 작업이 이미 있는지 — 적재 멱등성 사전 확인용. */
     boolean existsByActiveSessionId(Long activeSessionId);
