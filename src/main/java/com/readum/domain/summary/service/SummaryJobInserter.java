@@ -19,7 +19,7 @@ class SummaryJobInserter {
     private final SummaryJobRepository summaryJobRepository;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void insertPending(Long sessionId, SummaryJob.ExecutionMode executionMode) {
-        summaryJobRepository.save(SummaryJob.createPending(sessionId, executionMode));
+    public void insertPending(Long sessionId) {
+        summaryJobRepository.save(SummaryJob.createPending(sessionId));
     }
 }

@@ -9,7 +9,6 @@ import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.domain.summary.out.SummaryCallBreaker;
 import com.readum.domain.summary.out.SummaryCallRateLimiter;
-import com.readum.model.summary.entity.SummaryJob;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -53,7 +52,7 @@ class SummaryGenerationWorkerTest {
     @BeforeEach
     void setup() {
         when(breaker.isBlocked()).thenReturn(false);
-        when(lifecycleService.claimOne(eq(SummaryJob.ExecutionMode.SYNC), anyString())).thenReturn(1L);
+        when(lifecycleService.claimOne(anyString())).thenReturn(1L);
         when(lifecycleService.prepareGeneration(eq(1L), anyString())).thenReturn(CONTEXT);
         when(properties.reservedOutputTokens()).thenReturn(1024);
         when(tokenEstimator.estimate(any(), eq(1024))).thenReturn(3000);
@@ -67,7 +66,7 @@ class SummaryGenerationWorkerTest {
         boolean processed = worker.processOne();
 
         org.assertj.core.api.Assertions.assertThat(processed).isFalse();
-        verify(lifecycleService, never()).claimOne(any(), anyString());
+        verify(lifecycleService, never()).claimOne(anyString());
     }
 
     @Test

@@ -39,7 +39,7 @@ public class SummaryDraftSearchService {
 
         int progressPercent = summaryDraftPolicy.calculateProgressPercent(session.getAccumulatedTokens());
 
-        // 이미 활성(완료·실패 전 상태 — PENDING/PROCESSING/BATCH_BUILDING/SUBMITTED) 작업이 있으면 "생성 중" — 세션 상태와 무관하게 재요청 불가.
+        // 이미 활성(완료·실패 전 상태 — PENDING/PROCESSING) 작업이 있으면 "생성 중" — 세션 상태와 무관하게 재요청 불가.
         SummaryDraftEligibility eligibility = summaryJobRepository.existsByActiveSessionId(sessionId)
                 ? SummaryDraftEligibility.fail(IneligibleReason.SUMMARY_IN_PROGRESS)
                 : summaryDraftPolicy.evaluate(session);

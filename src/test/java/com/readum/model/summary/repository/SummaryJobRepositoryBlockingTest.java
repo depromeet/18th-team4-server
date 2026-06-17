@@ -13,11 +13,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * {@link SummaryJobRepository#existsBlockingSummaryJob} 의 차단 판정 조건을 검증하는 DAO 통합 테스트.
  * 판정 기준:
- * - 수동(SYNC) PENDING → 차단 (요청 시점 이후 메시지 끼어들기 방지)
- * - 자동(BATCH) PENDING → 차단 아님 (builder 스냅샷 시점인 BATCH_BUILDING 까지 메시지 포함 허용)
- * - 유효 점유(lockedUntil > now) PROCESSING/BATCH_BUILDING → 차단
- * - 점유 만료 PROCESSING/BATCH_BUILDING → 차단 아님
- * - SUBMITTED → 차단
+ * - PENDING → 차단 (요청 시점 이후 메시지 끼어들기 방지)
+ * - 유효 점유(lockedUntil > now) PROCESSING → 차단
+ * - 점유 만료 PROCESSING → 차단 아님
  */
 @SpringBootTest
 @Transactional
@@ -33,53 +31,11 @@ class SummaryJobRepositoryBlockingTest {
     }
 
     @Test
-    void SUBMITTED_작업은_차단으로_본다() {
-        long sessionId = nextSessionId();
-        repository.save(SummaryJobFixture.persistedSubmitted(null, sessionId, 1L));
-
-        assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isTrue();
-    }
-
-    @Test
-    void 유효_점유_BATCH_BUILDING은_차단으로_본다() {
-        long sessionId = nextSessionId();
-        repository.save(SummaryJobFixture.persistedBatchBuilding(
-                null, sessionId, "owner-1", LocalDateTime.now().plusMinutes(5)));
-
-        assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isTrue();
-    }
-
-    @Test
-    void 점유_만료된_BATCH_BUILDING은_차단_아니다() {
-        long sessionId = nextSessionId();
-        repository.save(SummaryJobFixture.persistedBatchBuilding(
-                null, sessionId, "owner-1", LocalDateTime.now().minusMinutes(1)));
-
-        assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isFalse();
-    }
-
-    @Test
-    void BATCH_PENDING은_차단_아니다() {
-        long sessionId = nextSessionId();
-        repository.save(SummaryJobFixture.persistedBatchPending(null, sessionId, LocalDateTime.now()));
-
-        assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isFalse();
-    }
-
-    @Test
-    void SYNC_PENDING_작업은_차단으로_본다() {
+    void PENDING_작업은_차단으로_본다() {
         long sessionId = nextSessionId();
         repository.save(SummaryJobFixture.persistedPending(null, sessionId, LocalDateTime.now()));
 
         assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isTrue();
-    }
-
-    @Test
-    void BATCH_PENDING_작업은_차단으로_보지_않는다() {
-        long sessionId = nextSessionId();
-        repository.save(SummaryJobFixture.persistedBatchPending(null, sessionId, LocalDateTime.now()));
-
-        assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isFalse();
     }
 
     @Test
@@ -89,5 +45,14 @@ class SummaryJobRepositoryBlockingTest {
                 null, sessionId, "o", LocalDateTime.now().plusMinutes(5)));
 
         assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isTrue();
+    }
+
+    @Test
+    void 점유_만료된_PROCESSING은_차단_아니다() {
+        long sessionId = nextSessionId();
+        repository.save(SummaryJobFixture.persistedProcessing(
+                null, sessionId, "o", LocalDateTime.now().minusMinutes(1)));
+
+        assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isFalse();
     }
 }

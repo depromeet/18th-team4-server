@@ -7,7 +7,6 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.summary.service.EnqueueSummaryJobService;
 import com.readum.domain.user.exception.UserErrorCode;
-import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
@@ -48,13 +47,13 @@ public class SummaryDraftService {
         userBookRepository.findByIdAndUserId(session.getUserBookId(), user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        // 이미 활성(완료·실패 전 상태 — PENDING/PROCESSING/BATCH_BUILDING/SUBMITTED) 작업이 있으면 "생성 중" — 409 로 거부(중복 요청 방지).
+        // 이미 활성(완료·실패 전 상태 — PENDING/PROCESSING) 작업이 있으면 "생성 중" — 409 로 거부(중복 요청 방지).
         if (summaryJobRepository.existsByActiveSessionId(sessionId)) {
             throw new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS);
         }
 
         summaryDraftPolicy.assertEligible(session);
 
-        enqueueSummaryJobService.execute(sessionId, SummaryJob.ExecutionMode.SYNC);
+        enqueueSummaryJobService.execute(sessionId);
     }
 }

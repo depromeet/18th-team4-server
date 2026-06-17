@@ -36,28 +36,24 @@ class SummaryJobRepositoryTest {
 
         List<SummaryJob> claimable =
                 summaryJobRepository.findClaimable(
-                        SummaryJob.ExecutionMode.SYNC, SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
+                        SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
 
         assertThat(claimable).extracting(SummaryJob::getId).contains(ready.getId());
         assertThat(claimable).allMatch(job -> !job.getNextAttemptAt().isAfter(now));
     }
 
     @Test
-    void findOrphaned_은_lease가_만료된_PROCESSING과_BATCH_BUILDING을_가져온다() {
+    void findOrphaned_은_lease가_만료된_PROCESSING을_가져온다() {
         LocalDateTime now = LocalDateTime.now();
         SummaryJob expiredProcessing = summaryJobRepository.save(
                 SummaryJobFixture.persistedProcessing(null, nextSessionId(), "dead", now.minusMinutes(1)));
-        SummaryJob expiredBatchBuilding = summaryJobRepository.save(
-                SummaryJobFixture.persistedBatchBuilding(null, nextSessionId(), "dead-batch", now.minusMinutes(1)));
         summaryJobRepository.save(
                 SummaryJobFixture.persistedProcessing(null, nextSessionId(), "alive", now.plusMinutes(5)));
-        summaryJobRepository.save(
-                SummaryJobFixture.persistedBatchBuilding(null, nextSessionId(), "alive-batch", now.plusMinutes(5)));
 
         List<SummaryJob> orphans = summaryJobRepository.findOrphaned(now, PageRequest.of(0, 10));
 
         assertThat(orphans).extracting(SummaryJob::getId)
-                .contains(expiredProcessing.getId(), expiredBatchBuilding.getId());
+                .contains(expiredProcessing.getId());
         assertThat(orphans).allMatch(job -> job.getLockedUntil().isBefore(now));
     }
 
@@ -100,7 +96,7 @@ class SummaryJobRepositoryTest {
 
         List<SummaryJob> claimable =
                 summaryJobRepository.findClaimable(
-                        SummaryJob.ExecutionMode.SYNC, SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
+                        SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
 
         List<Long> sessionOrder = claimable.stream().map(SummaryJob::getAiChatSessionId).toList();
         assertThat(sessionOrder.indexOf(earlierSession)).isLessThan(sessionOrder.indexOf(laterSession));
@@ -117,26 +113,6 @@ class SummaryJobRepositoryTest {
         List<SummaryJob> orphans = summaryJobRepository.findOrphaned(now, PageRequest.of(0, 10));
 
         assertThat(orphans).extracting(SummaryJob::getAiChatSessionId).doesNotContain(sessionId);
-    }
-
-    @Test
-    void findOrphaned_는_SUBMITTED_작업을_회수_대상에_포함하지_않는다() {
-        long sessionId = nextSessionId();
-        SummaryJob submitted = summaryJobRepository.save(
-                SummaryJobFixture.persistedSubmitted(null, sessionId, 1L));
-
-        List<SummaryJob> orphans = summaryJobRepository.findOrphaned(
-                LocalDateTime.now(), PageRequest.of(0, 10));
-
-        assertThat(orphans).extracting(SummaryJob::getId).doesNotContain(submitted.getId());
-    }
-
-    @Test
-    void existsByActiveSessionId_는_SUBMITTED_BATCH_작업이_있으면_true() {
-        long sessionId = nextSessionId();
-        summaryJobRepository.save(SummaryJobFixture.persistedSubmitted(null, sessionId, 1L));
-
-        assertThat(summaryJobRepository.existsByActiveSessionId(sessionId)).isTrue();
     }
 
     @Test

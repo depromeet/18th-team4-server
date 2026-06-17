@@ -10,7 +10,6 @@ import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.domain.summary.exception.SummaryErrorCode;
 import com.readum.domain.summary.out.SummaryCallBreaker;
 import com.readum.domain.summary.out.SummaryCallRateLimiter;
-import com.readum.model.summary.entity.SummaryJob;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -64,7 +63,7 @@ public class SummaryGenerationWorker {
             return false;
         }
         String owner = UUID.randomUUID().toString();
-        Long jobId = lifecycleService.claimOne(SummaryJob.ExecutionMode.SYNC, owner);
+        Long jobId = lifecycleService.claimOne(owner);
         if (jobId == null) {
             return false;
         }

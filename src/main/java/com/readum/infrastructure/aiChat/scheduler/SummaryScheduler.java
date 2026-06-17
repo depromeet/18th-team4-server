@@ -5,7 +5,6 @@ import com.readum.domain.summary.service.EnqueueSummaryJobService;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
-import com.readum.model.summary.entity.SummaryJob;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -40,7 +39,7 @@ public class SummaryScheduler {
         int enqueued = 0;
         for (Long sessionId : targetSessionIds) {
             try {
-                enqueueSummaryJobService.execute(sessionId, SummaryJob.ExecutionMode.SYNC);
+                enqueueSummaryJobService.execute(sessionId);
                 enqueued++;
             } catch (Exception e) {
                 // 한 세션 적재 실패가 나머지 배치를 막지 않도록 격리

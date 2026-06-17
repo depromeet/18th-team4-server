@@ -10,7 +10,7 @@ class SummaryJobTest {
 
     @Test
     void createPending_은_PENDING_활성작업으로_시작한다() {
-        SummaryJob job = SummaryJob.createPending(42L, SummaryJob.ExecutionMode.SYNC);
+        SummaryJob job = SummaryJob.createPending(42L);
 
         assertThat(job.getAiChatSessionId()).isEqualTo(42L);
         assertThat(job.getActiveSessionId()).isEqualTo(42L);
@@ -22,7 +22,7 @@ class SummaryJobTest {
 
     @Test
     void claim_은_PROCESSING_으로_바뀌고_소유자와_lease를_설정한다() {
-        SummaryJob job = SummaryJob.createPending(1L, SummaryJob.ExecutionMode.SYNC);
+        SummaryJob job = SummaryJob.createPending(1L);
         LocalDateTime until = LocalDateTime.now().plusMinutes(5);
 
         job.claim("owner-1", until);
@@ -38,9 +38,8 @@ class SummaryJobTest {
 
     @Test
     void markSucceeded_는_활성해제하고_SUCCEEDED로_만든다() {
-        SummaryJob job = SummaryJob.createPending(1L, SummaryJob.ExecutionMode.BATCH);
-        job.startBatchBuilding("owner-1", LocalDateTime.now().plusMinutes(5));
-        job.markSubmitted(77L);  // summaryBatchId=77 설정 후 성공 처리 — 완료 행은 깨끗해야 한다
+        SummaryJob job = SummaryJob.createPending(1L);
+        job.claim("owner-1", LocalDateTime.now().plusMinutes(5));
 
         job.markSucceeded();
 
@@ -48,12 +47,11 @@ class SummaryJobTest {
         assertThat(job.getActiveSessionId()).isNull();
         assertThat(job.getLockOwner()).isNull();
         assertThat(job.getLockedUntil()).isNull();
-        assertThat(job.getSummaryBatchId()).isNull();
     }
 
     @Test
     void scheduleRetry_는_시도횟수를_올리고_PENDING으로_되돌린다() {
-        SummaryJob job = SummaryJob.createPending(1L, SummaryJob.ExecutionMode.SYNC);
+        SummaryJob job = SummaryJob.createPending(1L);
         job.claim("owner-1", LocalDateTime.now().plusMinutes(5));
         LocalDateTime next = LocalDateTime.now().plusMinutes(1);
 
@@ -69,7 +67,7 @@ class SummaryJobTest {
 
     @Test
     void markFailed_는_활성해제하고_FAILED로_만든다() {
-        SummaryJob job = SummaryJob.createPending(1L, SummaryJob.ExecutionMode.SYNC);
+        SummaryJob job = SummaryJob.createPending(1L);
         job.claim("owner-1", LocalDateTime.now().plusMinutes(5));
 
         job.markFailed("AI_PROVIDER_ERROR", "회복 불가");
@@ -82,7 +80,7 @@ class SummaryJobTest {
 
     @Test
     void releaseAfterOrphan_은_즉시_재선점가능한_PENDING으로_되돌린다() {
-        SummaryJob job = SummaryJob.createPending(1L, SummaryJob.ExecutionMode.SYNC);
+        SummaryJob job = SummaryJob.createPending(1L);
         job.claim("owner-1", LocalDateTime.now().minusMinutes(1));
 
         LocalDateTime releaseTime = LocalDateTime.now();

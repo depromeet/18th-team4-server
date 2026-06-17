@@ -1,6 +1,5 @@
 package com.readum.domain.summary.service;
 
-import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,12 +22,12 @@ public class EnqueueSummaryJobService {
     private final SummaryJobRepository summaryJobRepository;
     private final SummaryJobInserter summaryJobInserter;
 
-    public void execute(Long sessionId, SummaryJob.ExecutionMode executionMode) {
+    public void execute(Long sessionId) {
         if (summaryJobRepository.existsByActiveSessionId(sessionId)) {
             return;
         }
         try {
-            summaryJobInserter.insertPending(sessionId, executionMode);
+            summaryJobInserter.insertPending(sessionId);
         } catch (DataIntegrityViolationException e) {
             log.debug("감상문 작업 적재 경합 — 이미 활성 작업 존재 sessionId={}", sessionId);
         }

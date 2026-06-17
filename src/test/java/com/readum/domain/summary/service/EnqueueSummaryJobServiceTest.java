@@ -1,6 +1,5 @@
 package com.readum.domain.summary.service;
 
-import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,7 +9,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
@@ -30,30 +28,30 @@ class EnqueueSummaryJobServiceTest {
     private EnqueueSummaryJobService service;
 
     @Test
-    void 활성작업_없으면_주어진_모드로_적재한다() {
+    void 활성작업_없으면_적재한다() {
         given(summaryJobRepository.existsByActiveSessionId(7L)).willReturn(false);
 
-        service.execute(7L, SummaryJob.ExecutionMode.BATCH);
+        service.execute(7L);
 
-        verify(summaryJobInserter).insertPending(7L, SummaryJob.ExecutionMode.BATCH);
+        verify(summaryJobInserter).insertPending(7L);
     }
 
     @Test
     void 활성작업_있으면_적재하지_않는다() {
         given(summaryJobRepository.existsByActiveSessionId(7L)).willReturn(true);
 
-        service.execute(7L, SummaryJob.ExecutionMode.SYNC);
+        service.execute(7L);
 
-        verify(summaryJobInserter, never()).insertPending(anyLong(), any());
+        verify(summaryJobInserter, never()).insertPending(anyLong());
     }
 
     @Test
     void 동시적재로_unique위반이_나도_예외를_삼킨다() {
         given(summaryJobRepository.existsByActiveSessionId(7L)).willReturn(false);
         doThrow(new DataIntegrityViolationException("dup"))
-                .when(summaryJobInserter).insertPending(7L, SummaryJob.ExecutionMode.SYNC);
+                .when(summaryJobInserter).insertPending(7L);
 
-        assertThatCode(() -> service.execute(7L, SummaryJob.ExecutionMode.SYNC))
+        assertThatCode(() -> service.execute(7L))
                 .doesNotThrowAnyException();
     }
 }

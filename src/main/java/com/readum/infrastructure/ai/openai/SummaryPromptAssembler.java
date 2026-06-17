@@ -15,11 +15,7 @@ import java.util.Map;
 
 /**
  * 감상문 초안 생성용 프롬프트 조립 공통 컴포넌트.
- * {@link AiSummaryClientImpl}(동기 단건 경로)과 {@code SummaryBatchClientImpl}(Batch API 경로)이
- * 동일한 시스템 프롬프트·대화 이력 포맷·응답 형식을 공유한다.
- *
- * <p>응답 형식(response_format JSON 스키마)은 OpenAI Batch API JSONL 줄과 동기 ChatClient 옵션
- * 양쪽에서 같은 구조로 사용한다.
+ * {@link AiSummaryClientImpl}(동기 단건 경로)이 시스템 프롬프트·대화 이력 포맷·응답 형식을 여기서 가져온다.
  */
 @Slf4j
 @Component
@@ -59,8 +55,7 @@ public class SummaryPromptAssembler {
     /**
      * OpenAI API 응답 형식(response_format)에 사용하는 JSON 스키마 구조를 반환한다.
      *
-     * <p>동기 단건 경로({@link AiSummaryClientImpl})와 Batch API 경로({@code SummaryBatchClientImpl})
-     * 양쪽에서 같은 스키마 구조를 써야 하므로, 이 메서드가 유일한 출처 역할을 한다.
+     * <p>동기 단건 경로({@link AiSummaryClientImpl})가 쓰는 스키마 구조의 유일한 출처다.
      *
      * <p>반환 구조:
      * <pre>
