@@ -20,8 +20,9 @@ import java.time.LocalDateTime;
 /**
  * 감상문 생성 작업 큐의 한 행. "이 세션은 감상문을 만들어야 한다" 는 의도를 영속화한다.
  * 작업은 잃으면 복구 불가하므로 DB 에 영속한다.
- * 상태: PENDING(처리 대기) → PROCESSING(워커 점유) → SUCCEEDED / FAILED.
- * active_session_id: 미완료(PENDING/PROCESSING) 동안만 세션 id, 완료/실패 시 NULL.
+ * 상태: PENDING(처리 대기) → PROCESSING(동기 워커 점유) / BATCH_BUILDING(builder 청크 점유)
+ *   → SUBMITTED(OpenAI Batch 제출 완료) → SUCCEEDED / FAILED.
+ * active_session_id: 미완료(PENDING/PROCESSING/BATCH_BUILDING/SUBMITTED) 동안만 세션 id, 완료/실패 시 NULL.
  *   → unique 제약으로 "세션당 활성 작업 1개" 를 보장한다.
  */
 @Getter
@@ -33,7 +34,8 @@ import java.time.LocalDateTime;
         },
         indexes = {
                 @Index(name = "idx_summary_job_claim", columnList = "status, next_attempt_at"),
-                @Index(name = "idx_summary_job_session", columnList = "ai_chat_session_id, status")
+                @Index(name = "idx_summary_job_session", columnList = "ai_chat_session_id, status"),
+                @Index(name = "idx_summary_job_mode_claim", columnList = "execution_mode, status, next_attempt_at")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -41,7 +43,11 @@ import java.time.LocalDateTime;
 public class SummaryJob {
 
     public enum Status {
-        PENDING, PROCESSING, SUCCEEDED, FAILED
+        PENDING, PROCESSING, BATCH_BUILDING, SUBMITTED, SUCCEEDED, FAILED
+    }
+
+    public enum ExecutionMode {
+        SYNC, BATCH
     }
 
     @Id
@@ -55,6 +61,10 @@ public class SummaryJob {
     private Long activeSessionId;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "execution_mode", nullable = false, length = 10)
+    private ExecutionMode executionMode;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private Status status;
 
@@ -63,6 +73,9 @@ public class SummaryJob {
 
     @Column(name = "locked_until")
     private LocalDateTime lockedUntil;
+
+    @Column(name = "open_ai_batch_id")
+    private Long openAiBatchId;
 
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount;
@@ -83,11 +96,11 @@ public class SummaryJob {
     private LocalDateTime updatedAt;
 
     /** 새 작업은 즉시 처리 가능한 PENDING 으로 시작한다. */
-    public static SummaryJob createPending(Long aiChatSessionId) {
+    public static SummaryJob createPending(Long aiChatSessionId, ExecutionMode executionMode) {
         LocalDateTime now = LocalDateTime.now();
         return new SummaryJob(
-                null, aiChatSessionId, aiChatSessionId, Status.PENDING,
-                null, null, 0, now, null, null, now, now
+                null, aiChatSessionId, aiChatSessionId, executionMode, Status.PENDING,
+                null, null, null, 0, now, null, null, now, now
         );
     }
 
@@ -99,8 +112,26 @@ public class SummaryJob {
         this.updatedAt = LocalDateTime.now();
     }
 
+    /** builder 가 청크로 점유한다 — BATCH_BUILDING. */
+    public void startBatchBuilding(String owner, LocalDateTime lockedUntil) {
+        this.status = Status.BATCH_BUILDING;
+        this.lockOwner = owner;
+        this.lockedUntil = lockedUntil;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /** OpenAI 제출 성공 — SUBMITTED. 점유 해제(워커가 들고 있지 않음), batch 연결. */
+    public void markSubmitted(Long openAiBatchId) {
+        this.status = Status.SUBMITTED;
+        this.openAiBatchId = openAiBatchId;
+        this.lockOwner = null;
+        this.lockedUntil = null;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     public boolean isOwnedBy(String owner) {
-        return this.status == Status.PROCESSING && owner != null && owner.equals(this.lockOwner);
+        return (this.status == Status.PROCESSING || this.status == Status.BATCH_BUILDING)
+                && owner != null && owner.equals(this.lockOwner);
     }
 
     public void markSucceeded() {
@@ -117,6 +148,7 @@ public class SummaryJob {
         this.attemptCount += 1;
         this.lockOwner = null;
         this.lockedUntil = null;
+        this.openAiBatchId = null;
         this.nextAttemptAt = nextAttemptAt;
         this.lastErrorCode = errorCode;
         this.lastErrorMessage = errorMessage;
@@ -129,6 +161,7 @@ public class SummaryJob {
         this.activeSessionId = null;
         this.lockOwner = null;
         this.lockedUntil = null;
+        this.openAiBatchId = null;
         this.lastErrorCode = errorCode;
         this.lastErrorMessage = errorMessage;
         this.updatedAt = LocalDateTime.now();
@@ -139,6 +172,7 @@ public class SummaryJob {
         this.status = Status.PENDING;
         this.lockOwner = null;
         this.lockedUntil = null;
+        this.openAiBatchId = null;
         this.nextAttemptAt = now;
         this.updatedAt = LocalDateTime.now();
     }
