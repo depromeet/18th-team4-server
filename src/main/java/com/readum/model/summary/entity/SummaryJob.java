@@ -138,6 +138,7 @@ public class SummaryJob {
         this.activeSessionId = null;
         this.lockOwner = null;
         this.lockedUntil = null;
+        this.openAiBatchId = null;
         this.updatedAt = LocalDateTime.now();
     }
 

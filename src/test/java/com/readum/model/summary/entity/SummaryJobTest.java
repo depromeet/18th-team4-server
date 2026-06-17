@@ -38,8 +38,9 @@ class SummaryJobTest {
 
     @Test
     void markSucceeded_는_활성해제하고_SUCCEEDED로_만든다() {
-        SummaryJob job = SummaryJob.createPending(1L, SummaryJob.ExecutionMode.SYNC);
-        job.claim("owner-1", LocalDateTime.now().plusMinutes(5));
+        SummaryJob job = SummaryJob.createPending(1L, SummaryJob.ExecutionMode.BATCH);
+        job.startBatchBuilding("owner-1", LocalDateTime.now().plusMinutes(5));
+        job.markSubmitted(77L);  // openAiBatchId=77 설정 후 성공 처리 — 완료 행은 깨끗해야 한다
 
         job.markSucceeded();
 
@@ -47,6 +48,7 @@ class SummaryJobTest {
         assertThat(job.getActiveSessionId()).isNull();
         assertThat(job.getLockOwner()).isNull();
         assertThat(job.getLockedUntil()).isNull();
+        assertThat(job.getOpenAiBatchId()).isNull();
     }
 
     @Test
