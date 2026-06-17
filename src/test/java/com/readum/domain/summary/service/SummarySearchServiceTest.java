@@ -207,6 +207,61 @@ class SummarySearchServiceTest {
     }
 
     @Test
+    void 월_경계는_월초_00시와_월말_자정직전을_포함하고_다음달_00시는_제외한다() {
+        UserBook userBook = UserBookFixture.persistedUserBook(10L, USER_ID, 100L);
+        Book book = BookFixture.persistedBook(
+                100L, "ext-1", "테스트 책", "저자", "출판사", 2024, "http://example.com/c.jpg");
+        AiChatSession monthStart = AiChatSessionFixture.persistedActiveSession(1000L, 10L, 3, 100, "월초");
+        AiChatSession monthEnd = AiChatSessionFixture.persistedActiveSession(1001L, 10L, 3, 100, "월말");
+        AiChatSession nextMonth = AiChatSessionFixture.persistedActiveSession(1002L, 10L, 3, 100, "다음달 0시");
+
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
+        given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L)))
+                .willReturn(List.of(monthStart, monthEnd, nextMonth));
+        given(aiChatMessageRepository.findLastChattedAtBySessionIds(
+                List.of(1000L, 1001L, 1002L), AiChatMessage.Status.COMPLETED))
+                .willReturn(List.of(
+                        new SessionLastChattedProjection(1000L, LocalDateTime.of(2026, 6, 1, 0, 0, 0)),
+                        new SessionLastChattedProjection(1001L, LocalDateTime.of(2026, 6, 30, 23, 59, 59)),
+                        new SessionLastChattedProjection(1002L, LocalDateTime.of(2026, 7, 1, 0, 0, 0))));
+        given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L, 1001L))).willReturn(List.of());
+        given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
+
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+
+        // 월말(1001)이 최신순으로 앞, 월초(1000)가 뒤. 다음달 0시(1002)는 제외.
+        assertThat(results).extracting(MonthlyReadingRecordResult::chatSessionId)
+                .containsExactly(1001L, 1000L);
+    }
+
+    @Test
+    void 마지막_채팅_시각이_같으면_chatSessionId_내림차순으로_정렬한다() {
+        UserBook userBook = UserBookFixture.persistedUserBook(10L, USER_ID, 100L);
+        Book book = BookFixture.persistedBook(
+                100L, "ext-1", "테스트 책", "저자", "출판사", 2024, "http://example.com/c.jpg");
+        AiChatSession lower = AiChatSessionFixture.persistedActiveSession(1000L, 10L, 3, 100, "같은 시각 A");
+        AiChatSession higher = AiChatSessionFixture.persistedActiveSession(1001L, 10L, 3, 100, "같은 시각 B");
+
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+        given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
+        given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L)))
+                .willReturn(List.of(lower, higher));
+        given(aiChatMessageRepository.findLastChattedAtBySessionIds(
+                List.of(1000L, 1001L), AiChatMessage.Status.COMPLETED))
+                .willReturn(List.of(
+                        new SessionLastChattedProjection(1000L, JUNE_11),
+                        new SessionLastChattedProjection(1001L, JUNE_11)));
+        given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L, 1001L))).willReturn(List.of());
+        given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
+
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+
+        assertThat(results).extracting(MonthlyReadingRecordResult::chatSessionId)
+                .containsExactly(1001L, 1000L);
+    }
+
+    @Test
     void 등록한_책이_없으면_세션_조회_없이_빈_리스트를_반환한다() {
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of());

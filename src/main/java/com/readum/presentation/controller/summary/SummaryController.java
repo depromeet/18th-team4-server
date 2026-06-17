@@ -28,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.YearMonth;
 import java.util.List;
 
-@Tag(name = "감상 기록", description = "완성된 감상문 조회 — 전체 목록(무한스크롤), 홈 캘린더의 월별·날짜별 조회, 단건 상세")
+@Tag(name = "감상 기록", description = "감상문 전체 목록(무한스크롤)·단건 상세, 홈 캘린더의 월별 독서 기록(채팅 세션) 조회")
 @RestController
 @RequestMapping("/api/v1/summaries")
 @RequiredArgsConstructor
