@@ -7,16 +7,18 @@ import com.readum.domain.summary.dto.SummaryBatchResultItem;
 import com.readum.domain.summary.out.SummaryBatchClient;
 import com.readum.infrastructure.ai.openai.SummaryPromptAssembler;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import tools.jackson.databind.ObjectMapper;
+
+import java.net.http.HttpClient;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -40,7 +42,6 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-@EnableConfigurationProperties(OpenAiBatchProperties.class)
 public class SummaryBatchClientImpl implements SummaryBatchClient {
 
     // OpenAI Batch API 경로
@@ -66,9 +67,16 @@ public class SummaryBatchClientImpl implements SummaryBatchClient {
         this.properties = properties;
         this.promptAssembler = promptAssembler;
         this.objectMapper = objectMapper;
+        // 파일 업로드·다운로드가 포함되므로 연결·읽기 타임아웃을 명시한다 (AladinHttpConfig 패턴 동일).
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(properties.requestTimeout())
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(properties.requestTimeout());
         this.restClient = RestClient.builder()
                 .baseUrl(properties.baseUrl())
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + properties.apiKey())
+                .requestFactory(requestFactory)
                 .build();
     }
 
@@ -191,20 +199,12 @@ public class SummaryBatchClientImpl implements SummaryBatchClient {
                 Map.of("role", "user", "content", promptAssembler.buildUserMessage(item.messages()))
         );
 
-        // response_format — JSON 스키마 모드 (strict=true, additionalProperties=false)
-        Map<String, Object> schema = Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "title", Map.of("type", "string"),
-                        "body", Map.of("type", "string")
-                ),
-                "required", List.of("title", "body"),
-                "additionalProperties", false
-        );
+        // response_format — JSON 스키마 모드 (strict=true, additionalProperties=false).
+        // 스키마 구조는 SummaryPromptAssembler 가 단일 출처로 제공한다.
         Map<String, Object> jsonSchema = Map.of(
                 "name", SummaryPromptAssembler.RESPONSE_FORMAT_SCHEMA_NAME,
                 "strict", true,
-                "schema", schema
+                "schema", promptAssembler.responseFormatSchema()
         );
         Map<String, Object> responseFormat = Map.of(
                 "type", "json_schema",
@@ -384,18 +384,19 @@ public class SummaryBatchClientImpl implements SummaryBatchClient {
      */
     private SummaryDraftResult parseDraftResult(String customId, OpenAiChatCompletionBody body) {
         if (body == null || body.choices() == null || body.choices().isEmpty()) {
-            log.error("감상문 batch 응답에 choices 가 없음 customId={}", customId);
+            // 항목별 복구 가능한 파싱 실패. ERROR 는 즉각 대응이 필요한 외부 장애 전용이므로 WARN 사용.
+            log.warn("감상문 batch 응답에 choices 가 없음 customId={}", customId);
             return null;
         }
         String content = body.choices().get(0).message().content();
         if (content == null || content.isBlank()) {
-            log.error("감상문 batch 응답 content 가 비어 있음 customId={}", customId);
+            log.warn("감상문 batch 응답 content 가 비어 있음 customId={}", customId);
             return null;
         }
         try {
             return objectMapper.readValue(content, SummaryDraftResult.class);
         } catch (Exception e) {
-            log.error("감상문 batch 응답 content JSON 파싱 실패 customId={} content={}", customId, content, e);
+            log.warn("감상문 batch 응답 content JSON 파싱 실패 customId={} content={}", customId, content, e);
             return null;
         }
     }
@@ -409,6 +410,7 @@ public class SummaryBatchClientImpl implements SummaryBatchClient {
         }
         List<String> lines = new ArrayList<>();
         for (String line : jsonl.split("\n")) {
+            // trim() 은 앞뒤 공백 외에 줄 끝 \r 도 제거하므로 CRLF 형식 JSONL 도 처리된다.
             String trimmed = line.trim();
             if (!trimmed.isEmpty()) {
                 lines.add(trimmed);

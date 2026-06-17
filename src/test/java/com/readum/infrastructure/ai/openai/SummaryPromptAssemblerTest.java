@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -80,5 +81,25 @@ class SummaryPromptAssemblerTest {
                 .startsWith("[대화 이력]\n")
                 .contains("User: 느낀 점을 말할게요.")
                 .endsWith("위 대화 이력을 바탕으로 감상문 초안을 작성해 주세요.");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void responseFormatSchema는_OpenAI_JSON스키마_구조를_반환한다() {
+        Map<String, Object> schema = assembler.responseFormatSchema();
+
+        assertThat(schema).containsKey("type");
+        assertThat(schema.get("type")).isEqualTo("object");
+
+        assertThat(schema).containsKey("properties");
+        Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+        assertThat(properties).containsKey("title");
+        assertThat(properties).containsKey("body");
+
+        assertThat(schema).containsKey("required");
+        List<String> required = (List<String>) schema.get("required");
+        assertThat(required).containsExactlyInAnyOrder("title", "body");
+
+        assertThat(schema).containsEntry("additionalProperties", false);
     }
 }

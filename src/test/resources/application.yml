@@ -66,3 +66,10 @@ summary:
     tokens-per-minute: 40000
     max-request-tokens: 130000
     acquire-max-wait-seconds: 20
+
+openai-batch:
+  api-key: test-openai-batch-key
+  model: gpt-4o-mini
+  base-url: https://api.openai.com/v1
+  completion-window: 24h
+  request-timeout: PT60S

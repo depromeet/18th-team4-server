@@ -5,7 +5,6 @@ import com.readum.domain.aiChat.out.AiSummaryClient;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.model.aiChat.entity.AiChatMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ResponseEntity;
@@ -15,11 +14,9 @@ import org.springframework.ai.openai.api.ResponseFormat;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.Map;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AiSummaryClientImpl implements AiSummaryClient {
 
     // TODO: 컨텍스트 윈도우 초과 방지를 위해 최근 N턴만 사용하는 절삭 로직 추가 필요
@@ -31,25 +28,29 @@ public class AiSummaryClientImpl implements AiSummaryClient {
 
     private final ChatClient chatClient;
     private final AiPromptAuditLogger auditLogger;
-    // 시스템 프롬프트·대화 이력 포맷을 Batch API 어댑터와 공유한다.
+    // 시스템 프롬프트·대화 이력 포맷·응답 스키마를 Batch API 어댑터와 공유한다.
     private final SummaryPromptAssembler promptAssembler;
+    // 응답 스키마 구조는 promptAssembler 에서 가져와 인스턴스 필드로 보관한다.
+    // static 필드가 아닌 이유: ResponseFormat 조립에 promptAssembler 인스턴스가 필요하기 때문.
+    private final ResponseFormat summaryResponseFormat;
 
-    private static final ResponseFormat SUMMARY_RESPONSE_FORMAT = ResponseFormat.builder()
-            .type(ResponseFormat.Type.JSON_SCHEMA)
-            .jsonSchema(ResponseFormat.JsonSchema.builder()
-                    .name(SummaryPromptAssembler.RESPONSE_FORMAT_SCHEMA_NAME)
-                    .strict(true)
-                    .schema(Map.of(
-                            "type", "object",
-                            "properties", Map.of(
-                                    "title", Map.of("type", "string"),
-                                    "body", Map.of("type", "string")
-                            ),
-                            "required", List.of("title", "body"),
-                            "additionalProperties", false
-                    ))
-                    .build())
-            .build();
+    public AiSummaryClientImpl(
+            ChatClient chatClient,
+            AiPromptAuditLogger auditLogger,
+            SummaryPromptAssembler promptAssembler
+    ) {
+        this.chatClient = chatClient;
+        this.auditLogger = auditLogger;
+        this.promptAssembler = promptAssembler;
+        this.summaryResponseFormat = ResponseFormat.builder()
+                .type(ResponseFormat.Type.JSON_SCHEMA)
+                .jsonSchema(ResponseFormat.JsonSchema.builder()
+                        .name(SummaryPromptAssembler.RESPONSE_FORMAT_SCHEMA_NAME)
+                        .strict(true)
+                        .schema(promptAssembler.responseFormatSchema())
+                        .build())
+                .build();
+    }
 
     @Override
     public SummaryDraftResult generate(List<AiChatMessage> messages) {
@@ -69,7 +70,7 @@ public class AiSummaryClientImpl implements AiSummaryClient {
                     .system(promptAssembler.systemPrompt())
                     .user(promptAssembler.buildUserMessage(messages))
                     .options(OpenAiChatOptions.builder()
-                            .responseFormat(SUMMARY_RESPONSE_FORMAT)
+                            .responseFormat(summaryResponseFormat)
                             .build())
                     .call()
                     .responseEntity(SummaryDraftResult.class);

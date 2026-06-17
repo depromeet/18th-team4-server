@@ -85,9 +85,10 @@ summary-job:
   base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
   reserved-output-tokens: 1024  # 토큰 추정 시 호출당 예약 출력 토큰(batch 청킹에서도 재사용)
 
-# OpenAI Batch API 어댑터 설정. api-key·model 은 환경별 yml 에서 주입한다.
+# OpenAI Batch API 어댑터 설정. api-key 는 환경변수로, model·base-url·completion-window·request-timeout 은 application.yml 기본값.
 openai-batch:
   api-key: ${OPENAI_API_KEY}
-  model: gpt-4o-mini             # Batch API 에서 사용할 모델. 환경별 yml 에서 재정의 가능.
+  model: gpt-4o-mini             # Batch API 에서 사용할 모델
   base-url: https://api.openai.com/v1
   completion-window: 24h         # OpenAI 가 현재 지원하는 유일한 완료 대기 창 값
+  request-timeout: PT60S         # 파일 업로드·다운로드를 포함하므로 넉넉하게 60초 설정

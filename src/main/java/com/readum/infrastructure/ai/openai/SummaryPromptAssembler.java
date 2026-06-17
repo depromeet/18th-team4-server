@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 감상문 초안 생성용 프롬프트 조립 공통 컴포넌트.
@@ -53,6 +54,37 @@ public class SummaryPromptAssembler {
      */
     public String systemPrompt() {
         return systemPrompt;
+    }
+
+    /**
+     * OpenAI API 응답 형식(response_format)에 사용하는 JSON 스키마 구조를 반환한다.
+     *
+     * <p>동기 단건 경로({@link AiSummaryClientImpl})와 Batch API 경로({@code SummaryBatchClientImpl})
+     * 양쪽에서 같은 스키마 구조를 써야 하므로, 이 메서드가 유일한 출처 역할을 한다.
+     *
+     * <p>반환 구조:
+     * <pre>
+     * {
+     *   "type": "object",
+     *   "properties": {
+     *     "title": {"type": "string"},
+     *     "body":  {"type": "string"}
+     *   },
+     *   "required": ["title", "body"],
+     *   "additionalProperties": false
+     * }
+     * </pre>
+     */
+    public Map<String, Object> responseFormatSchema() {
+        return Map.of(
+                "type", "object",
+                "properties", Map.of(
+                        "title", Map.of("type", "string"),
+                        "body", Map.of("type", "string")
+                ),
+                "required", List.of("title", "body"),
+                "additionalProperties", false
+        );
     }
 
     /**
