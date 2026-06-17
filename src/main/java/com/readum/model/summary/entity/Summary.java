@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 
 /**
  * 감상문 — 생성에 성공한 결과의 불변 기록 (write-once).
- * 생성 중에는 행을 만들지 않고(세션 AiChatSession.Status.LOCKED 가 "생성 중" 을 표현),
+ * 생성 중에는 행을 만들지 않고(진행 상태는 summary_job.PROCESSING 이 표현한다),
  * 생성에 성공했을 때만 한 번 기록된다. 실패 시에는 행을 만들지 않는다 (원인은 로그로만 남긴다).
  * 세션과 1:1 — unique 제약(uk_summary_session)으로 세션당 감상문은 한 행만 허용된다. 감상문 완성 시 세션은 종료(LOCKED)되어 재생성이 없다.
  */
