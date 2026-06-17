@@ -4,6 +4,8 @@ import com.readum.model.aiChat.entity.AiChatMessageFixture;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
 import com.readum.model.summary.entity.Summary;
+import com.readum.model.summary.entity.SummaryJobFixture;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
@@ -34,6 +36,9 @@ class AiChatSessionRepositoryTest {
 
     @Autowired
     private SummaryRepository summaryRepository;
+
+    @Autowired
+    private SummaryJobRepository summaryJobRepository;
 
     private static long userIdSeq = 9_100_000L;
     private static long bookIdSeq = 9_100_000L;
@@ -145,25 +150,11 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: LOCKED 세션은 'SUMMARIZING' 으로 도출된다")
-    void status_SUMMARIZING_도출() {
-        Long userId = nextUserId();
-        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "summarizing-session");
-
-        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
-                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
-
-        assertThat(slice.getContent()).hasSize(1);
-        assertThat(slice.getContent().get(0).status()).isEqualTo("SUMMARIZING");
-    }
-
-    @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: ACTIVE + 감상문 있으면 'SUMMARIZED' 로 도출")
+    @DisplayName("findSessionsByUserBookIdAndOwner: LOCKED(종료) 세션은 'SUMMARIZED' 로 도출된다")
     void status_SUMMARIZED_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "summarized-session");
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "summarized-session");
         summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문"));
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
@@ -174,34 +165,33 @@ class AiChatSessionRepositoryTest {
     }
 
     @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: 감상문이 있으면 세션은 'SUMMARIZED' 로 나타난다 (1:1 모델 — 세션당 감상문 한 건)")
-    void status_감상문_여러건이어도_한번만() {
+    @DisplayName("findSessionsByUserBookIdAndOwner: 유효 PROCESSING 작업이 있으면 'SUMMARIZING' 으로 도출")
+    void status_SUMMARIZING_도출() {
         Long userId = nextUserId();
         UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "retried-session");
-        // 1:1 모델 — unique 제약으로 세션당 감상문은 한 행이며, 중복은 DB 에서 거부된다
-        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문"));
-
-        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
-                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
-
-        assertThat(slice.getContent()).hasSize(1);
-        assertThat(slice.getContent().get(0).status()).isEqualTo("SUMMARIZED");
-    }
-
-    @Test
-    @DisplayName("findSessionsByUserBookIdAndOwner: 재생성 중(LOCKED)이면 직전 감상문이 있어도 'SUMMARIZING'")
-    void status_재생성_중에는_SUMMARIZING_우선() {
-        Long userId = nextUserId();
-        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
-        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.LOCKED, "regenerating-session");
-        summaryRepository.save(Summary.createCompleted(userBook.getId(), session.getId(), "제목", "본문"));
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "generating-session");
+        saveProcessingJob(session.getId(), LocalDateTime.now().plusMinutes(5)); // lease 유효 — 생성 중
 
         Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
                 .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
 
         assertThat(slice.getContent()).hasSize(1);
         assertThat(slice.getContent().get(0).status()).isEqualTo("SUMMARIZING");
+    }
+
+    @Test
+    @DisplayName("findSessionsByUserBookIdAndOwner: 고아(lease 만료) PROCESSING 작업은 'SUMMARIZING' 이 아니다")
+    void status_고아작업은_SUMMARIZING_아님() {
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        AiChatSession session = saveSession(userBook.getId(), AiChatSession.Status.ACTIVE, "orphan-session");
+        saveProcessingJob(session.getId(), LocalDateTime.now().minusMinutes(1)); // lease 만료 — 고아
+
+        Slice<AiChatSessionListProjection> slice = aiChatSessionRepository
+                .findSessionsByUserBookIdAndOwner(userBook.getId(), userId, PageRequest.of(0, 10));
+
+        assertThat(slice.getContent()).hasSize(1);
+        assertThat(slice.getContent().get(0).status()).isEqualTo("ACTIVE");
     }
 
     @Test
@@ -304,5 +294,9 @@ class AiChatSessionRepositoryTest {
 
     private void saveCompletedUserMessage(Long sessionId, LocalDateTime createdAt) {
         aiChatMessageRepository.save(AiChatMessageFixture.userMessageAt(sessionId, "msg", createdAt));
+    }
+
+    private void saveProcessingJob(Long sessionId, LocalDateTime lockedUntil) {
+        summaryJobRepository.save(SummaryJobFixture.persistedProcessing(null, sessionId, "worker", lockedUntil));
     }
 }
