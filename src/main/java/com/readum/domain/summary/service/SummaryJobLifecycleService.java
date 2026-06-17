@@ -134,6 +134,8 @@ public class SummaryJobLifecycleService {
             job.scheduleRetry(nextAttemptAt, errorCode, errorMessage);
         } else {
             job.markFailed(errorCode, errorMessage);
+            log.error("감상문 생성 최종 실패(재시도 소진 또는 회복 불가) jobId={} sessionId={} errorCode={} message={}",
+                    jobId, job.getAiChatSessionId(), errorCode, errorMessage);
         }
     }
 
@@ -241,6 +243,8 @@ public class SummaryJobLifecycleService {
                 job.scheduleRetry(nextAttemptAt, resultItem.errorCode(), resultItem.errorMessage());
             } else {
                 job.markFailed(resultItem.errorCode(), resultItem.errorMessage());
+                log.error("감상문 batch 결과 최종 실패(재시도 소진 또는 회복 불가) jobId={} sessionId={} errorCode={} message={}",
+                        jobId, job.getAiChatSessionId(), resultItem.errorCode(), resultItem.errorMessage());
             }
             return;
         }
@@ -298,6 +302,8 @@ public class SummaryJobLifecycleService {
                 job.scheduleRetry(nextAttemptAt, "BATCH_FAILED", "배치 전체 실패");
             } else {
                 job.markFailed("BATCH_FAILED", "배치 전체 실패 — 시도 상한 초과");
+                log.error("감상문 batch 전체 실패로 작업 최종 실패(시도 상한 초과) jobId={} sessionId={} batchEntityId={}",
+                        job.getId(), job.getAiChatSessionId(), batchEntityId);
             }
         }
     }
