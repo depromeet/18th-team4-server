@@ -1,5 +1,6 @@
 package com.readum.domain.summary.service;
 
+import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -9,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
@@ -25,31 +27,33 @@ class EnqueueSummaryJobServiceTest {
     private SummaryJobInserter summaryJobInserter;
 
     @InjectMocks
-    private EnqueueSummaryJobService enqueueSummaryJobService;
+    private EnqueueSummaryJobService service;
 
     @Test
-    void 활성작업이_없으면_PENDING_작업을_저장한다() {
-        given(summaryJobRepository.existsByActiveSessionId(1L)).willReturn(false);
+    void 활성작업_없으면_주어진_모드로_적재한다() {
+        given(summaryJobRepository.existsByActiveSessionId(7L)).willReturn(false);
 
-        enqueueSummaryJobService.execute(1L);
+        service.execute(7L, SummaryJob.ExecutionMode.BATCH);
 
-        verify(summaryJobInserter).insertPending(1L);
+        verify(summaryJobInserter).insertPending(7L, SummaryJob.ExecutionMode.BATCH);
     }
 
     @Test
-    void 활성작업이_이미_있으면_저장하지_않는다() {
-        given(summaryJobRepository.existsByActiveSessionId(1L)).willReturn(true);
+    void 활성작업_있으면_적재하지_않는다() {
+        given(summaryJobRepository.existsByActiveSessionId(7L)).willReturn(true);
 
-        enqueueSummaryJobService.execute(1L);
+        service.execute(7L, SummaryJob.ExecutionMode.SYNC);
 
-        verify(summaryJobInserter, never()).insertPending(anyLong());
+        verify(summaryJobInserter, never()).insertPending(anyLong(), any());
     }
 
     @Test
     void 동시적재로_unique위반이_나도_예외를_삼킨다() {
-        given(summaryJobRepository.existsByActiveSessionId(1L)).willReturn(false);
-        doThrow(new DataIntegrityViolationException("dup")).when(summaryJobInserter).insertPending(1L);
+        given(summaryJobRepository.existsByActiveSessionId(7L)).willReturn(false);
+        doThrow(new DataIntegrityViolationException("dup"))
+                .when(summaryJobInserter).insertPending(7L, SummaryJob.ExecutionMode.SYNC);
 
-        assertThatCode(() -> enqueueSummaryJobService.execute(1L)).doesNotThrowAnyException();
+        assertThatCode(() -> service.execute(7L, SummaryJob.ExecutionMode.SYNC))
+                .doesNotThrowAnyException();
     }
 }

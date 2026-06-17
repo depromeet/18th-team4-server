@@ -7,6 +7,7 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.summary.service.EnqueueSummaryJobService;
 import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
@@ -26,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
@@ -61,7 +63,7 @@ class SummaryDraftServiceTest {
 
         summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
-        verify(enqueueSummaryJobService).execute(SESSION_ID);
+        verify(enqueueSummaryJobService).execute(SESSION_ID, SummaryJob.ExecutionMode.SYNC);
     }
 
     @Test
@@ -70,7 +72,7 @@ class SummaryDraftServiceTest {
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(UnauthorizedException.class);
-        verify(enqueueSummaryJobService, never()).execute(anyLong());
+        verify(enqueueSummaryJobService, never()).execute(anyLong(), any());
     }
 
     @Test
@@ -81,7 +83,7 @@ class SummaryDraftServiceTest {
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(NotFoundException.class);
-        verify(enqueueSummaryJobService, never()).execute(anyLong());
+        verify(enqueueSummaryJobService, never()).execute(anyLong(), any());
     }
 
     @Test
@@ -94,7 +96,7 @@ class SummaryDraftServiceTest {
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(NotFoundException.class);
-        verify(enqueueSummaryJobService, never()).execute(anyLong());
+        verify(enqueueSummaryJobService, never()).execute(anyLong(), any());
     }
 
     @Test
@@ -110,7 +112,7 @@ class SummaryDraftServiceTest {
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(ConflictException.class);
-        verify(enqueueSummaryJobService, never()).execute(anyLong());
+        verify(enqueueSummaryJobService, never()).execute(anyLong(), any());
     }
 
     @Test
@@ -127,6 +129,6 @@ class SummaryDraftServiceTest {
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
-        verify(enqueueSummaryJobService, never()).execute(anyLong());
+        verify(enqueueSummaryJobService, never()).execute(anyLong(), any());
     }
 }

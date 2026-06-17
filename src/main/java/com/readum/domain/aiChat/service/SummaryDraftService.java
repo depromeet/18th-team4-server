@@ -7,6 +7,7 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.summary.service.EnqueueSummaryJobService;
 import com.readum.domain.user.exception.UserErrorCode;
+import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
@@ -54,6 +55,6 @@ public class SummaryDraftService {
 
         summaryDraftPolicy.assertEligible(session);
 
-        enqueueSummaryJobService.execute(sessionId);
+        enqueueSummaryJobService.execute(sessionId, SummaryJob.ExecutionMode.SYNC);
     }
 }
