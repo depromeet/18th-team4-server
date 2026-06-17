@@ -404,6 +404,59 @@ class SummaryJobLifecycleServiceTest {
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
     }
 
+    // ─── failBatch ────────────────────────────────────────────────────────────
+
+    @Test
+    void failBatch_는_batch를_FAILED로_바꾸고_SUBMITTED작업을_재시도한다() {
+        OpenAiBatch batch = OpenAiBatchFixture.submitted(30L, "batch_F", 1);
+        SummaryJob job = SummaryJobFixture.persistedSubmitted(60L, 10L, 30L); // attemptCount=0
+        given(openAiBatchRepository.findById(30L)).willReturn(Optional.of(batch));
+        given(summaryJobRepository.findByOpenAiBatchIdAndStatus(30L, SummaryJob.Status.SUBMITTED))
+                .willReturn(List.of(job));
+        given(properties.maxAttempts()).willReturn(5); // 0+1 < 5 → 재시도 가능
+        given(properties.nextAttemptFrom(any(), anyInt())).willReturn(LocalDateTime.now().plusMinutes(3));
+
+        summaryJobLifecycleService.failBatch(30L);
+
+        assertThat(batch.getStatus()).isEqualTo(OpenAiBatch.Status.FAILED);
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
+        assertThat(job.getAttemptCount()).isEqualTo(1);
+        assertThat(job.getLastErrorCode()).isEqualTo("BATCH_FAILED");
+    }
+
+    @Test
+    void failBatch_는_시도상한_초과시_작업을_FAILED로_만든다() {
+        OpenAiBatch batch = OpenAiBatchFixture.submitted(31L, "batch_G", 1);
+        SummaryJob job = SummaryJobFixture.persistedSubmitted(61L, 11L, 31L); // attemptCount=0
+        given(openAiBatchRepository.findById(31L)).willReturn(Optional.of(batch));
+        given(summaryJobRepository.findByOpenAiBatchIdAndStatus(31L, SummaryJob.Status.SUBMITTED))
+                .willReturn(List.of(job));
+        given(properties.maxAttempts()).willReturn(1); // 0+1 < 1 → false → 상한 초과
+
+        summaryJobLifecycleService.failBatch(31L);
+
+        assertThat(batch.getStatus()).isEqualTo(OpenAiBatch.Status.FAILED);
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.FAILED);
+        assertThat(job.getLastErrorCode()).isEqualTo("BATCH_FAILED");
+    }
+
+    @Test
+    void applyBatchResult_는_성공결과여도_세션이_LOCKED면_감상문_저장없이_무해종료한다() {
+        SummaryJob job = SummaryJobFixture.persistedSubmitted(62L, 12L, 40L);
+        AiChatSession lockedSession = AiChatSessionFixture.persistedSummarizedSession(
+                12L, 8L, 3, 700, "제목");
+        given(summaryJobRepository.findByIdForUpdate(62L)).willReturn(Optional.of(job));
+        given(aiChatSessionRepository.findByIdForUpdate(12L)).willReturn(Optional.of(lockedSession));
+
+        SummaryBatchResultItem resultItem = SummaryBatchResultItem.success(
+                "summaryjob-62", new SummaryDraftResult("감상문 제목", "감상문 본문"));
+
+        summaryJobLifecycleService.applyBatchResult(40L, resultItem);
+
+        verify(summaryRepository, never()).save(any());
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
+    }
+
     // ─── completeBatch ────────────────────────────────────────────────────────
 
     @Test
