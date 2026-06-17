@@ -56,3 +56,10 @@ summary-job:
   lease-seconds: 300
   max-attempts: 5
   base-backoff-seconds: 60
+  breaker-open-seconds: 600
+
+summary:
+  rate-limit:
+    requests-per-minute: 60
+    tokens-per-minute: 40000
+    reserved-output-tokens: 1024
