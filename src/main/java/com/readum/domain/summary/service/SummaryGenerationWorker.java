@@ -22,9 +22,11 @@ import java.util.UUID;
  * 한 워커 스레드의 작업 처리 루프. 트랜잭션 없이, 각 트랜잭션 단계(SummaryJobLifecycleService)를
  * 순서대로 호출하고 그 사이(트랜잭션 밖)에서 OpenAI 를 부른다.
  *
- * 호출 전: 전역 차단(quota)이 열려 있으면 작업을 선점하지 않고, RPM/TPM 페이서로 속도를 조인다.
- * 페이서 예산을 제한시간 안에 못 얻으면 작업을 큐로 되돌린다 — lease 를 오래 잡은 채 대기하다
- * reaper 에 중복 선점되는 것을 막기 위함.
+ * 호출 전: quota 전역 차단이 열려 있으면 작업을 아예 선점하지 않는다. 그리고 OpenAI 호출 속도 제한기
+ * (rateLimiter)로 분당 허용량(요청 수·토큰 수) 안에서만 호출하도록 조인다.
+ * 이번 분 허용량이 다 차서 제한시간 안에 확보하지 못하면, 작업을 잡은 채 오래 기다리지 않고 큐로 되돌린다.
+ * 오래 기다리면 점유 시한(lease, 5분)이 지나 회수기(reaper)가 같은 작업을 다른 워커에 넘겨
+ * OpenAI 를 두 번 부를 수 있기 때문이다.
  * 실패 분류: quota → 전역 차단 후 재시도 / 429 burst → Retry-After 재시도 / 4xx → 즉시 FAILED / 5xx·기타 → 재시도.
  */
 @Slf4j
@@ -79,7 +81,7 @@ public class SummaryGenerationWorker {
             return;
         }
         if (!acquired) {
-            // 페이서 예산 부족 — lease 를 오래 잡지 않고 작업을 큐로 되돌린다(reaper 중복 처리 방지).
+            // 이번 분 호출 허용량이 다 차서 확보 실패 — 작업을 잡은 채 기다리지 않고 큐로 되돌린다(중복 호출 방지).
             requeueForPacing(jobId, owner);
             return;
         }
