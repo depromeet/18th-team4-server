@@ -40,7 +40,7 @@ public class SummaryScheduler {
         int enqueued = 0;
         for (Long sessionId : targetSessionIds) {
             try {
-                enqueueSummaryJobService.execute(sessionId, SummaryJob.ExecutionMode.BATCH);
+                enqueueSummaryJobService.execute(sessionId, SummaryJob.ExecutionMode.SYNC);
                 enqueued++;
             } catch (Exception e) {
                 // 한 세션 적재 실패가 나머지 배치를 막지 않도록 격리
