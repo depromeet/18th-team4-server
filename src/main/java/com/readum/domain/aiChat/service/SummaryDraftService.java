@@ -2,12 +2,14 @@ package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
+import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.summary.service.EnqueueSummaryJobService;
 import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
@@ -31,6 +33,7 @@ public class SummaryDraftService {
     private final AiChatSessionRepository aiChatSessionRepository;
     private final UserBookRepository userBookRepository;
     private final SummaryDraftPolicy summaryDraftPolicy;
+    private final SummaryJobRepository summaryJobRepository;
     private final EnqueueSummaryJobService enqueueSummaryJobService;
 
     @Transactional
@@ -43,6 +46,11 @@ public class SummaryDraftService {
 
         userBookRepository.findByIdAndUserId(session.getUserBookId(), user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
+
+        // 이미 활성(PENDING/PROCESSING) 작업이 있으면 "생성 중" — 409 로 거부(중복 요청 방지).
+        if (summaryJobRepository.existsByActiveSessionId(sessionId)) {
+            throw new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS);
+        }
 
         summaryDraftPolicy.assertEligible(session);
 

@@ -9,12 +9,14 @@ import com.readum.domain.summary.service.EnqueueSummaryJobService;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.entity.UserBookFixture;
 import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -43,6 +45,7 @@ class SummaryDraftServiceTest {
     @Mock private AiChatSessionRepository aiChatSessionRepository;
     @Mock private UserBookRepository userBookRepository;
     @Mock private SummaryDraftPolicy summaryDraftPolicy;
+    @Mock private SummaryJobRepository summaryJobRepository;
     @Mock private EnqueueSummaryJobService enqueueSummaryJobService;
 
     @InjectMocks private SummaryDraftService summaryDraftService;
@@ -107,6 +110,23 @@ class SummaryDraftServiceTest {
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
                 .isInstanceOf(ConflictException.class);
+        verify(enqueueSummaryJobService, never()).execute(anyLong());
+    }
+
+    @Test
+    void 이미_활성_작업이_있으면_409_SUMMARY_IN_PROGRESS_이고_적재하지_않는다() {
+        User user = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(SESSION_ID, USER_BOOK_ID, 2, 600, "제목");
+        UserBook userBook = UserBookFixture.persistedUserBook(USER_BOOK_ID, USER_ID, BOOK_ID);
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(user));
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
+        given(summaryJobRepository.existsByActiveSessionId(SESSION_ID)).willReturn(true);
+
+        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
+                .extracting(ConflictException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
         verify(enqueueSummaryJobService, never()).execute(anyLong());
     }
 }

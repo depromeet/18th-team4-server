@@ -10,6 +10,7 @@ import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.entity.UserBook;
@@ -56,6 +57,9 @@ class SummaryDraftSearchServiceTest {
 
     @Spy
     private SummaryDraftPolicy summaryDraftPolicy = new SummaryDraftPolicy();
+
+    @Mock
+    private SummaryJobRepository summaryJobRepository;
 
     @InjectMocks
     private SummaryDraftSearchService summaryDraftSearchService;
@@ -125,6 +129,20 @@ class SummaryDraftSearchServiceTest {
         assertThat(result.eligible()).isFalse();
         assertThat(result.reason()).isEqualTo(IneligibleReason.ALREADY_SUMMARIZED.name());
         assertThat(result.message()).isEqualTo(AiChatErrorCode.SESSION_ALREADY_SUMMARIZED.getMessage());
+    }
+
+    @Test
+    void 활성_작업이_있으면_eligible_false와_SUMMARY_IN_PROGRESS를_반환한다() {
+        AiChatSession session = activeSession(SUFFICIENT_TOKENS);
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(mock(UserBook.class)));
+        given(summaryJobRepository.existsByActiveSessionId(SESSION_ID)).willReturn(true);
+
+        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(SESSION_ID, USER_SESSION_ID);
+
+        assertThat(result.eligible()).isFalse();
+        assertThat(result.reason()).isEqualTo(IneligibleReason.SUMMARY_IN_PROGRESS.name());
+        assertThat(result.message()).isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS.getMessage());
     }
 
     @Test
