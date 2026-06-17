@@ -68,6 +68,9 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
 
     /**
      * "지금 생성 중(차단)" 판정 — 그 세션에 아래 조건을 만족하는 작업이 하나라도 있는가.
+     * - 수동(SYNC) 요청으로 대기 중인 PENDING: 수동은 "요청 시점 대화 내용"을 기준으로 생성하므로
+     *   워커가 아직 작업을 집어가지 않은 시간에도 새 메시지가 끼어들면 안 된다 → SYNC+PENDING 은 차단.
+     *   자동(BATCH) PENDING 은 builder 가 스냅샷을 찍는 BATCH_BUILDING 시점까지 메시지를 포함하는 설계이므로 차단하지 않는다.
      * - 유효 점유(lockedUntil > now) 상태의 PROCESSING 또는 BATCH_BUILDING
      * - 또는 SUBMITTED (OpenAI Batch 에 제출되어 결과를 기다리는 중)
      */
@@ -76,7 +79,9 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
               from SummaryJob summaryJob
              where summaryJob.aiChatSessionId = :sessionId
                and (
-                     (summaryJob.status in (
+                     (summaryJob.executionMode = com.readum.model.summary.entity.SummaryJob.ExecutionMode.SYNC
+                      and summaryJob.status = com.readum.model.summary.entity.SummaryJob.Status.PENDING)
+                  or (summaryJob.status in (
                             com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
                           , com.readum.model.summary.entity.SummaryJob.Status.BATCH_BUILDING
                       ) and summaryJob.lockedUntil > :now)

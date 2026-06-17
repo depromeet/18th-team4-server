@@ -60,8 +60,8 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
     List<Summary> findLatestByAiChatSessionIdIn(@Param("sessionIds") Collection<Long> sessionIds);
 
     /**
-     * 사용자 본인의 감상 기록 목록 — 세션(=책)당 가장 최근 감상문 1건만, 최신순(createdAt DESC, id DESC) Slice.
-     * 세션당 여러 건(매일 자동 생성 등)이 쌓이므로 세션별 최신 행만 골라야 목록이 도배되지 않는다.
+     * 사용자 본인의 감상 기록 목록 — 세션당 감상문은 1건(세션:감상문 = 1:1, uk_summary_session 제약),
+     * 최신순(createdAt DESC, id DESC) Slice.
      * Summary / AiChatSession / UserBook / Book 사이에 JPA 연관관계가 없어 on 절로 직접 join 한다 (Hibernate 6+).
      * book.title 을 투영해야 하므로 UserBook/Book join 이 불가피하고, userBook.userId 필터가 소유권 검증을 겸한다.
      */

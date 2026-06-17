@@ -64,10 +64,11 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
      *
      * status 도출: AiChatSession.status (ACTIVE/LOCKED) 와 진행 중 작업(summary_job) 존재 여부를 CASE 로 합성한다.
      *  - session LOCKED                                               → "SUMMARIZED" (감상문이 완성되어 종료된 세션)
-     *  - 유효 점유(lockedUntil > now) PROCESSING/BATCH_BUILDING 또는 SUBMITTED 작업 존재
+     *  - 수동(SYNC) PENDING, 유효 점유(lockedUntil > now) PROCESSING/BATCH_BUILDING, 또는 SUBMITTED 작업 존재
      *                                → "SUMMARIZING" (감상문 생성 진행 중 — SummaryJobRepository.existsBlockingSummaryJob 과 동일 조건)
      *  - 그 외                        → "ACTIVE"
      * 점유 만료 PROCESSING/BATCH_BUILDING 은 "생성 중" 으로 보지 않으므로 lockedUntil > now 로 거른다.
+     * SYNC PENDING 을 포함하는 이유: 수동 요청은 "요청 시점" 기준이므로 워커가 작업을 집어가기 전에도 화면상 SUMMARIZING 으로 표시해야 한다.
      *
      * 호출자 시그니처를 단순하게 유지하기 위해 default 메서드로 감싸고, 내부 @Query 에 enum 파라미터를 바인딩한다.
      */
@@ -95,7 +96,9 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
                                       from SummaryJob summaryJob
                                      where summaryJob.aiChatSessionId = aiChatSession.id
                                        and (
-                                             (summaryJob.status in (
+                                             (summaryJob.executionMode = com.readum.model.summary.entity.SummaryJob.ExecutionMode.SYNC
+                                              and summaryJob.status = com.readum.model.summary.entity.SummaryJob.Status.PENDING)
+                                          or (summaryJob.status in (
                                                     com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
                                                   , com.readum.model.summary.entity.SummaryJob.Status.BATCH_BUILDING
                                               ) and summaryJob.lockedUntil > :now)
