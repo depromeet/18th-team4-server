@@ -121,30 +121,12 @@ class SummaryRepositoryTest {
     // ===== 세션 최신 감상문 / 기록 목록 =====
 
     @Test
-    @DisplayName("findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc: 세션의 감상문을 반환한다")
-    void 최신_감상문_조회() {
-        Long userBookId = persistUserBook(nextUserId(), "데미안");
-        AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
-
-        // 1:1 모델 — 세션당 감상문은 한 행이다
-        Summary saved = summaryRepository.save(
-                Summary.createCompleted(userBookId, session.getId(), "제목", "본문"));
-
-        Optional<Summary> found =
-                summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(session.getId());
-
-        assertThat(found).isPresent();
-        assertThat(found.get().getId()).isEqualTo(saved.getId());
-        assertThat(found.get().getBody()).isEqualTo("본문");
-    }
-
-    @Test
-    @DisplayName("findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc: 감상문이 없으면 빈 Optional 을 반환한다")
+    @DisplayName("findByAiChatSessionId: 감상문이 없으면 빈 Optional 을 반환한다")
     void 감상문_없으면_빈_Optional() {
         Long userBookId = persistUserBook(nextUserId(), "빈세션책");
         AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
 
-        assertThat(summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(session.getId()))
+        assertThat(summaryRepository.findByAiChatSessionId(session.getId()))
                 .isEmpty();
     }
 

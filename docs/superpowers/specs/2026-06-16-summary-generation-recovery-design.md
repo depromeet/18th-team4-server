@@ -288,7 +288,7 @@ FOR UPDATE SKIP LOCKED
 
 - `AI_QUOTA_EXHAUSTED`(크레딧/예산 소진) 감지 시 breaker 를 일정 시간 OPEN — 그 동안 워커는 OpenAI 호출을 건너뛴다(작업은 `scheduleRetry` 로 뒤로 밀림).
 - 한도 소진은 작업 단위가 아니라 계정 전역 문제 → 작업마다 헛호출하지 않고 한 번 차단으로 막는 최적화.
-- 크래시로 상태가 사라져도 self-healing: 재시작 후 첫 호출이 다시 429 → 즉시 OPEN. 대가는 헛호출 1번.
+- 크래시로 상태가 사라져도 스스로 복원된다 — 재시작 후 첫 호출이 다시 429 를 받아 즉시 OPEN. 대가는 헛호출 1번.
 
 ### 11.3 구현
 
@@ -296,7 +296,7 @@ FOR UPDATE SKIP LOCKED
 - 구현: `infrastructure/.../InMemoryAiCallCircuitBreaker`(`AtomicReference<Instant blockedUntil>` 수준 빈).
 - 교체 여지가 있어 Port 로 둔다. 다중 인스턴스 시 Redis TTL/DB 어댑터로 교체만.
 
-> breaker 가 없어도 9절의 작업별 백오프가 크루드한 전역 페이싱을 제공한다 — breaker 는 헛호출을 N→1 로 줄이는 최적화일 뿐 안전 부품이 아니다.
+> breaker 가 없어도 9절의 작업별 백오프가 거친 수준의 전역 호출 속도 조절을 제공한다 — breaker 는 헛호출을 N→1 로 줄이는 최적화일 뿐 안전 부품이 아니다.
 
 ---
 

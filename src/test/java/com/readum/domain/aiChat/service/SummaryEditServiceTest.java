@@ -64,7 +64,7 @@ class SummaryEditServiceTest {
                 SUMMARY_ID, USER_BOOK_ID, SESSION_ID, "기존 제목", "기존 본문"
         );
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(session));
-        given(summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
+        given(summaryRepository.findByAiChatSessionId(SESSION_ID))
                 .willReturn(Optional.of(summary));
 
         SummaryEditCommand command = new SummaryEditCommand(USER_SESSION_ID, SESSION_ID, "수정된 제목", "수정된 본문");
@@ -104,7 +104,7 @@ class SummaryEditServiceTest {
     void 감상문이_없으면_NotFoundException이_발생한다() {
         AiChatSession session = ownedSession();
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(session));
-        given(summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
+        given(summaryRepository.findByAiChatSessionId(SESSION_ID))
                 .willReturn(Optional.empty());
 
         SummaryEditCommand command = new SummaryEditCommand(USER_SESSION_ID, SESSION_ID, "제목", "본문");

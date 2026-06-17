@@ -44,12 +44,6 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
     Optional<Summary> findByAiChatSessionId(Long aiChatSessionId);
 
     /**
-     * 세션의 가장 최근 감상문(= 현재 감상문). 세션당 여러 건(재생성 이력)이 쌓이므로 최신 한 건을 고른다.
-     * 같은 createdAt 동시 생성 대비 id 로 tiebreak.
-     */
-    Optional<Summary> findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(Long aiChatSessionId);
-
-    /**
      * 여러 세션의 최신 감상문을 한 번에 — 책별 세션 목록·표시상태 합성용.
      * 세션별 max(id) 행만 추린다.
      */
