@@ -20,13 +20,13 @@ class SummaryJobDispatcherTest {
     @Mock private SummaryJobProperties properties;
 
     @Test
-    void dispatch_는_풀크기만큼_드레인_작업을_제출한다() {
+    void dispatch_는_풀크기만큼_처리_작업을_제출한다() {
         Executor directExecutor = Runnable::run; // 같은 스레드에서 즉시 실행
         given(properties.poolSize()).willReturn(3);
         SummaryJobDispatcher dispatcher = new SummaryJobDispatcher(worker, directExecutor, properties);
 
         dispatcher.dispatch();
 
-        verify(worker, times(3)).drain();
+        verify(worker, times(3)).processUntilEmpty();
     }
 }

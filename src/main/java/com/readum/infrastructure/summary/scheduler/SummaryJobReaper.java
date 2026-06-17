@@ -1,6 +1,6 @@
 package com.readum.infrastructure.summary.scheduler;
 
-import com.readum.domain.summary.service.SummaryJobTxService;
+import com.readum.domain.summary.service.SummaryJobLifecycleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -17,11 +17,11 @@ public class SummaryJobReaper {
 
     private static final int BATCH_SIZE = 100;
 
-    private final SummaryJobTxService summaryJobTxService;
+    private final SummaryJobLifecycleService summaryJobLifecycleService;
 
     @Scheduled(fixedDelayString = "${summary-job.reaper-interval-ms}")
     public void reclaim() {
-        int reclaimed = summaryJobTxService.reclaimOrphans(BATCH_SIZE);
+        int reclaimed = summaryJobLifecycleService.reclaimOrphans(BATCH_SIZE);
         if (reclaimed > 0) {
             log.info("멈춘 감상문 작업 회수 {}건", reclaimed);
         }

@@ -16,7 +16,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 @ExtendWith(MockitoExtension.class)
-class SummaryJobTxServiceReapTest {
+class SummaryJobLifecycleServiceReapTest {
 
     @Mock private SummaryJobRepository summaryJobRepository;
     @Mock private com.readum.model.aiChat.repository.AiChatSessionRepository aiChatSessionRepository;
@@ -26,7 +26,7 @@ class SummaryJobTxServiceReapTest {
 
     @Test
     void reclaimOrphans_는_고아작업을_PENDING으로_되돌린다() {
-        SummaryJobTxService service = new SummaryJobTxService(
+        SummaryJobLifecycleService service = new SummaryJobLifecycleService(
                 summaryJobRepository, aiChatSessionRepository, aiChatMessageRepository,
                 summaryRepository, properties);
         SummaryJob orphan = SummaryJobFixture.persistedProcessing(

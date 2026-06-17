@@ -30,7 +30,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
-class SummaryJobTxServiceTest {
+class SummaryJobLifecycleServiceTest {
 
     @Mock private SummaryJobRepository summaryJobRepository;
     @Mock private AiChatSessionRepository aiChatSessionRepository;
@@ -38,7 +38,7 @@ class SummaryJobTxServiceTest {
     @Mock private SummaryRepository summaryRepository;
     @Mock private SummaryJobProperties properties;
 
-    @InjectMocks private SummaryJobTxService summaryJobTxService;
+    @InjectMocks private SummaryJobLifecycleService summaryJobLifecycleService;
 
     @Test
     void recordSuccess_는_소유권_일치시_감상문저장_세션잠금_작업성공을_한다() {
@@ -48,7 +48,7 @@ class SummaryJobTxServiceTest {
         given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
         given(aiChatSessionRepository.findByIdForUpdate(1L)).willReturn(Optional.of(session));
 
-        summaryJobTxService.recordSuccess(10L, "owner-1", 1L, new SummaryDraftResult("제목", "본문"));
+        summaryJobLifecycleService.recordSuccess(10L, "owner-1", 1L, new SummaryDraftResult("제목", "본문"));
 
         verify(summaryRepository).save(any(Summary.class));
         assertThat(session.isLocked()).isTrue();
@@ -61,7 +61,7 @@ class SummaryJobTxServiceTest {
                 10L, 1L, "other-owner", LocalDateTime.now().plusMinutes(5));
         given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
 
-        summaryJobTxService.recordSuccess(10L, "owner-1", 1L, new SummaryDraftResult("제목", "본문"));
+        summaryJobLifecycleService.recordSuccess(10L, "owner-1", 1L, new SummaryDraftResult("제목", "본문"));
 
         verify(summaryRepository, never()).save(any());
         verify(aiChatSessionRepository, never()).findByIdForUpdate(any());
@@ -75,7 +75,7 @@ class SummaryJobTxServiceTest {
         given(properties.maxAttempts()).willReturn(5);
         given(properties.nextAttemptFrom(any(), anyInt())).willReturn(LocalDateTime.now().plusMinutes(1));
 
-        summaryJobTxService.recordFailure(10L, "owner-1", true, "AI_PROVIDER_TRANSIENT", "일시", null);
+        summaryJobLifecycleService.recordFailure(10L, "owner-1", true, "AI_PROVIDER_TRANSIENT", "일시", null);
 
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
         assertThat(job.getAttemptCount()).isEqualTo(1);
@@ -87,7 +87,7 @@ class SummaryJobTxServiceTest {
                 10L, 1L, "owner-1", LocalDateTime.now().plusMinutes(5));
         given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
 
-        summaryJobTxService.recordFailure(10L, "owner-1", false, "AI_PROVIDER_ERROR", "회복불가", null);
+        summaryJobLifecycleService.recordFailure(10L, "owner-1", false, "AI_PROVIDER_ERROR", "회복불가", null);
 
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.FAILED);
     }
@@ -101,7 +101,7 @@ class SummaryJobTxServiceTest {
         given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
         given(aiChatSessionRepository.findByIdForUpdate(1L)).willReturn(Optional.of(locked));
 
-        SummaryGenerationContext context = summaryJobTxService.prepareGeneration(10L, "owner-1");
+        SummaryGenerationContext context = summaryJobLifecycleService.prepareGeneration(10L, "owner-1");
 
         assertThat(context).isNull();
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
@@ -113,7 +113,7 @@ class SummaryJobTxServiceTest {
                 10L, 1L, "other-owner", LocalDateTime.now().plusMinutes(5));
         given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
 
-        summaryJobTxService.recordFailure(10L, "owner-1", true, "AI_PROVIDER_TRANSIENT", "일시", null);
+        summaryJobLifecycleService.recordFailure(10L, "owner-1", true, "AI_PROVIDER_TRANSIENT", "일시", null);
 
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PROCESSING); // 변하지 않음
         assertThat(job.getAttemptCount()).isZero();
@@ -125,7 +125,7 @@ class SummaryJobTxServiceTest {
                 10L, 1L, "other-owner", LocalDateTime.now().plusMinutes(5));
         given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
 
-        var context = summaryJobTxService.prepareGeneration(10L, "owner-1");
+        var context = summaryJobLifecycleService.prepareGeneration(10L, "owner-1");
 
         assertThat(context).isNull();
         verify(aiChatSessionRepository, never()).findByIdForUpdate(any());
@@ -142,7 +142,7 @@ class SummaryJobTxServiceTest {
         given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(1L))
                 .willReturn(List.of());
 
-        SummaryGenerationContext context = summaryJobTxService.prepareGeneration(10L, "owner-1");
+        SummaryGenerationContext context = summaryJobLifecycleService.prepareGeneration(10L, "owner-1");
 
         assertThat(context).isNotNull();
         assertThat(context.sessionId()).isEqualTo(1L);

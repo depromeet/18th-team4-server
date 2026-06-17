@@ -28,7 +28,7 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class SummaryJobTxService {
+public class SummaryJobLifecycleService {
 
     private final SummaryJobRepository summaryJobRepository;
     private final AiChatSessionRepository aiChatSessionRepository;

@@ -25,65 +25,65 @@ import static org.mockito.Mockito.verify;
 @ExtendWith(MockitoExtension.class)
 class SummaryGenerationWorkerTest {
 
-    @Mock private SummaryJobTxService txService;
+    @Mock private SummaryJobLifecycleService lifecycleService;
     @Mock private AiSummaryClient aiSummaryClient;
 
     @InjectMocks private SummaryGenerationWorker worker;
 
     @Test
     void 처리할_작업이_없으면_생성을_호출하지_않는다() {
-        given(txService.claimOne(anyString())).willReturn(null);
+        given(lifecycleService.claimOne(anyString())).willReturn(null);
 
-        worker.drainOnce();
+        worker.processOne();
 
         verify(aiSummaryClient, never()).generate(any());
     }
 
     @Test
     void 정상_흐름은_준비_생성_성공기록을_순서대로_한다() {
-        given(txService.claimOne(anyString())).willReturn(10L);
-        given(txService.prepareGeneration(eq(10L), anyString()))
+        given(lifecycleService.claimOne(anyString())).willReturn(10L);
+        given(lifecycleService.prepareGeneration(eq(10L), anyString()))
                 .willReturn(new SummaryGenerationContext(1L, 7L, List.of()));
         given(aiSummaryClient.generate(any())).willReturn(new SummaryDraftResult("제목", "본문"));
 
-        worker.drainOnce();
+        worker.processOne();
 
-        verify(txService).recordSuccess(eq(10L), anyString(), eq(7L), any(SummaryDraftResult.class));
+        verify(lifecycleService).recordSuccess(eq(10L), anyString(), eq(7L), any(SummaryDraftResult.class));
     }
 
     @Test
     void 준비단계가_null이면_생성을_건너뛴다() {
-        given(txService.claimOne(anyString())).willReturn(10L);
-        given(txService.prepareGeneration(eq(10L), anyString())).willReturn(null);
+        given(lifecycleService.claimOne(anyString())).willReturn(10L);
+        given(lifecycleService.prepareGeneration(eq(10L), anyString())).willReturn(null);
 
-        worker.drainOnce();
+        worker.processOne();
 
         verify(aiSummaryClient, never()).generate(any());
-        verify(txService, never()).recordSuccess(anyLong(), anyString(), anyLong(), any());
+        verify(lifecycleService, never()).recordSuccess(anyLong(), anyString(), anyLong(), any());
     }
 
     @Test
     void 생성중_TooManyRequests면_재시도가능으로_실패기록한다() {
-        given(txService.claimOne(anyString())).willReturn(10L);
-        given(txService.prepareGeneration(eq(10L), anyString()))
+        given(lifecycleService.claimOne(anyString())).willReturn(10L);
+        given(lifecycleService.prepareGeneration(eq(10L), anyString()))
                 .willReturn(new SummaryGenerationContext(1L, 7L, List.of()));
         given(aiSummaryClient.generate(any()))
                 .willThrow(new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST));
 
-        worker.drainOnce();
+        worker.processOne();
 
-        verify(txService).recordFailure(eq(10L), anyString(), eq(true), anyString(), anyString(), isNull());
+        verify(lifecycleService).recordFailure(eq(10L), anyString(), eq(true), anyString(), anyString(), isNull());
     }
 
     @Test
     void 생성중_일반예외면_재시도가능으로_실패기록한다() {
-        given(txService.claimOne(anyString())).willReturn(10L);
-        given(txService.prepareGeneration(eq(10L), anyString()))
+        given(lifecycleService.claimOne(anyString())).willReturn(10L);
+        given(lifecycleService.prepareGeneration(eq(10L), anyString()))
                 .willReturn(new SummaryGenerationContext(1L, 7L, List.of()));
         given(aiSummaryClient.generate(any())).willThrow(new RuntimeException("boom"));
 
-        worker.drainOnce();
+        worker.processOne();
 
-        verify(txService).recordFailure(eq(10L), anyString(), eq(true), anyString(), anyString(), isNull());
+        verify(lifecycleService).recordFailure(eq(10L), anyString(), eq(true), anyString(), anyString(), isNull());
     }
 }
