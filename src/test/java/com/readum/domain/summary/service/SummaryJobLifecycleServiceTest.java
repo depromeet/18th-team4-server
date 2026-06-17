@@ -148,4 +148,29 @@ class SummaryJobLifecycleServiceTest {
         assertThat(context.sessionId()).isEqualTo(1L);
         assertThat(context.userBookId()).isEqualTo(7L);
     }
+
+    @Test
+    void requeue_는_소유권_일치시_시도횟수없이_PENDING으로_되돌린다() {
+        SummaryJob job = SummaryJobFixture.persistedProcessing(
+                10L, 1L, "owner-1", LocalDateTime.now().plusMinutes(5));
+        given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
+        LocalDateTime next = LocalDateTime.now().plusSeconds(30);
+
+        summaryJobLifecycleService.requeue(10L, "owner-1", next);
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
+        assertThat(job.getAttemptCount()).isZero();
+        assertThat(job.getNextAttemptAt()).isEqualTo(next);
+    }
+
+    @Test
+    void requeue_는_소유권_불일치시_아무것도_하지_않는다() {
+        SummaryJob job = SummaryJobFixture.persistedProcessing(
+                10L, 1L, "other-owner", LocalDateTime.now().plusMinutes(5));
+        given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
+
+        summaryJobLifecycleService.requeue(10L, "owner-1", LocalDateTime.now().plusSeconds(30));
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PROCESSING);
+    }
 }

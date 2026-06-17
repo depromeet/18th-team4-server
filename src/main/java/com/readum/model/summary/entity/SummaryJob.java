@@ -142,4 +142,16 @@ public class SummaryJob {
         this.nextAttemptAt = now;
         this.updatedAt = LocalDateTime.now();
     }
+
+    /**
+     * 페이서 예산 부족 등으로 처리를 잠시 미룬다 — 실패가 아니므로 시도 횟수/에러는 건드리지 않고
+     * 다음 처리 시각만 미뤄 PENDING 으로 되돌린다(블로킹으로 lease 를 오래 잡지 않기 위함).
+     */
+    public void requeue(LocalDateTime nextAttemptAt) {
+        this.status = Status.PENDING;
+        this.lockOwner = null;
+        this.lockedUntil = null;
+        this.nextAttemptAt = nextAttemptAt;
+        this.updatedAt = LocalDateTime.now();
+    }
 }

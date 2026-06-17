@@ -20,7 +20,8 @@ public record SummaryJobProperties(
         @Positive int maxAttempts,
         @Positive long baseBackoffSeconds,
         @Positive long breakerOpenSeconds,
-        @Positive int reservedOutputTokens
+        @Positive int reservedOutputTokens,
+        @Positive long pacedRetrySeconds
 ) {
 
     public Duration lease() {

@@ -9,8 +9,14 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 
 /**
- * bucket4j 기반 outbound 페이서. 요청 수(RPM)와 토큰 수(TPM)를 각각 양동이로 관리하고,
- * 호출 직전 둘 다 확보될 때까지 블로킹 대기시킨다. 단일 인스턴스 in-memory.
+ * bucket4j 기반 outbound 페이서. 요청 수(RPM)와 토큰 수(TPM)를 각각 양동이로 관리한다.
+ *
+ * 토큰 버킷의 용량은 "분당 TPM" 이 아니라 "단일 요청 최대 토큰(maxRequestTokens)" 으로 둔다 —
+ * 용량을 분당치로 두면 그보다 큰 단일 요청을 받을 수 없어 과소차감(클램프)이 필요해지고, 그러면
+ * 실제 토큰보다 적게 차감해 TPM 몫 보장이 깨진다. refill 을 분당 TPM 으로 둬 장기 평균을 한도 아래로 유지한다.
+ *
+ * acquire 는 블로킹이지만 maxWait 로 상한을 둔다 — 그 안에 예산을 못 얻으면 false 를 반환해,
+ * 워커가 lease 를 오래 잡은 채 대기하다 reaper 에 중복 선점되는 것을 막는다.
  */
 @Slf4j
 @Component
@@ -18,29 +24,31 @@ public class SummaryCallRateLimiterImpl implements SummaryCallRateLimiter {
 
     private final Bucket requestBucket;
     private final Bucket tokenBucket;
-    private final long tokenCapacity;
+    private final long maxWaitNanos;
 
     public SummaryCallRateLimiterImpl(SummaryRateLimitProperties properties) {
-        this.requestBucket = perMinuteBucket(properties.requestsPerMinute());
-        this.tokenCapacity = properties.tokensPerMinute();
-        this.tokenBucket = perMinuteBucket(tokenCapacity);
+        this.requestBucket = bucket(properties.requestsPerMinute(), properties.requestsPerMinute());
+        this.tokenBucket = bucket(properties.maxRequestTokens(), properties.tokensPerMinute());
+        this.maxWaitNanos = Duration.ofSeconds(properties.acquireMaxWaitSeconds()).toNanos();
     }
 
     @Override
-    public void acquire(int estimatedTokens) throws InterruptedException {
-        long tokens = Math.max(1, Math.min(estimatedTokens, tokenCapacity));
-        if (estimatedTokens > tokenCapacity) {
-            // 한 요청이 분당 토큰 용량보다 크면 영원히 대기하게 되므로 용량으로 클램프한다.
-            log.warn("요약 예상 토큰({})이 TPM 용량({})을 초과해 용량으로 클램프합니다.", estimatedTokens, tokenCapacity);
+    public boolean tryAcquire(int estimatedTokens) throws InterruptedException {
+        long tokens = Math.max(1, estimatedTokens);
+        if (!requestBucket.asBlocking().tryConsume(1, maxWaitNanos)) {
+            return false;
         }
-        requestBucket.asBlocking().consume(1);
-        tokenBucket.asBlocking().consume(tokens);
+        if (!tokenBucket.asBlocking().tryConsume(tokens, maxWaitNanos)) {
+            requestBucket.addTokens(1); // 토큰 예산 부족 — 앞서 차감한 요청 토큰을 환불
+            return false;
+        }
+        return true;
     }
 
-    private static Bucket perMinuteBucket(long perMinute) {
+    private static Bucket bucket(long capacity, long refillPerMinute) {
         Bandwidth bandwidth = Bandwidth.builder()
-                .capacity(perMinute)
-                .refillIntervally(perMinute, Duration.ofMinutes(1))
+                .capacity(capacity)
+                .refillIntervally(refillPerMinute, Duration.ofMinutes(1))
                 .build();
         return Bucket.builder()
                 .addLimit(bandwidth)

@@ -84,9 +84,12 @@ summary-job:
   max-attempts: 5
   base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
   breaker-open-seconds: 600   # quota 감지 시 10분 전역 차단
-  reserved-output-tokens: 1024 # TPM 추정 시 호출당 예약 출력 토큰
+  reserved-output-tokens: 1024  # TPM 추정 시 호출당 예약 출력 토큰
+  paced-retry-seconds: 30       # 페이서 예산 부족으로 되돌린 작업의 재시도 지연
 
 summary:
   rate-limit:
-    requests-per-minute: 60       # 배치 몫(OpenAI 천장 × 몫 × 안전여유로 산정)
+    requests-per-minute: 60        # 배치 몫(OpenAI 천장 × 몫 × 안전여유로 산정)
     tokens-per-minute: 40000
+    max-request-tokens: 130000     # 단일 요청 최대 토큰(컨텍스트 윈도우 규모) = 토큰 버킷 용량
+    acquire-max-wait-seconds: 20   # 이 시간 내 예산 미확보 시 작업을 큐로 되돌림(lease 보호)

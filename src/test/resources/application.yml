@@ -58,8 +58,11 @@ summary-job:
   base-backoff-seconds: 60
   breaker-open-seconds: 600
   reserved-output-tokens: 1024
+  paced-retry-seconds: 30
 
 summary:
   rate-limit:
     requests-per-minute: 60
     tokens-per-minute: 40000
+    max-request-tokens: 130000
+    acquire-max-wait-seconds: 20

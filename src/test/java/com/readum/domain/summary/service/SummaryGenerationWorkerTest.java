@@ -43,7 +43,7 @@ class SummaryGenerationWorkerTest {
 
     @InjectMocks private SummaryGenerationWorker worker;
 
-    /** breaker 닫힘 + 작업 1건 선점 + 컨텍스트 준비 + 토큰 추정까지 진행되는 공통 경로. */
+    /** breaker 닫힘 + 작업 1건 선점 + 컨텍스트 준비 + 토큰 추정까지 진행되는 공통 경로(페이서 결과는 각 테스트가 지정). */
     private void givenClaimedJobWithContext() {
         given(circuitBreaker.isOpen()).willReturn(false);
         given(lifecycleService.claimOne(anyString())).willReturn(10L);
@@ -77,12 +77,27 @@ class SummaryGenerationWorkerTest {
     @Test
     void 정상_흐름은_페이서_통과후_생성하고_성공을_기록한다() throws InterruptedException {
         givenClaimedJobWithContext();
+        given(rateLimiter.tryAcquire(2000)).willReturn(true);
         given(aiSummaryClient.generate(any())).willReturn(new SummaryDraftResult("제목", "본문"));
 
         worker.processOne();
 
-        verify(rateLimiter).acquire(2000);
+        verify(rateLimiter).tryAcquire(2000);
         verify(lifecycleService).recordSuccess(eq(10L), anyString(), eq(7L), any(SummaryDraftResult.class));
+    }
+
+    @Test
+    void 페이서_예산이_부족하면_생성하지않고_작업을_되돌린다() throws InterruptedException {
+        givenClaimedJobWithContext();
+        given(rateLimiter.tryAcquire(2000)).willReturn(false);
+        given(properties.pacedRetrySeconds()).willReturn(30L);
+
+        worker.processOne();
+
+        verify(aiSummaryClient, never()).generate(any());
+        verify(lifecycleService).requeue(eq(10L), anyString(), any(LocalDateTime.class));
+        verify(lifecycleService, never()).recordFailure(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString(), any(), any());
     }
 
     @Test
@@ -98,8 +113,9 @@ class SummaryGenerationWorkerTest {
     }
 
     @Test
-    void quota_소진이면_breaker를_열고_재시도로_기록한다() {
+    void quota_소진이면_breaker를_열고_재시도로_기록한다() throws InterruptedException {
         givenClaimedJobWithContext();
+        given(rateLimiter.tryAcquire(2000)).willReturn(true);
         given(properties.breakerOpen()).willReturn(Duration.ofMinutes(10));
         given(aiSummaryClient.generate(any()))
                 .willThrow(new TooManyRequestsException(AiChatErrorCode.AI_QUOTA_EXHAUSTED, null));
@@ -111,8 +127,9 @@ class SummaryGenerationWorkerTest {
     }
 
     @Test
-    void burst_429면_breaker는_안열고_RetryAfter로_재시도한다() {
+    void burst_429면_breaker는_안열고_RetryAfter로_재시도한다() throws InterruptedException {
         givenClaimedJobWithContext();
+        given(rateLimiter.tryAcquire(2000)).willReturn(true);
         RateLimitInfo info = new RateLimitInfo(Duration.ofSeconds(30), null, null, null, null, null, null);
         given(aiSummaryClient.generate(any()))
                 .willThrow(new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST, info));
@@ -125,8 +142,9 @@ class SummaryGenerationWorkerTest {
     }
 
     @Test
-    void 비재시도_4xx면_즉시_FAILED로_기록한다() {
+    void 비재시도_4xx면_즉시_FAILED로_기록한다() throws InterruptedException {
         givenClaimedJobWithContext();
+        given(rateLimiter.tryAcquire(2000)).willReturn(true);
         given(aiSummaryClient.generate(any())).willThrow(new NonTransientAiException("bad request"));
 
         worker.processOne();
@@ -135,8 +153,9 @@ class SummaryGenerationWorkerTest {
     }
 
     @Test
-    void 일시_5xx면_재시도로_기록한다() {
+    void 일시_5xx면_재시도로_기록한다() throws InterruptedException {
         givenClaimedJobWithContext();
+        given(rateLimiter.tryAcquire(2000)).willReturn(true);
         given(aiSummaryClient.generate(any())).willThrow(new TransientAiException("server error"));
 
         worker.processOne();

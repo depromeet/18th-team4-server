@@ -13,6 +13,10 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "summary.rate-limit")
 public record SummaryRateLimitProperties(
         @Positive int requestsPerMinute,
-        @Positive long tokensPerMinute
+        @Positive long tokensPerMinute,
+        // 토큰 버킷 용량 = 단일 요청 최대 토큰(컨텍스트 윈도우 규모). 큰 요청도 실제 비용만큼 차감하기 위해.
+        @Positive long maxRequestTokens,
+        // 이 시간 안에 예산을 못 얻으면 tryAcquire 가 false 를 반환한다. lease 보다 충분히 짧아야 한다.
+        @Positive long acquireMaxWaitSeconds
 ) {
 }

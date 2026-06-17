@@ -128,4 +128,17 @@ public class SummaryJobLifecycleService {
             job.markFailed(errorCode, errorMessage);
         }
     }
+
+    /**
+     * 페이서 예산 부족으로 아직 호출하지 못한 작업을 큐로 되돌린다(실패 아님 — 시도 횟수 증가 없음).
+     * 소유권 확인 후에만 반영해, lease 만료로 재선점된 작업을 옛 워커가 건드리지 못하게 한다.
+     */
+    @Transactional
+    public void requeue(Long jobId, String owner, LocalDateTime nextAttemptAt) {
+        SummaryJob job = summaryJobRepository.findByIdForUpdate(jobId).orElse(null);
+        if (job == null || !job.isOwnedBy(owner)) {
+            return;
+        }
+        job.requeue(nextAttemptAt);
+    }
 }
