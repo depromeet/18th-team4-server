@@ -120,6 +120,26 @@ class SummaryJobRepositoryTest {
     }
 
     @Test
+    void findOrphaned_는_SUBMITTED_작업을_회수_대상에_포함하지_않는다() {
+        long sessionId = nextSessionId();
+        SummaryJob submitted = summaryJobRepository.save(
+                SummaryJobFixture.persistedSubmitted(null, sessionId, 1L));
+
+        List<SummaryJob> orphans = summaryJobRepository.findOrphaned(
+                LocalDateTime.now(), PageRequest.of(0, 10));
+
+        assertThat(orphans).extracting(SummaryJob::getId).doesNotContain(submitted.getId());
+    }
+
+    @Test
+    void existsByActiveSessionId_는_SUBMITTED_BATCH_작업이_있으면_true() {
+        long sessionId = nextSessionId();
+        summaryJobRepository.save(SummaryJobFixture.persistedSubmitted(null, sessionId, 1L));
+
+        assertThat(summaryJobRepository.existsByActiveSessionId(sessionId)).isTrue();
+    }
+
+    @Test
     void active_session_id_는_세션당_하나만_허용한다() {
         long sessionId = nextSessionId();
         summaryJobRepository.saveAndFlush(SummaryJobFixture.persistedPending(null, sessionId, LocalDateTime.now()));
