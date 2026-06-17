@@ -56,16 +56,7 @@ summary-job:
   lease-seconds: 300
   max-attempts: 5
   base-backoff-seconds: 60
-  breaker-open-seconds: 600
   reserved-output-tokens: 1024
-  paced-retry-seconds: 30
-
-summary:
-  rate-limit:
-    requests-per-minute: 60
-    tokens-per-minute: 40000
-    max-request-tokens: 130000
-    acquire-max-wait-seconds: 20
 
 openai-batch:
   api-key: test-openai-batch-key
