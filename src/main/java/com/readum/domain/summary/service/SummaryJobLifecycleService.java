@@ -38,12 +38,13 @@ public class SummaryJobLifecycleService {
 
     /**
      * 처리 대상 작업을 하나 선점한다. SKIP LOCKED 로 다른 워커와 겹치지 않는다.
+     * executionMode 로 SYNC/BATCH 를 분리해 동기 워커가 BATCH 큐를 침범하지 않는다.
      * owner 는 이 선점만의 토큰. 반환된 작업 id 를 워커가 이후 단계에 넘긴다. 없으면 null.
      */
     @Transactional
-    public Long claimOne(String owner) {
+    public Long claimOne(SummaryJob.ExecutionMode executionMode, String owner) {
         List<SummaryJob> candidates = summaryJobRepository.findClaimable(
-                SummaryJob.Status.PENDING, LocalDateTime.now(),
+                executionMode, SummaryJob.Status.PENDING, LocalDateTime.now(),
                 PageRequest.of(0, 1));
         if (candidates.isEmpty()) {
             return null;
@@ -129,16 +130,4 @@ public class SummaryJobLifecycleService {
         }
     }
 
-    /**
-     * 호출 속도 제한으로 아직 호출하지 못한 작업을 큐로 되돌린다(실패 아님 — 시도 횟수 증가 없음).
-     * 소유권 확인 후에만 반영해, lease 만료로 재선점된 작업을 옛 워커가 건드리지 못하게 한다.
-     */
-    @Transactional
-    public void requeue(Long jobId, String owner, LocalDateTime nextAttemptAt) {
-        SummaryJob job = summaryJobRepository.findByIdForUpdate(jobId).orElse(null);
-        if (job == null || !job.isOwnedBy(owner)) {
-            return;
-        }
-        job.requeue(nextAttemptAt);
-    }
 }

@@ -18,6 +18,7 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
 
     /**
      * 처리 가능한 PENDING 작업을 선점 후보로 조회한다.
+     * executionMode 로 SYNC/BATCH 를 분리해 두 소비자가 서로의 큐를 침범하지 않는다.
      * PESSIMISTIC_WRITE + lock timeout -2(Hibernate SKIP LOCKED): 다른 워커가 이미 잠근 행은 건너뛴다.
      * 주의: SKIP LOCKED 동시-skip 동작은 MySQL 에서 성립하며 H2 에서는 무시될 수 있다.
      */
@@ -26,23 +27,31 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
     @Query("""
             select summaryJob
               from SummaryJob summaryJob
-             where summaryJob.status = :status
+             where summaryJob.executionMode = :executionMode
+               and summaryJob.status = :status
                and summaryJob.nextAttemptAt <= :now
              order by summaryJob.nextAttemptAt asc
                     , summaryJob.id asc
             """)
     List<SummaryJob> findClaimable(
+            @Param("executionMode") SummaryJob.ExecutionMode executionMode,
             @Param("status") SummaryJob.Status status,
             @Param("now") LocalDateTime now,
             Pageable pageable);
 
-    /** lease 가 만료된 PROCESSING(고아) 작업. 회수기가 PENDING 으로 되돌릴 대상. */
+    /**
+     * lease 가 만료된 고아 작업을 조회한다. 회수기가 PENDING 으로 되돌릴 대상.
+     * PROCESSING(동기 워커 점유)과 BATCH_BUILDING(builder 청크 점유) 둘 다 포함한다.
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
     @Query("""
             select summaryJob
               from SummaryJob summaryJob
-             where summaryJob.status = com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
+             where summaryJob.status in (
+                       com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
+                     , com.readum.model.summary.entity.SummaryJob.Status.BATCH_BUILDING
+                   )
                and summaryJob.lockedUntil < :now
              order by summaryJob.lockedUntil asc
             """)

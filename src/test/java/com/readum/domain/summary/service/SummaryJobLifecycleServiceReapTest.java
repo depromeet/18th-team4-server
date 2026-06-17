@@ -25,7 +25,7 @@ class SummaryJobLifecycleServiceReapTest {
     @Mock private com.readum.domain.summary.config.SummaryJobProperties properties;
 
     @Test
-    void reclaimOrphans_는_고아작업을_PENDING으로_되돌린다() {
+    void reclaimOrphans_는_PROCESSING_고아를_PENDING으로_되돌린다() {
         SummaryJobLifecycleService service = new SummaryJobLifecycleService(
                 summaryJobRepository, aiChatSessionRepository, aiChatMessageRepository,
                 summaryRepository, properties);
@@ -38,5 +38,21 @@ class SummaryJobLifecycleServiceReapTest {
         assertThat(reclaimed).isEqualTo(1);
         assertThat(orphan.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
         assertThat(orphan.getLockOwner()).isNull();
+    }
+
+    @Test
+    void reclaimOrphans_는_BATCH_BUILDING_고아도_PENDING으로_되돌린다() {
+        SummaryJobLifecycleService service = new SummaryJobLifecycleService(
+                summaryJobRepository, aiChatSessionRepository, aiChatMessageRepository,
+                summaryRepository, properties);
+        SummaryJob batchOrphan = SummaryJobFixture.persistedBatchBuilding(
+                20L, 2L, "dead-builder", LocalDateTime.now().minusMinutes(1));
+        given(summaryJobRepository.findOrphaned(any(), any())).willReturn(List.of(batchOrphan));
+
+        int reclaimed = service.reclaimOrphans(100);
+
+        assertThat(reclaimed).isEqualTo(1);
+        assertThat(batchOrphan.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
+        assertThat(batchOrphan.getLockOwner()).isNull();
     }
 }

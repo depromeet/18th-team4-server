@@ -18,6 +18,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +26,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -39,6 +41,31 @@ class SummaryJobLifecycleServiceTest {
     @Mock private SummaryJobProperties properties;
 
     @InjectMocks private SummaryJobLifecycleService summaryJobLifecycleService;
+
+    @Test
+    void SYNC_선점은_SYNC_PENDING만_가져온다() {
+        SummaryJob syncJob = SummaryJobFixture.persistedPending(1L, 100L, LocalDateTime.now());
+        given(summaryJobRepository.findClaimable(
+                eq(SummaryJob.ExecutionMode.SYNC), eq(SummaryJob.Status.PENDING), any(), any()))
+                .willReturn(List.of(syncJob));
+        given(properties.lease()).willReturn(Duration.ofMinutes(5));
+
+        Long claimed = summaryJobLifecycleService.claimOne(SummaryJob.ExecutionMode.SYNC, "owner-1");
+
+        assertThat(claimed).isEqualTo(1L);
+        assertThat(syncJob.getStatus()).isEqualTo(SummaryJob.Status.PROCESSING);
+    }
+
+    @Test
+    void SYNC_선점시_대상이_없으면_null을_반환한다() {
+        given(summaryJobRepository.findClaimable(
+                eq(SummaryJob.ExecutionMode.SYNC), eq(SummaryJob.Status.PENDING), any(), any()))
+                .willReturn(List.of());
+
+        Long claimed = summaryJobLifecycleService.claimOne(SummaryJob.ExecutionMode.SYNC, "owner-1");
+
+        assertThat(claimed).isNull();
+    }
 
     @Test
     void recordSuccess_는_소유권_일치시_감상문저장_세션잠금_작업성공을_한다() {
@@ -149,28 +176,4 @@ class SummaryJobLifecycleServiceTest {
         assertThat(context.userBookId()).isEqualTo(7L);
     }
 
-    @Test
-    void requeue_는_소유권_일치시_시도횟수없이_PENDING으로_되돌린다() {
-        SummaryJob job = SummaryJobFixture.persistedProcessing(
-                10L, 1L, "owner-1", LocalDateTime.now().plusMinutes(5));
-        given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
-        LocalDateTime next = LocalDateTime.now().plusSeconds(30);
-
-        summaryJobLifecycleService.requeue(10L, "owner-1", next);
-
-        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
-        assertThat(job.getAttemptCount()).isZero();
-        assertThat(job.getNextAttemptAt()).isEqualTo(next);
-    }
-
-    @Test
-    void requeue_는_소유권_불일치시_아무것도_하지_않는다() {
-        SummaryJob job = SummaryJobFixture.persistedProcessing(
-                10L, 1L, "other-owner", LocalDateTime.now().plusMinutes(5));
-        given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
-
-        summaryJobLifecycleService.requeue(10L, "owner-1", LocalDateTime.now().plusSeconds(30));
-
-        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PROCESSING);
-    }
 }
