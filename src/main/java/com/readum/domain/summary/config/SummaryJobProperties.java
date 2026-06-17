@@ -19,18 +19,11 @@ public record SummaryJobProperties(
         @Positive long leaseSeconds,
         @Positive int maxAttempts,
         @Positive long baseBackoffSeconds,
-        @Positive long breakerOpenSeconds,
-        @Positive int reservedOutputTokens,
-        @Positive long pacedRetrySeconds
+        @Positive int reservedOutputTokens
 ) {
 
     public Duration lease() {
         return Duration.ofSeconds(leaseSeconds);
-    }
-
-    /** quota 소진 감지 시 전역 차단을 유지할 시간. */
-    public Duration breakerOpen() {
-        return Duration.ofSeconds(breakerOpenSeconds);
     }
 
     /** 지수 백오프: base * 2^attemptCount (attemptCount = 지금까지의 시도 횟수). */
