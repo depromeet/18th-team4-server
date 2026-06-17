@@ -13,7 +13,6 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "summary.rate-limit")
 public record SummaryRateLimitProperties(
         @Positive int requestsPerMinute,
-        @Positive long tokensPerMinute,
-        @Positive int reservedOutputTokens
+        @Positive long tokensPerMinute
 ) {
 }

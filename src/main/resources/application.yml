@@ -83,10 +83,10 @@ summary-job:
   lease-seconds: 300        # 5분 lease
   max-attempts: 5
   base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
-  breaker-open-seconds: 600 # quota 감지 시 10분 전역 차단
+  breaker-open-seconds: 600   # quota 감지 시 10분 전역 차단
+  reserved-output-tokens: 1024 # TPM 추정 시 호출당 예약 출력 토큰
 
 summary:
   rate-limit:
     requests-per-minute: 60       # 배치 몫(OpenAI 천장 × 몫 × 안전여유로 산정)
     tokens-per-minute: 40000
-    reserved-output-tokens: 1024
