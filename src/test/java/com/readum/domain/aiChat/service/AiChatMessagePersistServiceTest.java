@@ -97,7 +97,7 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void loadHistory_활성_세션이지만_PROCESSING_작업이_있으면_BadRequest_SESSION_LOCKED_를_던진다() {
+    void loadHistory_활성_세션이지만_차단_작업이_있으면_BadRequest_SESSION_LOCKED_를_던진다() {
         // 감상문을 생성 중인 세션 — 일시적으로 메시지 전송 불가.
         Long userId = 1L;
         Long sessionId = 7L;

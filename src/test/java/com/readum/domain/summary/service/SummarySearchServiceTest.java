@@ -232,7 +232,7 @@ class SummarySearchServiceTest {
     }
 
     @Test
-    void 세션_ID로_조회_시_PROCESSING_작업이_있으면_ConflictException_을_던진다() {
+    void 세션_ID로_조회_시_차단_작업이_있으면_ConflictException_을_던진다() {
         AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));

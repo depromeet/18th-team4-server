@@ -63,10 +63,11 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
      * 갱신해 "최근 채팅 시각" 의 의미가 흐려지기 때문.
      *
      * status 도출: AiChatSession.status (ACTIVE/LOCKED) 와 진행 중 작업(summary_job) 존재 여부를 CASE 로 합성한다.
-     *  - session LOCKED              → "SUMMARIZED" (감상문이 완성되어 종료된 세션)
-     *  - 유효 PROCESSING 작업 존재     → "SUMMARIZING" (지금 생성 중 — lease 유효한 PROCESSING summary_job)
+     *  - session LOCKED                                               → "SUMMARIZED" (감상문이 완성되어 종료된 세션)
+     *  - 유효 점유(lockedUntil > now) PROCESSING/BATCH_BUILDING 또는 SUBMITTED 작업 존재
+     *                                → "SUMMARIZING" (감상문 생성 진행 중 — SummaryJobRepository.existsBlockingSummaryJob 과 동일 조건)
      *  - 그 외                        → "ACTIVE"
-     * 고아(lease 만료) PROCESSING 작업은 "생성 중" 으로 보지 않으므로 lockedUntil > now 로 거른다.
+     * 점유 만료 PROCESSING/BATCH_BUILDING 은 "생성 중" 으로 보지 않으므로 lockedUntil > now 로 거른다.
      *
      * 호출자 시그니처를 단순하게 유지하기 위해 default 메서드로 감싸고, 내부 @Query 에 enum 파라미터를 바인딩한다.
      */

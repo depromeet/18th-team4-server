@@ -61,4 +61,13 @@ class SummaryJobRepositoryBlockingTest {
 
         assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isFalse();
     }
+
+    @Test
+    void 유효_점유_PROCESSING은_차단으로_본다() {
+        long sessionId = nextSessionId();
+        repository.save(SummaryJobFixture.persistedProcessing(
+                null, sessionId, "o", LocalDateTime.now().plusMinutes(5)));
+
+        assertThat(repository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())).isTrue();
+    }
 }
