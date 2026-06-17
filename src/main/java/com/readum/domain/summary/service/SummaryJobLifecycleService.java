@@ -9,10 +9,10 @@ import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
-import com.readum.model.summary.entity.OpenAiBatch;
+import com.readum.model.summary.entity.SummaryBatch;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.entity.SummaryJob;
-import com.readum.model.summary.repository.OpenAiBatchRepository;
+import com.readum.model.summary.repository.SummaryBatchRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import lombok.RequiredArgsConstructor;
@@ -40,7 +40,7 @@ public class SummaryJobLifecycleService {
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final SummaryRepository summaryRepository;
-    private final OpenAiBatchRepository openAiBatchRepository;
+    private final SummaryBatchRepository summaryBatchRepository;
     private final SummaryJobProperties properties;
 
     /**
@@ -172,13 +172,13 @@ public class SummaryJobLifecycleService {
     }
 
     /**
-     * 제출 성공 기록 — openai_batch 행을 저장하고, 이 owner 가 점유 중인 작업들을 SUBMITTED 로 전이한다.
+     * 제출 성공 기록 — summary_batch 행을 저장하고, 이 owner 가 점유 중인 작업들을 SUBMITTED 로 전이한다.
      * isOwnedBy 펜싱: lease 만료로 회수된 작업은 소유권 불일치로 건너뛴다.
      */
     @Transactional
     public void recordSubmission(List<Long> jobIds, String owner, String batchId, String inputFileId) {
-        OpenAiBatch batch = openAiBatchRepository.save(
-                OpenAiBatch.createSubmitted(batchId, inputFileId, jobIds.size()));
+        SummaryBatch batch = summaryBatchRepository.save(
+                SummaryBatch.createSubmitted(batchId, inputFileId, jobIds.size()));
         for (Long jobId : jobIds) {
             SummaryJob job = summaryJobRepository.findByIdForUpdate(jobId).orElse(null);
             if (job != null && job.isOwnedBy(owner)) {
@@ -226,8 +226,8 @@ public class SummaryJobLifecycleService {
             return;
         }
         // batch 소속 검증: 이 결과 항목이 실제로 이 batch 에 속하는 작업인지 확인한다.
-        // customId 파싱으로 jobId 를 꺼낸 뒤 그 작업의 openAiBatchId 가 batchEntityId 와 다르면 건너뛴다.
-        if (job.getOpenAiBatchId() == null || !job.getOpenAiBatchId().equals(batchEntityId)) {
+        // customId 파싱으로 jobId 를 꺼낸 뒤 그 작업의 summaryBatchId 가 batchEntityId 와 다르면 건너뛴다.
+        if (job.getSummaryBatchId() == null || !job.getSummaryBatchId().equals(batchEntityId)) {
             log.warn("감상문 batch 결과 적용 — 작업이 이 batch 소속 아님 jobId={} batchEntityId={}",
                     jobId, batchEntityId);
             return;
@@ -259,7 +259,7 @@ public class SummaryJobLifecycleService {
     }
 
     /**
-     * batch 의 모든 결과 항목이 적용된 뒤 OpenAiBatch 를 COMPLETED 로 전이한다.
+     * batch 의 모든 결과 항목이 적용된 뒤 SummaryBatch 를 COMPLETED 로 전이한다.
      * <p>
      * completeBatch 는 batch 내 모든 항목이 applyBatchResult 를 통해 적용된 후에만 호출된다.
      * JVM 재시작이나 중간 실패로 batch 가 SUBMITTED 에 머물더라도, 재수집 시 applyBatchResult 의
@@ -268,7 +268,7 @@ public class SummaryJobLifecycleService {
      */
     @Transactional
     public void completeBatch(Long batchEntityId, String outputFileId, String errorFileId) {
-        OpenAiBatch batch = openAiBatchRepository.findById(batchEntityId).orElse(null);
+        SummaryBatch batch = summaryBatchRepository.findById(batchEntityId).orElse(null);
         if (batch == null) {
             log.warn("감상문 batch 완료 처리 대상 배치 없음 batchEntityId={}", batchEntityId);
             return;
@@ -277,27 +277,27 @@ public class SummaryJobLifecycleService {
     }
 
     /**
-     * batch 전체 실패(OpenAI 측 오류) 시 OpenAiBatch 를 FAILED 로 전이하고,
+     * batch 전체 실패(제공자 측 오류) 시 SummaryBatch 를 FAILED 로 전이하고,
      * 이 batch 에 묶인 SUBMITTED 작업을 재시도 대상(PENDING)으로 되돌린다.
      */
     @Transactional
     public void failBatch(Long batchEntityId) {
-        OpenAiBatch batch = openAiBatchRepository.findById(batchEntityId).orElse(null);
+        SummaryBatch batch = summaryBatchRepository.findById(batchEntityId).orElse(null);
         if (batch == null) {
             log.warn("감상문 batch 실패 처리 대상 배치 없음 batchEntityId={}", batchEntityId);
             return;
         }
         batch.markFailed();
-        List<SummaryJob> submittedJobs = summaryJobRepository.findByOpenAiBatchIdAndStatus(
+        List<SummaryJob> submittedJobs = summaryJobRepository.findBySummaryBatchIdAndStatus(
                 batchEntityId, SummaryJob.Status.SUBMITTED);
         LocalDateTime now = LocalDateTime.now();
         for (SummaryJob job : submittedJobs) {
             boolean canRetry = job.getAttemptCount() + 1 < properties.maxAttempts();
             if (canRetry) {
                 LocalDateTime nextAttemptAt = properties.nextAttemptFrom(now, job.getAttemptCount());
-                job.scheduleRetry(nextAttemptAt, "BATCH_FAILED", "OpenAI batch 전체 실패");
+                job.scheduleRetry(nextAttemptAt, "BATCH_FAILED", "배치 전체 실패");
             } else {
-                job.markFailed("BATCH_FAILED", "OpenAI batch 전체 실패 — 시도 상한 초과");
+                job.markFailed("BATCH_FAILED", "배치 전체 실패 — 시도 상한 초과");
             }
         }
     }

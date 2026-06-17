@@ -2,9 +2,9 @@ package com.readum.domain.summary.service;
 
 import com.readum.domain.summary.dto.SummaryBatchResultItem;
 import com.readum.domain.summary.out.SummaryBatchClient;
-import com.readum.model.summary.entity.OpenAiBatch;
-import com.readum.model.summary.entity.OpenAiBatchFixture;
-import com.readum.model.summary.repository.OpenAiBatchRepository;
+import com.readum.model.summary.entity.SummaryBatch;
+import com.readum.model.summary.entity.SummaryBatchFixture;
+import com.readum.model.summary.repository.SummaryBatchRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -25,14 +25,14 @@ class SummaryBatchCollectServiceTest {
 
     @Mock private SummaryJobLifecycleService lifecycleService;
     @Mock private SummaryBatchClient batchClient;
-    @Mock private OpenAiBatchRepository openAiBatchRepository;
+    @Mock private SummaryBatchRepository summaryBatchRepository;
 
     @InjectMocks private SummaryBatchCollectService collectService;
 
     @Test
     void COMPLETED_배치는_결과를_항목별로_적용하고_completeBatch를_호출한다() {
-        OpenAiBatch batch = OpenAiBatchFixture.submitted(1L, "batch_AAA", 2);
-        given(openAiBatchRepository.findByStatus(OpenAiBatch.Status.SUBMITTED))
+        SummaryBatch batch = SummaryBatchFixture.submitted(1L, "batch_AAA", 2);
+        given(summaryBatchRepository.findByStatus(SummaryBatch.Status.SUBMITTED))
                 .willReturn(List.of(batch));
 
         SummaryBatchClient.BatchStatus completedStatus = new SummaryBatchClient.BatchStatus(
@@ -54,8 +54,8 @@ class SummaryBatchCollectServiceTest {
 
     @Test
     void RUNNING_배치는_결과_적용_없이_건너뛴다() {
-        OpenAiBatch batch = OpenAiBatchFixture.submitted(2L, "batch_BBB", 1);
-        given(openAiBatchRepository.findByStatus(OpenAiBatch.Status.SUBMITTED))
+        SummaryBatch batch = SummaryBatchFixture.submitted(2L, "batch_BBB", 1);
+        given(summaryBatchRepository.findByStatus(SummaryBatch.Status.SUBMITTED))
                 .willReturn(List.of(batch));
 
         SummaryBatchClient.BatchStatus runningStatus = new SummaryBatchClient.BatchStatus(
@@ -71,8 +71,8 @@ class SummaryBatchCollectServiceTest {
 
     @Test
     void FAILED_배치는_failBatch를_호출한다() {
-        OpenAiBatch batch = OpenAiBatchFixture.submitted(3L, "batch_CCC", 1);
-        given(openAiBatchRepository.findByStatus(OpenAiBatch.Status.SUBMITTED))
+        SummaryBatch batch = SummaryBatchFixture.submitted(3L, "batch_CCC", 1);
+        given(summaryBatchRepository.findByStatus(SummaryBatch.Status.SUBMITTED))
                 .willReturn(List.of(batch));
 
         SummaryBatchClient.BatchStatus failedStatus = new SummaryBatchClient.BatchStatus(
@@ -88,9 +88,9 @@ class SummaryBatchCollectServiceTest {
     @Test
     void 첫_배치에서_예외가_발생해도_두_번째_배치는_계속_처리된다() {
         // 준비: 배치 두 개 — 첫 번째는 pollStatus 에서 예외, 두 번째는 정상 완료
-        OpenAiBatch batch1 = OpenAiBatchFixture.submitted(4L, "batch_FAIL", 1);
-        OpenAiBatch batch2 = OpenAiBatchFixture.submitted(5L, "batch_OK", 1);
-        given(openAiBatchRepository.findByStatus(OpenAiBatch.Status.SUBMITTED))
+        SummaryBatch batch1 = SummaryBatchFixture.submitted(4L, "batch_FAIL", 1);
+        SummaryBatch batch2 = SummaryBatchFixture.submitted(5L, "batch_OK", 1);
+        given(summaryBatchRepository.findByStatus(SummaryBatch.Status.SUBMITTED))
                 .willReturn(List.of(batch1, batch2));
 
         given(batchClient.pollStatus("batch_FAIL"))

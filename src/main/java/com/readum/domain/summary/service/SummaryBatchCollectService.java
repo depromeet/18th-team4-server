@@ -2,8 +2,8 @@ package com.readum.domain.summary.service;
 
 import com.readum.domain.summary.dto.SummaryBatchResultItem;
 import com.readum.domain.summary.out.SummaryBatchClient;
-import com.readum.model.summary.entity.OpenAiBatch;
-import com.readum.model.summary.repository.OpenAiBatchRepository;
+import com.readum.model.summary.entity.SummaryBatch;
+import com.readum.model.summary.repository.SummaryBatchRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * SUBMITTED 상태인 OpenAI Batch 목록을 조회·폴링해 결과를 수집한다.
+ * SUBMITTED 상태인 배치 목록을 조회·폴링해 결과를 수집한다.
  * 비-TX 오케스트레이터. 트랜잭션 단계는 {@link SummaryJobLifecycleService} 의 @Transactional 메서드에 위임한다.
  *
  * <p>재수집 안전성: completeBatch 는 batch 내 모든 항목이 applyBatchResult 를 통해 적용된 뒤에만 호출된다.
@@ -25,7 +25,7 @@ public class SummaryBatchCollectService {
 
     private final SummaryJobLifecycleService lifecycleService;
     private final SummaryBatchClient batchClient;
-    private final OpenAiBatchRepository openAiBatchRepository;
+    private final SummaryBatchRepository summaryBatchRepository;
 
     /**
      * SUBMITTED 배치를 모두 순회하며 각각 폴링 → 결과 적용 → 완료 처리한다.
@@ -37,8 +37,8 @@ public class SummaryBatchCollectService {
      * 항목별로 잡아 completeBatch 까지 진행하면 실패한 항목이 영영 건너뛰어지므로 per-batch 잡기만 한다.
      */
     public void collect() {
-        List<OpenAiBatch> submittedBatches = openAiBatchRepository.findByStatus(OpenAiBatch.Status.SUBMITTED);
-        for (OpenAiBatch batch : submittedBatches) {
+        List<SummaryBatch> submittedBatches = summaryBatchRepository.findByStatus(SummaryBatch.Status.SUBMITTED);
+        for (SummaryBatch batch : submittedBatches) {
             try {
                 processOneBatch(batch);
             } catch (Exception e) {
@@ -48,7 +48,7 @@ public class SummaryBatchCollectService {
         }
     }
 
-    private void processOneBatch(OpenAiBatch batch) {
+    private void processOneBatch(SummaryBatch batch) {
         SummaryBatchClient.BatchStatus status = batchClient.pollStatus(batch.getBatchId());
         switch (status.state()) {
             case RUNNING -> log.info("감상문 batch 처리 중 — batchId={}", batch.getBatchId());
@@ -61,7 +61,7 @@ public class SummaryBatchCollectService {
                 log.info("감상문 batch 수집 완료 batchId={} 항목수={}", batch.getBatchId(), resultItems.size());
             }
             case FAILED -> {
-                log.error("감상문 batch 실패(OpenAI 측) batchId={}", batch.getBatchId());
+                log.error("감상문 batch 실패(제공자 측) batchId={}", batch.getBatchId());
                 lifecycleService.failBatch(batch.getId());
             }
         }

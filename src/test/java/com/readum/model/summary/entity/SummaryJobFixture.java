@@ -53,12 +53,12 @@ public final class SummaryJobFixture {
         );
     }
 
-    /** SUBMITTED 작업(점유 시한 없음). collector·미회수 테스트용. openAiBatchId 연결. */
-    public static SummaryJob persistedSubmitted(Long id, Long sessionId, Long openAiBatchId) {
+    /** SUBMITTED 작업(점유 시한 없음). collector·미회수 테스트용. summaryBatchId 연결. */
+    public static SummaryJob persistedSubmitted(Long id, Long sessionId, Long summaryBatchId) {
         LocalDateTime now = LocalDateTime.now();
         return new SummaryJob(
                 id, sessionId, sessionId, SummaryJob.ExecutionMode.BATCH, SummaryJob.Status.SUBMITTED,
-                null, null, openAiBatchId, 0, now, null, null, now, now
+                null, null, summaryBatchId, 0, now, null, null, now, now
         );
     }
 

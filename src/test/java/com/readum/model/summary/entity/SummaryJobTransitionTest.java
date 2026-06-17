@@ -32,7 +32,7 @@ class SummaryJobTransitionTest {
         job.startBatchBuilding("owner-1", LocalDateTime.now().plusMinutes(5));
         job.markSubmitted(42L);
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUBMITTED);
-        assertThat(job.getOpenAiBatchId()).isEqualTo(42L);
+        assertThat(job.getSummaryBatchId()).isEqualTo(42L);
         assertThat(job.getLockOwner()).isNull();
         assertThat(job.getLockedUntil()).isNull();
         assertThat(job.isOwnedBy("owner-1")).isFalse();

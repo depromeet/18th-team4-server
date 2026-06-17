@@ -18,7 +18,7 @@ import java.util.UUID;
 
 /**
  * 동기(수동) 감상문 생성 워커. 트랜잭션 없이, 각 트랜잭션 단계(SummaryJobLifecycleService)를
- * 순서대로 호출하고 그 사이(트랜잭션 밖)에서 OpenAI 를 부른다.
+ * 순서대로 호출하고 그 사이(트랜잭션 밖)에서 외부 AI(현재 OpenAI)를 부른다.
  * SYNC 모드 작업만 선점한다 — BATCH 모드는 별도 builder 가 처리한다.
  * 실패 분류: quota/burst 429 → 재시도 / 4xx → 즉시 FAILED / 5xx·기타 → 재시도.
  */

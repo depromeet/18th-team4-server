@@ -3,7 +3,7 @@ package com.readum.domain.summary.dto;
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 
 /**
- * OpenAI Batch API 결과를 customId 단위로 파싱한 항목.
+ * 배치 제공자 결과를 customId 단위로 파싱한 항목.
  * result != null 이면 성공, failed == true 이면 실패.
  */
 public record SummaryBatchResultItem(

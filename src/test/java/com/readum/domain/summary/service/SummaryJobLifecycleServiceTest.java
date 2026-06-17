@@ -11,12 +11,12 @@ import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
-import com.readum.model.summary.entity.OpenAiBatch;
-import com.readum.model.summary.entity.OpenAiBatchFixture;
+import com.readum.model.summary.entity.SummaryBatch;
+import com.readum.model.summary.entity.SummaryBatchFixture;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.summary.entity.SummaryJobFixture;
-import com.readum.model.summary.repository.OpenAiBatchRepository;
+import com.readum.model.summary.repository.SummaryBatchRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ class SummaryJobLifecycleServiceTest {
     @Mock private AiChatSessionRepository aiChatSessionRepository;
     @Mock private AiChatMessageRepository aiChatMessageRepository;
     @Mock private SummaryRepository summaryRepository;
-    @Mock private OpenAiBatchRepository openAiBatchRepository;
+    @Mock private SummaryBatchRepository summaryBatchRepository;
     @Mock private SummaryJobProperties properties;
 
     @InjectMocks private SummaryJobLifecycleService summaryJobLifecycleService;
@@ -243,32 +243,32 @@ class SummaryJobLifecycleServiceTest {
     // ─── recordSubmission ─────────────────────────────────────────────────────
 
     @Test
-    void recordSubmission_은_openAiBatch를_저장하고_소유권_일치_작업을_SUBMITTED로_전이한다() {
+    void recordSubmission_은_summaryBatch를_저장하고_소유권_일치_작업을_SUBMITTED로_전이한다() {
         SummaryJob job1 = SummaryJobFixture.persistedBatchBuilding(30L, 1L, "owner-s", LocalDateTime.now().plusMinutes(5));
         SummaryJob job2 = SummaryJobFixture.persistedBatchBuilding(31L, 2L, "owner-s", LocalDateTime.now().plusMinutes(5));
-        OpenAiBatch savedBatch = OpenAiBatchFixture.submitted(99L, "batch_X", 2);
-        given(openAiBatchRepository.save(any(OpenAiBatch.class))).willReturn(savedBatch);
+        SummaryBatch savedBatch = SummaryBatchFixture.submitted(99L, "batch_X", 2);
+        given(summaryBatchRepository.save(any(SummaryBatch.class))).willReturn(savedBatch);
         given(summaryJobRepository.findByIdForUpdate(30L)).willReturn(Optional.of(job1));
         given(summaryJobRepository.findByIdForUpdate(31L)).willReturn(Optional.of(job2));
 
         summaryJobLifecycleService.recordSubmission(List.of(30L, 31L), "owner-s", "batch_X", "file_in_1");
 
-        ArgumentCaptor<OpenAiBatch> batchCaptor = ArgumentCaptor.forClass(OpenAiBatch.class);
-        verify(openAiBatchRepository).save(batchCaptor.capture());
+        ArgumentCaptor<SummaryBatch> batchCaptor = ArgumentCaptor.forClass(SummaryBatch.class);
+        verify(summaryBatchRepository).save(batchCaptor.capture());
         assertThat(batchCaptor.getValue().getJobCount()).isEqualTo(2);
 
         assertThat(job1.getStatus()).isEqualTo(SummaryJob.Status.SUBMITTED);
-        assertThat(job1.getOpenAiBatchId()).isEqualTo(99L);
+        assertThat(job1.getSummaryBatchId()).isEqualTo(99L);
         assertThat(job2.getStatus()).isEqualTo(SummaryJob.Status.SUBMITTED);
-        assertThat(job2.getOpenAiBatchId()).isEqualTo(99L);
+        assertThat(job2.getSummaryBatchId()).isEqualTo(99L);
     }
 
     @Test
     void recordSubmission_은_소유권_불일치_작업은_건드리지_않는다() {
         SummaryJob ownedJob = SummaryJobFixture.persistedBatchBuilding(32L, 1L, "owner-s", LocalDateTime.now().plusMinutes(5));
         SummaryJob otherJob = SummaryJobFixture.persistedBatchBuilding(33L, 2L, "other-owner", LocalDateTime.now().plusMinutes(5));
-        OpenAiBatch savedBatch = OpenAiBatchFixture.submitted(100L, "batch_Y", 1);
-        given(openAiBatchRepository.save(any(OpenAiBatch.class))).willReturn(savedBatch);
+        SummaryBatch savedBatch = SummaryBatchFixture.submitted(100L, "batch_Y", 1);
+        given(summaryBatchRepository.save(any(SummaryBatch.class))).willReturn(savedBatch);
         given(summaryJobRepository.findByIdForUpdate(32L)).willReturn(Optional.of(ownedJob));
         given(summaryJobRepository.findByIdForUpdate(33L)).willReturn(Optional.of(otherJob));
 
@@ -276,7 +276,7 @@ class SummaryJobLifecycleServiceTest {
 
         assertThat(ownedJob.getStatus()).isEqualTo(SummaryJob.Status.SUBMITTED);
         assertThat(otherJob.getStatus()).isEqualTo(SummaryJob.Status.BATCH_BUILDING); // 변하지 않음
-        assertThat(otherJob.getOpenAiBatchId()).isNull();
+        assertThat(otherJob.getSummaryBatchId()).isNull();
     }
 
     // ─── releaseBuilding ──────────────────────────────────────────────────────
@@ -374,7 +374,7 @@ class SummaryJobLifecycleServiceTest {
 
     @Test
     void applyBatchResult_는_작업이_다른_batch_소속이면_건너뛴다() {
-        // 준비: openAiBatchId=99 인 SUBMITTED 작업 — batchEntityId=1 로 호출하면 소속 불일치
+        // 준비: summaryBatchId=99 인 SUBMITTED 작업 — batchEntityId=1 로 호출하면 소속 불일치
         SummaryJob job = SummaryJobFixture.persistedSubmitted(55L, 6L, 99L);
         given(summaryJobRepository.findByIdForUpdate(55L)).willReturn(Optional.of(job));
 
@@ -408,17 +408,17 @@ class SummaryJobLifecycleServiceTest {
 
     @Test
     void failBatch_는_batch를_FAILED로_바꾸고_SUBMITTED작업을_재시도한다() {
-        OpenAiBatch batch = OpenAiBatchFixture.submitted(30L, "batch_F", 1);
+        SummaryBatch batch = SummaryBatchFixture.submitted(30L, "batch_F", 1);
         SummaryJob job = SummaryJobFixture.persistedSubmitted(60L, 10L, 30L); // attemptCount=0
-        given(openAiBatchRepository.findById(30L)).willReturn(Optional.of(batch));
-        given(summaryJobRepository.findByOpenAiBatchIdAndStatus(30L, SummaryJob.Status.SUBMITTED))
+        given(summaryBatchRepository.findById(30L)).willReturn(Optional.of(batch));
+        given(summaryJobRepository.findBySummaryBatchIdAndStatus(30L, SummaryJob.Status.SUBMITTED))
                 .willReturn(List.of(job));
         given(properties.maxAttempts()).willReturn(5); // 0+1 < 5 → 재시도 가능
         given(properties.nextAttemptFrom(any(), anyInt())).willReturn(LocalDateTime.now().plusMinutes(3));
 
         summaryJobLifecycleService.failBatch(30L);
 
-        assertThat(batch.getStatus()).isEqualTo(OpenAiBatch.Status.FAILED);
+        assertThat(batch.getStatus()).isEqualTo(SummaryBatch.Status.FAILED);
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
         assertThat(job.getAttemptCount()).isEqualTo(1);
         assertThat(job.getLastErrorCode()).isEqualTo("BATCH_FAILED");
@@ -426,16 +426,16 @@ class SummaryJobLifecycleServiceTest {
 
     @Test
     void failBatch_는_시도상한_초과시_작업을_FAILED로_만든다() {
-        OpenAiBatch batch = OpenAiBatchFixture.submitted(31L, "batch_G", 1);
+        SummaryBatch batch = SummaryBatchFixture.submitted(31L, "batch_G", 1);
         SummaryJob job = SummaryJobFixture.persistedSubmitted(61L, 11L, 31L); // attemptCount=0
-        given(openAiBatchRepository.findById(31L)).willReturn(Optional.of(batch));
-        given(summaryJobRepository.findByOpenAiBatchIdAndStatus(31L, SummaryJob.Status.SUBMITTED))
+        given(summaryBatchRepository.findById(31L)).willReturn(Optional.of(batch));
+        given(summaryJobRepository.findBySummaryBatchIdAndStatus(31L, SummaryJob.Status.SUBMITTED))
                 .willReturn(List.of(job));
         given(properties.maxAttempts()).willReturn(1); // 0+1 < 1 → false → 상한 초과
 
         summaryJobLifecycleService.failBatch(31L);
 
-        assertThat(batch.getStatus()).isEqualTo(OpenAiBatch.Status.FAILED);
+        assertThat(batch.getStatus()).isEqualTo(SummaryBatch.Status.FAILED);
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.FAILED);
         assertThat(job.getLastErrorCode()).isEqualTo("BATCH_FAILED");
     }
@@ -461,12 +461,12 @@ class SummaryJobLifecycleServiceTest {
 
     @Test
     void completeBatch_는_배치를_COMPLETED로_전이한다() {
-        OpenAiBatch batch = OpenAiBatchFixture.submitted(20L, "batch_Z", 2);
-        given(openAiBatchRepository.findById(20L)).willReturn(Optional.of(batch));
+        SummaryBatch batch = SummaryBatchFixture.submitted(20L, "batch_Z", 2);
+        given(summaryBatchRepository.findById(20L)).willReturn(Optional.of(batch));
 
         summaryJobLifecycleService.completeBatch(20L, "file_out", "file_err");
 
-        assertThat(batch.getStatus()).isEqualTo(OpenAiBatch.Status.COMPLETED);
+        assertThat(batch.getStatus()).isEqualTo(SummaryBatch.Status.COMPLETED);
         assertThat(batch.getOutputFileId()).isEqualTo("file_out");
     }
 

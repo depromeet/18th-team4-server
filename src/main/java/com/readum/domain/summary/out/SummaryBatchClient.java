@@ -6,7 +6,7 @@ import com.readum.domain.summary.dto.SummaryBatchResultItem;
 import java.util.List;
 
 /**
- * OpenAI Batch API 연동 Port.
+ * 외부 배치 제공자(현재 OpenAI) 연동 Port.
  * 구현체({@code SummaryBatchClientImpl})는 infrastructure 계층에 둔다.
  */
 public interface SummaryBatchClient {
@@ -20,13 +20,13 @@ public interface SummaryBatchClient {
     /** 완료된 batch 의 결과를 customId 단위로 파싱해 반환한다. */
     List<SummaryBatchResultItem> fetchResults(BatchStatus status);
 
-    /** 제출 결과 식별자. batchId = OpenAI batch 식별자, inputFileId = 업로드된 입력 파일 식별자. */
+    /** 제출 결과 식별자. batchId = 제공자 batch 식별자, inputFileId = 업로드된 입력 파일 식별자. */
     record BatchSubmission(String batchId, String inputFileId) {}
 
     /** batch 처리 상태 스냅샷. */
     record BatchStatus(String batchId, State state, String outputFileId, String errorFileId) {
 
-        /** OpenAI batch 처리 상태. */
+        /** batch 처리 상태. */
         public enum State {
             /** 처리 진행 중. */
             RUNNING,

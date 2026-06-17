@@ -21,7 +21,7 @@ import java.time.LocalDateTime;
  * 감상문 생성 작업 큐의 한 행. "이 세션은 감상문을 만들어야 한다" 는 의도를 영속화한다.
  * 작업은 잃으면 복구 불가하므로 DB 에 영속한다.
  * 상태: PENDING(처리 대기) → PROCESSING(동기 워커 점유) / BATCH_BUILDING(builder 청크 점유)
- *   → SUBMITTED(OpenAI Batch 제출 완료) → SUCCEEDED / FAILED.
+ *   → SUBMITTED(배치 제출 완료) → SUCCEEDED / FAILED.
  * active_session_id: 미완료(PENDING/PROCESSING/BATCH_BUILDING/SUBMITTED) 동안만 세션 id, 완료/실패 시 NULL.
  *   → unique 제약으로 "세션당 활성 작업 1개" 를 보장한다.
  */
@@ -73,8 +73,8 @@ public class SummaryJob {
     @Column(name = "locked_until")
     private LocalDateTime lockedUntil;
 
-    @Column(name = "open_ai_batch_id")
-    private Long openAiBatchId;
+    @Column(name = "summary_batch_id")
+    private Long summaryBatchId;
 
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount;
@@ -119,10 +119,10 @@ public class SummaryJob {
         this.updatedAt = LocalDateTime.now();
     }
 
-    /** OpenAI 제출 성공 — SUBMITTED. 점유 해제(워커가 들고 있지 않음), batch 연결. */
-    public void markSubmitted(Long openAiBatchId) {
+    /** 배치 제출 성공 — SUBMITTED. 점유 해제(워커가 들고 있지 않음), batch 연결. */
+    public void markSubmitted(Long summaryBatchId) {
         this.status = Status.SUBMITTED;
-        this.openAiBatchId = openAiBatchId;
+        this.summaryBatchId = summaryBatchId;
         this.lockOwner = null;
         this.lockedUntil = null;
         this.updatedAt = LocalDateTime.now();
@@ -138,7 +138,7 @@ public class SummaryJob {
         this.activeSessionId = null;
         this.lockOwner = null;
         this.lockedUntil = null;
-        this.openAiBatchId = null;
+        this.summaryBatchId = null;
         this.updatedAt = LocalDateTime.now();
     }
 
@@ -148,7 +148,7 @@ public class SummaryJob {
         this.attemptCount += 1;
         this.lockOwner = null;
         this.lockedUntil = null;
-        this.openAiBatchId = null;
+        this.summaryBatchId = null;
         this.nextAttemptAt = nextAttemptAt;
         this.lastErrorCode = errorCode;
         this.lastErrorMessage = errorMessage;
@@ -161,7 +161,7 @@ public class SummaryJob {
         this.activeSessionId = null;
         this.lockOwner = null;
         this.lockedUntil = null;
-        this.openAiBatchId = null;
+        this.summaryBatchId = null;
         this.lastErrorCode = errorCode;
         this.lastErrorMessage = errorMessage;
         this.updatedAt = LocalDateTime.now();
@@ -172,7 +172,7 @@ public class SummaryJob {
         this.status = Status.PENDING;
         this.lockOwner = null;
         this.lockedUntil = null;
-        this.openAiBatchId = null;
+        this.summaryBatchId = null;
         this.nextAttemptAt = now;
         this.updatedAt = LocalDateTime.now();
     }

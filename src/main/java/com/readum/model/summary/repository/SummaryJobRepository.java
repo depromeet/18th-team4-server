@@ -72,7 +72,7 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
      *   워커가 아직 작업을 집어가지 않은 시간에도 새 메시지가 끼어들면 안 된다 → SYNC+PENDING 은 차단.
      *   자동(BATCH) PENDING 은 builder 가 스냅샷을 찍는 BATCH_BUILDING 시점까지 메시지를 포함하는 설계이므로 차단하지 않는다.
      * - 유효 점유(lockedUntil > now) 상태의 PROCESSING 또는 BATCH_BUILDING
-     * - 또는 SUBMITTED (OpenAI Batch 에 제출되어 결과를 기다리는 중)
+     * - 또는 SUBMITTED (배치에 제출되어 결과를 기다리는 중)
      */
     @Query("""
             select case when count(summaryJob) > 0 then true else false end
@@ -112,5 +112,5 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
     boolean existsByActiveSessionId(Long activeSessionId);
 
     /** batch 전체 실패 시 해당 batch 에 묶인 SUBMITTED 작업 목록 조회 — 재큐 대상. */
-    List<SummaryJob> findByOpenAiBatchIdAndStatus(Long openAiBatchId, SummaryJob.Status status);
+    List<SummaryJob> findBySummaryBatchIdAndStatus(Long summaryBatchId, SummaryJob.Status status);
 }
