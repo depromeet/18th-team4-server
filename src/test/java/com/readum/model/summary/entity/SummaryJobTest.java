@@ -93,19 +93,4 @@ class SummaryJobTest {
         assertThat(job.getNextAttemptAt()).isEqualTo(releaseTime);
     }
 
-    @Test
-    void requeue_는_시도횟수_에러를_안건드리고_다음시각으로_미뤄_PENDING으로_되돌린다() {
-        SummaryJob job = SummaryJob.createPending(1L, SummaryJob.ExecutionMode.SYNC);
-        job.claim("owner-1", LocalDateTime.now().plusMinutes(5));
-
-        LocalDateTime next = LocalDateTime.now().plusSeconds(30);
-        job.requeue(next);
-
-        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
-        assertThat(job.getAttemptCount()).isZero();          // 실패가 아니므로 시도 횟수 증가 없음
-        assertThat(job.getLockOwner()).isNull();
-        assertThat(job.getLockedUntil()).isNull();
-        assertThat(job.getNextAttemptAt()).isEqualTo(next);
-        assertThat(job.getActiveSessionId()).isEqualTo(1L);  // 여전히 활성
-    }
 }

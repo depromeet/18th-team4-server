@@ -35,7 +35,8 @@ class SummaryJobRepositoryTest {
                 SummaryJobFixture.persistedPending(null, nextSessionId(), now.plusMinutes(10)));
 
         List<SummaryJob> claimable =
-                summaryJobRepository.findClaimable(SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
+                summaryJobRepository.findClaimable(
+                        SummaryJob.ExecutionMode.SYNC, SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
 
         assertThat(claimable).extracting(SummaryJob::getId).contains(ready.getId());
         assertThat(claimable).allMatch(job -> !job.getNextAttemptAt().isAfter(now));
@@ -93,7 +94,8 @@ class SummaryJobRepositoryTest {
         summaryJobRepository.save(SummaryJobFixture.persistedPending(null, earlierSession, now.minusSeconds(60)));
 
         List<SummaryJob> claimable =
-                summaryJobRepository.findClaimable(SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
+                summaryJobRepository.findClaimable(
+                        SummaryJob.ExecutionMode.SYNC, SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
 
         List<Long> sessionOrder = claimable.stream().map(SummaryJob::getAiChatSessionId).toList();
         assertThat(sessionOrder.indexOf(earlierSession)).isLessThan(sessionOrder.indexOf(laterSession));
