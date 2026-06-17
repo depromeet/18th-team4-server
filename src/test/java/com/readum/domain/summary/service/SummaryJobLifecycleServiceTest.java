@@ -10,6 +10,7 @@ import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.summary.entity.SummaryJobFixture;
+import com.readum.model.summary.repository.OpenAiBatchRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,7 @@ class SummaryJobLifecycleServiceTest {
     @Mock private AiChatSessionRepository aiChatSessionRepository;
     @Mock private AiChatMessageRepository aiChatMessageRepository;
     @Mock private SummaryRepository summaryRepository;
+    @Mock private OpenAiBatchRepository openAiBatchRepository;
     @Mock private SummaryJobProperties properties;
 
     @InjectMocks private SummaryJobLifecycleService summaryJobLifecycleService;

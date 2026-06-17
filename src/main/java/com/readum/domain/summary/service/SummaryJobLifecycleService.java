@@ -2,13 +2,16 @@ package com.readum.domain.summary.service;
 
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.summary.config.SummaryJobProperties;
+import com.readum.domain.summary.dto.SummaryBatchBuildItem;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.entity.OpenAiBatch;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.entity.SummaryJob;
+import com.readum.model.summary.repository.OpenAiBatchRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +20,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -34,6 +39,7 @@ public class SummaryJobLifecycleService {
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final SummaryRepository summaryRepository;
+    private final OpenAiBatchRepository openAiBatchRepository;
     private final SummaryJobProperties properties;
 
     /**
@@ -127,6 +133,64 @@ public class SummaryJobLifecycleService {
             job.scheduleRetry(nextAttemptAt, errorCode, errorMessage);
         } else {
             job.markFailed(errorCode, errorMessage);
+        }
+    }
+
+    /**
+     * BATCH PENDING 작업을 maxJobs 만큼 후보로 선점(BATCH_BUILDING)하고 빌드 아이템 리스트를 반환한다.
+     * 세션이 없거나 ACTIVE 가 아니면 해당 작업을 성공 처리하고 목록에서 제외한다(대화가 없으니 생성 불필요).
+     */
+    @Transactional
+    public List<SummaryBatchBuildItem> claimBatchChunk(String owner, int maxJobs, Duration buildLease) {
+        LocalDateTime now = LocalDateTime.now();
+        List<SummaryJob> candidates = summaryJobRepository.findClaimableBatch(
+                now, PageRequest.of(0, maxJobs));
+        List<SummaryBatchBuildItem> buildItems = new ArrayList<>();
+        for (SummaryJob job : candidates) {
+            AiChatSession session = aiChatSessionRepository.findByIdForUpdate(
+                    job.getAiChatSessionId()).orElse(null);
+            if (session == null || session.getStatus() != AiChatSession.Status.ACTIVE) {
+                // 종료/부재 세션은 생성 불필요 — 무해 종료
+                job.markSucceeded();
+                continue;
+            }
+            job.startBatchBuilding(owner, now.plus(buildLease));
+            List<AiChatMessage> messages =
+                    aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(session.getId());
+            buildItems.add(new SummaryBatchBuildItem(
+                    job.getId(), job.getAiChatSessionId(), session.getUserBookId(), messages));
+        }
+        return buildItems;
+    }
+
+    /**
+     * 제출 성공 기록 — openai_batch 행을 저장하고, 이 owner 가 점유 중인 작업들을 SUBMITTED 로 전이한다.
+     * isOwnedBy 펜싱: lease 만료로 회수된 작업은 소유권 불일치로 건너뛴다.
+     */
+    @Transactional
+    public void recordSubmission(List<Long> jobIds, String owner, String batchId, String inputFileId) {
+        OpenAiBatch batch = openAiBatchRepository.save(
+                OpenAiBatch.createSubmitted(batchId, inputFileId, jobIds.size()));
+        for (Long jobId : jobIds) {
+            SummaryJob job = summaryJobRepository.findByIdForUpdate(jobId).orElse(null);
+            if (job != null && job.isOwnedBy(owner)) {
+                job.markSubmitted(batch.getId());
+            }
+        }
+    }
+
+    /**
+     * 제출 실패 시 BATCH_BUILDING 점유를 PENDING 으로 되돌린다(시도 횟수 미증가 — 재청킹 대상).
+     * isOwnedBy 펜싱: 이미 회수된 작업은 건드리지 않는다.
+     */
+    @Transactional
+    public void releaseBuilding(List<Long> jobIds, String owner) {
+        LocalDateTime now = LocalDateTime.now();
+        for (Long jobId : jobIds) {
+            SummaryJob job = summaryJobRepository.findByIdForUpdate(jobId).orElse(null);
+            if (job != null && job.isOwnedBy(owner)) {
+                job.releaseAfterOrphan(now);
+            }
         }
     }
 

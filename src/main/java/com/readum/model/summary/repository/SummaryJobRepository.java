@@ -85,6 +85,24 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
             """)
     boolean existsBlockingSummaryJob(@Param("sessionId") Long sessionId, @Param("now") LocalDateTime now);
 
+    /**
+     * BATCH 모드 PENDING 작업을 여러 건 선점 후보로 조회한다.
+     * PESSIMISTIC_WRITE + lock timeout -2(Hibernate SKIP LOCKED): 다른 builder 가 이미 잠근 행은 건너뛴다.
+     * maxJobsPerBatch 만큼을 한 번에 선점해 토큰 예산 청킹에 넘긴다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
+    @Query("""
+            select summaryJob
+              from SummaryJob summaryJob
+             where summaryJob.executionMode = com.readum.model.summary.entity.SummaryJob.ExecutionMode.BATCH
+               and summaryJob.status = com.readum.model.summary.entity.SummaryJob.Status.PENDING
+               and summaryJob.nextAttemptAt <= :now
+             order by summaryJob.nextAttemptAt asc
+                    , summaryJob.id asc
+            """)
+    List<SummaryJob> findClaimableBatch(@Param("now") LocalDateTime now, Pageable pageable);
+
     /** 세션에 미완료(활성) 작업이 이미 있는지 — 적재 멱등성 사전 확인용. */
     boolean existsByActiveSessionId(Long activeSessionId);
 }

@@ -2,6 +2,7 @@ package com.readum.domain.summary.service;
 
 import com.readum.model.summary.entity.SummaryJob;
 import com.readum.model.summary.entity.SummaryJobFixture;
+import com.readum.model.summary.repository.OpenAiBatchRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,13 +23,14 @@ class SummaryJobLifecycleServiceReapTest {
     @Mock private com.readum.model.aiChat.repository.AiChatSessionRepository aiChatSessionRepository;
     @Mock private com.readum.model.aiChat.repository.AiChatMessageRepository aiChatMessageRepository;
     @Mock private com.readum.model.summary.repository.SummaryRepository summaryRepository;
+    @Mock private OpenAiBatchRepository openAiBatchRepository;
     @Mock private com.readum.domain.summary.config.SummaryJobProperties properties;
 
     @Test
     void reclaimOrphans_는_PROCESSING_고아를_PENDING으로_되돌린다() {
         SummaryJobLifecycleService service = new SummaryJobLifecycleService(
                 summaryJobRepository, aiChatSessionRepository, aiChatMessageRepository,
-                summaryRepository, properties);
+                summaryRepository, openAiBatchRepository, properties);
         SummaryJob orphan = SummaryJobFixture.persistedProcessing(
                 10L, 1L, "dead", LocalDateTime.now().minusMinutes(1));
         given(summaryJobRepository.findOrphaned(any(), any())).willReturn(List.of(orphan));
@@ -44,7 +46,7 @@ class SummaryJobLifecycleServiceReapTest {
     void reclaimOrphans_는_BATCH_BUILDING_고아도_PENDING으로_되돌린다() {
         SummaryJobLifecycleService service = new SummaryJobLifecycleService(
                 summaryJobRepository, aiChatSessionRepository, aiChatMessageRepository,
-                summaryRepository, properties);
+                summaryRepository, openAiBatchRepository, properties);
         SummaryJob batchOrphan = SummaryJobFixture.persistedBatchBuilding(
                 20L, 2L, "dead-builder", LocalDateTime.now().minusMinutes(1));
         given(summaryJobRepository.findOrphaned(any(), any())).willReturn(List.of(batchOrphan));
