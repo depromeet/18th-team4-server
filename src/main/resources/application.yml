@@ -85,6 +85,17 @@ summary-job:
   base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
   reserved-output-tokens: 1024  # 토큰 추정 시 호출당 예약 출력 토큰(batch 청킹에서도 재사용)
 
+# 감상문 Batch builder·collector 비즈니스 룰.
+# 정적 보장: builder-concurrency × chunk-token-limit × 안전계수 ≤ 계정 enqueued-token 한도 - 마진
+# 위 값(2 × 1,500,000 = 3,000,000)은 운영 계정 한도에 맞춰 조정할 것.
+summary-batch:
+  builder-concurrency: 2
+  chunk-token-limit: 1500000      # 청크당 토큰 안전 상한
+  max-jobs-per-batch: 500
+  submit-interval-ms: 5000
+  collect-interval-ms: 60000
+  build-lease-seconds: 300        # BATCH_BUILDING 점유 시한(업로드+제출 최악 소요 초과)
+
 # OpenAI Batch API 어댑터 설정. api-key 는 환경변수로, model·base-url·completion-window·request-timeout 은 application.yml 기본값.
 openai-batch:
   api-key: ${OPENAI_API_KEY}

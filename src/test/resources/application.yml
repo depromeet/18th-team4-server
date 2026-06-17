@@ -73,3 +73,11 @@ openai-batch:
   base-url: https://api.openai.com/v1
   completion-window: 24h
   request-timeout: PT60S
+
+summary-batch:
+  builder-concurrency: 2
+  chunk-token-limit: 1500000
+  max-jobs-per-batch: 500
+  submit-interval-ms: 5000
+  collect-interval-ms: 60000
+  build-lease-seconds: 300
