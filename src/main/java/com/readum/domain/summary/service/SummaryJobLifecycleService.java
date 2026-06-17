@@ -140,6 +140,20 @@ public class SummaryJobLifecycleService {
     }
 
     /**
+     * 페이싱 backpressure(예산 미확보) 또는 burst 429 로 호출을 못 보낸 작업을,
+     * 시도 횟수 미증가(무벌점)로 PENDING 에 되돌린다. 소유권 펜싱으로 회수된 작업은 건드리지 않는다.
+     */
+    @Transactional
+    public void releaseWithoutPenalty(Long jobId, String owner) {
+        SummaryJob job = summaryJobRepository.findByIdForUpdate(jobId).orElse(null);
+        if (job == null || !job.isOwnedBy(owner)) {
+            log.warn("감상문 무벌점 반납 소유권 상실 jobId={}", jobId);
+            return;
+        }
+        job.releaseAfterOrphan(LocalDateTime.now());
+    }
+
+    /**
      * BATCH PENDING 작업을 maxJobs 만큼 후보로 선점(BATCH_BUILDING)하고 빌드 아이템 리스트를 반환한다.
      * 세션이 없거나 ACTIVE 가 아니면 해당 작업을 성공 처리하고 목록에서 제외한다(대화가 없으니 생성 불필요).
      * <p>

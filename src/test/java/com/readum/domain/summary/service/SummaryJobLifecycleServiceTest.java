@@ -457,6 +457,33 @@ class SummaryJobLifecycleServiceTest {
         assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.SUCCEEDED);
     }
 
+    // ─── releaseWithoutPenalty ────────────────────────────────────────────────
+
+    @Test
+    void 무벌점_반납은_시도_횟수를_올리지_않고_PENDING_으로_되돌린다() {
+        String owner = java.util.UUID.randomUUID().toString();
+        SummaryJob job = SummaryJob.createPending(10L, SummaryJob.ExecutionMode.SYNC);
+        job.claim(owner, java.time.LocalDateTime.now().plusMinutes(5));
+        int before = job.getAttemptCount();
+        given(summaryJobRepository.findByIdForUpdate(1L)).willReturn(Optional.of(job));
+
+        summaryJobLifecycleService.releaseWithoutPenalty(1L, owner);
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PENDING);
+        assertThat(job.getAttemptCount()).isEqualTo(before);
+    }
+
+    @Test
+    void 무벌점_반납은_소유권이_다르면_아무것도_하지_않는다() {
+        SummaryJob job = SummaryJob.createPending(10L, SummaryJob.ExecutionMode.SYNC);
+        job.claim("real-owner", java.time.LocalDateTime.now().plusMinutes(5));
+        given(summaryJobRepository.findByIdForUpdate(1L)).willReturn(Optional.of(job));
+
+        summaryJobLifecycleService.releaseWithoutPenalty(1L, "other-owner");
+
+        assertThat(job.getStatus()).isEqualTo(SummaryJob.Status.PROCESSING);
+    }
+
     // ─── completeBatch ────────────────────────────────────────────────────────
 
     @Test

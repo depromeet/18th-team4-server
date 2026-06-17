@@ -167,7 +167,7 @@ public class SummaryJob {
         this.updatedAt = LocalDateTime.now();
     }
 
-    /** 회수기 전용 — lease 만료된 고아를 즉시 재선점 가능한 PENDING 으로 되돌린다. */
+    /** 무벌점 반납 — lease 만료 회수(reaper) 또는 페이싱 backpressure 시, 시도 횟수 미증가로 즉시 재선점 가능한 PENDING 으로 되돌린다. */
     public void releaseAfterOrphan(LocalDateTime now) {
         this.status = Status.PENDING;
         this.lockOwner = null;
