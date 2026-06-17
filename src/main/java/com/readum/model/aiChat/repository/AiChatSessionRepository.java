@@ -13,6 +13,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -53,6 +54,9 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, Lo
 
     /** 한 권(userBook)에 속한 모든 채팅 세션 — 책별 세션 목록 합성용. */
     List<AiChatSession> findByUserBookId(Long userBookId);
+
+    /** 여러 등록 도서(userBook)에 속한 모든 채팅 세션 — 홈 캘린더(전체 책 범위) 합성용. */
+    List<AiChatSession> findByUserBookIdIn(Collection<Long> userBookIds);
 
     /**
      * 특정 userBook 의 채팅 세션 목록 페이지 조회.

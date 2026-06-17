@@ -270,6 +270,26 @@ class AiChatSessionRepositoryTest {
         assertThat(targets).containsExactly(eligible.getId());
     }
 
+    @Test
+    @DisplayName("findByUserBookIdIn: 조회 범위에 든 userBook 들의 세션만 모두 반환한다")
+    void findByUserBookIdIn_여러_책의_세션() {
+        Long userId = nextUserId();
+        UserBook bookA = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        UserBook bookB = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        UserBook bookC = userBookRepository.save(UserBook.create(userId, nextBookId()));
+
+        AiChatSession a1 = saveSession(bookA.getId(), AiChatSession.Status.ACTIVE, "a1");
+        AiChatSession a2 = saveSession(bookA.getId(), AiChatSession.Status.ACTIVE, "a2");
+        AiChatSession b1 = saveSession(bookB.getId(), AiChatSession.Status.ACTIVE, "b1");
+        saveSession(bookC.getId(), AiChatSession.Status.ACTIVE, "c1"); // 조회 범위 밖
+
+        java.util.List<AiChatSession> sessions = aiChatSessionRepository.findByUserBookIdIn(
+                java.util.List.of(bookA.getId(), bookB.getId()));
+
+        assertThat(sessions).extracting(AiChatSession::getId)
+                .containsExactlyInAnyOrder(a1.getId(), a2.getId(), b1.getId());
+    }
+
     private AiChatSession saveSessionWithTokens(Long userBookId, AiChatSession.Status status, int tokens) {
         AiChatSession session = AiChatSession.create(userBookId);
         if (tokens > 0) {
