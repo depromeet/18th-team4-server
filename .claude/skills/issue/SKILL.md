@@ -248,6 +248,7 @@ git switch -c <type>/#<N>-<슬러그>
 - 템플릿 무시한 자유 형식 / 영문 섹션 헤더 / 빈 placeholder 줄 방치.
 - 라벨을 템플릿 소문자 값(`task`)으로 지정 → 실제 라벨(`Task`) 불일치.
 - 모호한 용어·추상 영어 jargon (CLAUDE.md 어휘 규칙 위반).
+- 표준 기술 용어를 임의 의역/조어로 바꾸기 (token bucket→"양동이", rate limiter→"페이서", "무벌점 반납", "owner 펜싱" 류) — 표준어 + 한 줄 풀이로 (`pr` 스킬 어휘 가이드 "둘째 실패 모드" 표 참조).
 - 리팩토링/비기능을 user-story 로 등록 (→ task + `Chore`).
 - 이슈 제목에 `feat(scope):` commit prefix 부착.
 - 브랜치 이름에서 `#N` 누락 → `pr` 스킬이 `closes #N` 추출 실패.
