@@ -19,7 +19,7 @@ class EnqueueSummaryJobServiceIntegrationTest {
 
     @Test
     void 같은_세션을_두번_적재해도_예외없이_작업은_하나만_생긴다() {
-        long sessionId = 730_001L;
+        long sessionId = System.nanoTime();
         try {
             enqueueSummaryJobService.execute(sessionId);
             assertThatCode(() -> enqueueSummaryJobService.execute(sessionId)).doesNotThrowAnyException();

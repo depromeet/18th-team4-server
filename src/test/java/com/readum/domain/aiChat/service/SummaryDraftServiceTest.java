@@ -5,6 +5,7 @@ import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.summary.dto.EnqueueSummaryJobResult;
 import com.readum.domain.summary.service.EnqueueSummaryJobService;
 import com.readum.model.aiChat.entity.AiChatSession;
@@ -87,7 +88,9 @@ class SummaryDraftServiceTest {
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(UnauthorizedException.class);
+                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
+                .extracting(UnauthorizedException::getErrorCode)
+                .isEqualTo(UserErrorCode.INVALID_SESSION);
         verify(enqueueSummaryJobService, never()).execute(anyLong());
     }
 
@@ -98,7 +101,9 @@ class SummaryDraftServiceTest {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(NotFoundException.class);
+                .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
+                .extracting(NotFoundException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
         verify(enqueueSummaryJobService, never()).execute(anyLong());
     }
 
@@ -111,7 +116,9 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(NotFoundException.class);
+                .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
+                .extracting(NotFoundException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
         verify(enqueueSummaryJobService, never()).execute(anyLong());
     }
 
@@ -127,7 +134,9 @@ class SummaryDraftServiceTest {
                 .given(summaryDraftPolicy).assertEligible(session);
 
         assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
-                .isInstanceOf(ConflictException.class);
+                .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
+                .extracting(ConflictException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
         verify(enqueueSummaryJobService, never()).execute(anyLong());
     }
 

@@ -75,7 +75,7 @@ class SummaryJobLifecycleServiceTest {
         given(summaryJobRepository.findByIdForUpdate(10L)).willReturn(Optional.of(job));
         given(aiChatSessionRepository.findByIdForUpdate(1L)).willReturn(Optional.of(session));
 
-        summaryJobLifecycleService.recordSuccess(10L, "owner-1", 1L, new SummaryDraftResult("제목", "본문"));
+        summaryJobLifecycleService.recordSuccess(10L, "owner-1", 5L, new SummaryDraftResult("제목", "본문"));
 
         verify(summaryRepository).save(any(Summary.class));
         assertThat(session.isLocked()).isTrue();

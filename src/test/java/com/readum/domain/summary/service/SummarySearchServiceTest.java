@@ -278,7 +278,8 @@ class SummarySearchServiceTest {
 
         assertThatThrownBy(() -> summarySearchService.findMonthly(JUNE, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(UserErrorCode.INVALID_SESSION));
+                .extracting(UnauthorizedException::getErrorCode)
+                .isEqualTo(UserErrorCode.INVALID_SESSION);
     }
 
     @Test
@@ -302,7 +303,8 @@ class SummarySearchServiceTest {
 
         assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(UserErrorCode.INVALID_SESSION));
+                .extracting(UnauthorizedException::getErrorCode)
+                .isEqualTo(UserErrorCode.INVALID_SESSION);
     }
 
     @Test
@@ -312,7 +314,8 @@ class SummarySearchServiceTest {
 
         assertThatThrownBy(() -> summarySearchService.findById(99L, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND));
+                .extracting(NotFoundException::getErrorCode)
+                .isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND);
     }
 
     @Test
@@ -324,7 +327,8 @@ class SummarySearchServiceTest {
 
         assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND));
+                .extracting(NotFoundException::getErrorCode)
+                .isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND);
     }
 
     private static final Long SESSION_ID = 1000L;
@@ -356,7 +360,8 @@ class SummarySearchServiceTest {
 
         assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_IN_PROGRESS));
+                .extracting(ConflictException::getErrorCode)
+                .isEqualTo(SummaryErrorCode.SUMMARY_IN_PROGRESS);
     }
 
     @Test
@@ -370,7 +375,8 @@ class SummarySearchServiceTest {
 
         assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(SummaryErrorCode.SUMMARY_NOT_YET_CREATED));
+                .extracting(NotFoundException::getErrorCode)
+                .isEqualTo(SummaryErrorCode.SUMMARY_NOT_YET_CREATED);
     }
 
     @Test
@@ -380,6 +386,7 @@ class SummarySearchServiceTest {
 
         assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND));
+                .extracting(NotFoundException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
     }
 }
