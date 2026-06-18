@@ -31,8 +31,12 @@ public class EnqueueSummaryJobService {
             summaryJobInserter.insertPending(sessionId);
             return new EnqueueSummaryJobResult(true);
         } catch (DataIntegrityViolationException e) {
-            log.debug("감상문 작업 적재 경합 — 이미 활성 작업 존재 sessionId={}", sessionId);
-            return new EnqueueSummaryJobResult(false);
+            // unique 경합으로 확인되면 멱등 skip, 그 외 무결성 위반(FK/NOT NULL 등)은 재던져 드러낸다.
+            if (summaryJobRepository.existsByActiveSessionId(sessionId)) {
+                log.debug("감상문 작업 적재 경합 — 이미 활성 작업 존재 sessionId={}", sessionId);
+                return new EnqueueSummaryJobResult(false);
+            }
+            throw e;
         }
     }
 }
