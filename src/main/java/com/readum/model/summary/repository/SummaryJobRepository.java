@@ -82,6 +82,58 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
     boolean existsByActiveSessionId(Long activeSessionId);
 
     /**
+     * 자동 요약 대상 세션들의 작업을 집합 단위 단일 INSERT 로 한 번에 적재한다.
+     * 새벽 6시 적재를 세션마다 도는 per-row 루프(≈2N 쿼리/N 트랜잭션) 대신 1 쿼리/1 트랜잭션으로 줄인다.
+     *
+     * <p>대상 조건은 {@code AiChatSessionRepository.findAutoSummaryTargetSessionIds} 와 동일하게 맞춘다:
+     * ACTIVE + 누적 토큰 ≥ minTokens + since 이후 COMPLETED 메시지 존재.
+     * {@code NOT EXISTS(활성 작업)} 으로 중복 적재를 거르고(멱등), 그 사이 동시 적재(수동/타 인스턴스)가
+     * 먼저 행을 넣은 드문 경합은 active_session_id unique 제약 + {@code INSERT IGNORE} 가 충돌 행만 건너뛰며 흡수한다.
+     *
+     * <p>id 가 IDENTITY 라 JPQL/HQL bulk-insert 가 안 되므로 네이티브 SQL. 컬럼 값은 {@code createPending}
+     * 의 기본값(status='PENDING', attempt_count=0, 시각=:now)과 일치한다.
+     *
+     * @return 실제 적재된(insert 된) 행 수
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            insert ignore into summary_job
+                    ( ai_chat_session_id
+                    , active_session_id
+                    , status
+                    , attempt_count
+                    , next_attempt_at
+                    , created_at
+                    , updated_at )
+            select  aiChatSession.id
+                  , aiChatSession.id
+                  , 'PENDING'
+                  , 0
+                  , :now
+                  , :now
+                  , :now
+              from  ai_chat_session aiChatSession
+             where  aiChatSession.status = 'ACTIVE'
+               and  aiChatSession.accumulated_tokens >= :minTokens
+               and  exists (
+                        select 1
+                          from ai_chat_message aiChatMessage
+                         where aiChatMessage.session_id = aiChatSession.id
+                           and aiChatMessage.status = 'COMPLETED'
+                           and aiChatMessage.created_at >= :since
+                    )
+               and  not exists (
+                        select 1
+                          from summary_job summaryJob
+                         where summaryJob.active_session_id = aiChatSession.id
+                    )
+            """, nativeQuery = true)
+    int enqueuePendingForEligibleSessions(
+            @Param("minTokens") int minTokens,
+            @Param("since") LocalDateTime since,
+            @Param("now") LocalDateTime now);
+
+    /**
      * 등록 도서(UserBook) 삭제 cascade 용 — 그 도서의 세션들에 속한 작업을 일괄 삭제한다.
      * summary_job 은 userBookId 를 갖지 않으므로 세션(AiChatSession) 서브쿼리로 좁힌다.
      * 세션이 먼저 삭제되면 서브쿼리가 비므로, 반드시 세션 삭제 전에 호출한다.
