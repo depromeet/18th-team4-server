@@ -23,7 +23,7 @@ public class SummaryJobReaper {
     public void reclaim() {
         int reclaimed = summaryJobLifecycleService.reclaimOrphans(BATCH_SIZE);
         if (reclaimed > 0) {
-            log.info("멈춘 감상문 작업 회수 {}건", reclaimed);
+            log.warn("멈춘 감상문 작업 회수 {}건", reclaimed);
         }
     }
 }
