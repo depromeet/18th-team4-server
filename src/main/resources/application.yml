@@ -7,6 +7,11 @@ spring:
         log-prompt: false
         log-completion: false
         include-error-logging: true
+  # @Scheduled 3개(6시 적재 · dispatch · reaper)가 단일 스레드에서 직렬화되지 않도록 풀 분리.
+  task:
+    scheduling:
+      pool:
+        size: 3
 
 server:
   forward-headers-strategy: framework
