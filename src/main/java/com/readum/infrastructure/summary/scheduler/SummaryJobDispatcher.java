@@ -8,6 +8,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -39,15 +40,22 @@ public class SummaryJobDispatcher {
         int slots = properties.poolSize() - runningWorkers.get();
         for (int i = 0; i < slots; i++) {
             runningWorkers.incrementAndGet();
-            summaryExecutor.execute(() -> {
-                try {
-                    worker.processUntilEmpty();
-                } catch (Exception e) {
-                    log.error("감상문 워커 처리 중 오류", e);
-                } finally {
-                    runningWorkers.decrementAndGet();
-                }
-            });
+            try {
+                summaryExecutor.execute(() -> {
+                    try {
+                        worker.processUntilEmpty();
+                    } catch (Exception e) {
+                        log.error("감상문 워커 처리 중 오류", e);
+                    } finally {
+                        runningWorkers.decrementAndGet();
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                // 풀 포화로 제출 거부 — 증가시킨 카운터를 즉시 되돌리고(누수 방지) 이번 틱은 중단한다.
+                runningWorkers.decrementAndGet();
+                log.warn("감상문 워커 제출 거부 — 풀 포화, 다음 dispatch 에서 재시도", e);
+                break;
+            }
         }
     }
 }

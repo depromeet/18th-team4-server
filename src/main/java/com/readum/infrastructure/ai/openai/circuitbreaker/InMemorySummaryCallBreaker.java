@@ -34,6 +34,11 @@ public class InMemorySummaryCallBreaker implements SummaryCallBreaker {
 
     @Override
     public void blockFor(Duration duration) {
-        blockedUntil.set(clock.instant().plus(duration));
+        if (duration == null || duration.isZero() || duration.isNegative()) {
+            return;
+        }
+        Instant candidate = clock.instant().plus(duration);
+        // 동시에 들어온 짧은 차단(burst)이 이미 설정된 긴 차단(quota)을 되감지 않도록 단조 증가시킨다.
+        blockedUntil.updateAndGet(current -> candidate.isAfter(current) ? candidate : current);
     }
 }
