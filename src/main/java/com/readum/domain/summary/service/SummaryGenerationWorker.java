@@ -80,10 +80,12 @@ public class SummaryGenerationWorker {
         int estimatedTokens = tokenEstimator.estimate(context.messages(), properties.reservedOutputTokens());
         if (estimatedTokens > rateLimiter.maxRequestTokens()) {
             // 양동이보다 큰 요청은 영원히 예산을 못 얻는다(모델 한도에도 가까움) → 즉시 실패로 드러낸다.
-            log.warn("감상문 생성 세션 과대 — 즉시 실패 jobId={} sessionId={} estimatedTokens={}",
-                    jobId, context.sessionId(), estimatedTokens);
+            // 최종 실패 로그는 recordFailure(retryable=false) 의 ERROR 한 곳으로 일원화한다(중복 방지).
             lifecycleService.recordFailure(jobId, owner, false,
-                    SummaryErrorCode.SESSION_TOO_LARGE.name(), "세션이 너무 커 감상문을 생성할 수 없습니다", null);
+                    SummaryErrorCode.SESSION_TOO_LARGE.name(),
+                    "세션이 너무 커 감상문을 생성할 수 없습니다 (추정 토큰 " + estimatedTokens
+                            + " > 상한 " + rateLimiter.maxRequestTokens() + ")",
+                    null);
             return;
         }
 

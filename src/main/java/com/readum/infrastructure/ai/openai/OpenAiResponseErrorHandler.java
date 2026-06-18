@@ -76,7 +76,7 @@ public class OpenAiResponseErrorHandler implements ResponseErrorHandler {
             log.error("OpenAI quota 소진 (insufficient_quota) - body={}", body);
             return new TooManyRequestsException(AiChatErrorCode.AI_QUOTA_EXHAUSTED, rateLimitInfo);
         }
-        log.error("OpenAI Rate limit burst - body={}", body);
+        log.warn("OpenAI Rate limit burst - body={}", body);
         return new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST, rateLimitInfo);
     }
 
