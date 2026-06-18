@@ -5,31 +5,23 @@ import com.readum.model.summary.repository.projection.SummaryHistoryProjection;
 import java.time.LocalDateTime;
 
 /**
- * 감상 기록 1건. "감상문 내용"의 정의 자체가 미리보기이므로,
- * 본문을 100자까지만 노출하고 초과분은 "..." 로 줄이는 책임을 이 Result 가 갖는다.
+ * 감상 기록 1건. 목록 카드 표시·상세 이동에 필요한 감상문 id, 책 제목, 세션 제목, 생성일을 담는다.
+ * summaryId 는 감상문 행의 PK 라 항상 존재한다. sessionTitle 은 첫 대화 교환 뒤 비동기로 생성되며,
+ * 그 제목 생성이 실패한 드문 경우에만 null 일 수 있다.
  */
 public record SummaryHistoryItemResult(
+        Long summaryId,
         String bookTitle,
-        String content,
+        String sessionTitle,
         LocalDateTime createdAt
 ) {
 
-    private static final int MAX_CONTENT_PREVIEW_LENGTH = 100;
-
     public static SummaryHistoryItemResult from(SummaryHistoryProjection projection) {
         return new SummaryHistoryItemResult(
+                projection.summaryId(),
                 projection.bookTitle(),
-                preview(projection.body()),
+                projection.sessionTitle(),
                 projection.createdAt()
         );
-    }
-
-    private static String preview(String body) {
-        if (body == null) {
-            return null;
-        }
-        return body.length() <= MAX_CONTENT_PREVIEW_LENGTH
-                ? body
-                : body.substring(0, MAX_CONTENT_PREVIEW_LENGTH) + "...";
     }
 }

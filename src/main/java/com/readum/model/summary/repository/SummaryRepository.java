@@ -46,12 +46,14 @@ public interface SummaryRepository extends JpaRepository<Summary, Long> {
      * 사용자 본인의 감상 기록 목록 — 세션당 감상문은 1건(세션:감상문 = 1:1, uk_summary_session 제약),
      * 최신순(createdAt DESC, id DESC) Slice.
      * Summary / AiChatSession / UserBook / Book 사이에 JPA 연관관계가 없어 on 절로 직접 join 한다 (Hibernate 6+).
-     * book.title 을 투영해야 하므로 UserBook/Book join 이 불가피하고, userBook.userId 필터가 소유권 검증을 겸한다.
+     * 목록 카드에 책 제목·세션 제목을 함께 노출하고 상세 이동을 위해 감상문 id 가 필요하므로,
+     * book.title·aiChatSession.title 을 투영하는 join 이 불가피하다. userBook.userId 필터가 소유권 검증을 겸한다.
      */
     @Query("""
             select new com.readum.model.summary.repository.projection.SummaryHistoryProjection(
-                       book.title
-                     , summary.body
+                       summary.id
+                     , book.title
+                     , aiChatSession.title
                      , summary.createdAt
                    )
               from Summary summary

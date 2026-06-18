@@ -64,8 +64,8 @@ class SummaryControllerTest {
         given(summaryHistorySearchService.findMyHistory(any()))
                 .willReturn(new SummaryHistoryListResult(
                         List.of(
-                                new SummaryHistoryItemResult("데미안", "깊은 울림을 주는 책이었다.", createdAt),
-                                new SummaryHistoryItemResult("1984", "감시 사회의 공포.", createdAt.minusDays(1))
+                                new SummaryHistoryItemResult(101L, "데미안", "데미안을 읽고 나서", createdAt),
+                                new SummaryHistoryItemResult(102L, "1984", "감시 사회를 읽다", createdAt.minusDays(1))
                         ),
                         1,
                         20,
@@ -77,9 +77,12 @@ class SummaryControllerTest {
                         .param("page", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.summaries.length()").value(2))
+                .andExpect(jsonPath("$.data.summaries[0].summaryId").value(101))
                 .andExpect(jsonPath("$.data.summaries[0].bookTitle").value("데미안"))
-                .andExpect(jsonPath("$.data.summaries[0].content").value("깊은 울림을 주는 책이었다."))
+                .andExpect(jsonPath("$.data.summaries[0].sessionTitle").value("데미안을 읽고 나서"))
+                .andExpect(jsonPath("$.data.summaries[1].summaryId").value(102))
                 .andExpect(jsonPath("$.data.summaries[1].bookTitle").value("1984"))
+                .andExpect(jsonPath("$.data.summaries[1].sessionTitle").value("감시 사회를 읽다"))
                 .andExpect(jsonPath("$.data.page").value(1))
                 .andExpect(jsonPath("$.data.size").value(20))
                 .andExpect(jsonPath("$.data.hasNext").value(false));

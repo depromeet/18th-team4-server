@@ -10,53 +10,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SummaryHistoryItemResultTest {
 
     @Test
-    void 본문이_100자_이하면_원문_그대로_노출한다() {
-        String body = "가".repeat(50);
-
-        SummaryHistoryItemResult result = SummaryHistoryItemResult.from(
-                new SummaryHistoryProjection("책", body, LocalDateTime.now()));
-
-        assertThat(result.content()).isEqualTo(body);
-    }
-
-    @Test
-    void 본문이_정확히_100자면_말줄임표_없이_원문_그대로_노출한다() {
-        String body = "가".repeat(100);
-
-        SummaryHistoryItemResult result = SummaryHistoryItemResult.from(
-                new SummaryHistoryProjection("책", body, LocalDateTime.now()));
-
-        assertThat(result.content()).isEqualTo(body);
-        assertThat(result.content()).doesNotEndWith("...");
-    }
-
-    @Test
-    void 본문이_100자를_초과하면_앞_100자만_노출하고_말줄임표를_붙인다() {
-        String body = "가".repeat(101);
-
-        SummaryHistoryItemResult result = SummaryHistoryItemResult.from(
-                new SummaryHistoryProjection("책", body, LocalDateTime.now()));
-
-        assertThat(result.content()).isEqualTo("가".repeat(100) + "...");
-        assertThat(result.content()).hasSize(103);
-    }
-
-    @Test
-    void 본문이_null_이면_content_도_null_이다() {
-        SummaryHistoryItemResult result = SummaryHistoryItemResult.from(
-                new SummaryHistoryProjection("책", null, LocalDateTime.now()));
-
-        assertThat(result.content()).isNull();
-    }
-
-    @Test
-    void 책_제목과_생성일은_변형_없이_그대로_전달된다() {
+    void projection_의_모든_필드를_변형_없이_전달한다() {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 7, 9, 0, 0);
 
         SummaryHistoryItemResult result = SummaryHistoryItemResult.from(
-                new SummaryHistoryProjection("데미안", "본문", createdAt));
+                new SummaryHistoryProjection(42L, "데미안", "데미안을 읽고 나서", createdAt));
 
+        assertThat(result.summaryId()).isEqualTo(42L);
         assertThat(result.bookTitle()).isEqualTo("데미안");
+        assertThat(result.sessionTitle()).isEqualTo("데미안을 읽고 나서");
         assertThat(result.createdAt()).isEqualTo(createdAt);
+    }
+
+    @Test
+    void 세션_제목_생성이_실패해_title_이_null_이어도_그대로_통과시킨다() {
+        SummaryHistoryItemResult result = SummaryHistoryItemResult.from(
+                new SummaryHistoryProjection(1L, "책", null, LocalDateTime.now()));
+
+        assertThat(result.sessionTitle()).isNull();
     }
 }

@@ -83,7 +83,7 @@ class SummaryHistorySearchServiceTest {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 7, 9, 0, 0);
         given(summaryRepository.findLatestHistoryByUserId(USER_ID, PageRequest.of(0, PAGE_SIZE)))
                 .willReturn(new SliceImpl<>(List.of(
-                        new SummaryHistoryProjection("데미안", "내 안에서 솟아 나오려는 것", createdAt)
+                        new SummaryHistoryProjection(101L, "데미안", "데미안을 읽고 나서", createdAt)
                 ), PageRequest.of(0, PAGE_SIZE), false));
 
         SummaryHistoryListResult result = summaryHistorySearchService.findMyHistory(
@@ -92,8 +92,9 @@ class SummaryHistorySearchServiceTest {
 
         assertThat(result.summaries()).hasSize(1);
         SummaryHistoryItemResult item = result.summaries().get(0);
+        assertThat(item.summaryId()).isEqualTo(101L);
         assertThat(item.bookTitle()).isEqualTo("데미안");
-        assertThat(item.content()).isEqualTo("내 안에서 솟아 나오려는 것");
+        assertThat(item.sessionTitle()).isEqualTo("데미안을 읽고 나서");
         assertThat(item.createdAt()).isEqualTo(createdAt);
     }
 
@@ -114,7 +115,7 @@ class SummaryHistorySearchServiceTest {
     void 다음_페이지가_있으면_hasNext_true_를_반환한다() {
         given(summaryRepository.findLatestHistoryByUserId(USER_ID, PageRequest.of(0, PAGE_SIZE)))
                 .willReturn(new SliceImpl<>(List.of(
-                        new SummaryHistoryProjection("책", "본문", LocalDateTime.now())
+                        new SummaryHistoryProjection(1L, "책", "세션 제목", LocalDateTime.now())
                 ), PageRequest.of(0, PAGE_SIZE), true));
 
         SummaryHistoryListResult result = summaryHistorySearchService.findMyHistory(
