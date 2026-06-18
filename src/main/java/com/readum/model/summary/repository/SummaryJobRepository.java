@@ -6,6 +6,7 @@ import jakarta.persistence.QueryHint;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
@@ -79,4 +80,20 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
 
     /** 세션에 미완료(활성) 작업이 이미 있는지 — 적재 멱등성 사전 확인용. */
     boolean existsByActiveSessionId(Long activeSessionId);
+
+    /**
+     * 등록 도서(UserBook) 삭제 cascade 용 — 그 도서의 세션들에 속한 작업을 일괄 삭제한다.
+     * summary_job 은 userBookId 를 갖지 않으므로 세션(AiChatSession) 서브쿼리로 좁힌다.
+     * 세션이 먼저 삭제되면 서브쿼리가 비므로, 반드시 세션 삭제 전에 호출한다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            delete from SummaryJob summaryJob
+             where summaryJob.aiChatSessionId in (
+                   select aiChatSession.id
+                     from AiChatSession aiChatSession
+                    where aiChatSession.userBookId = :userBookId
+                 )
+            """)
+    int deleteAllByUserBookId(@Param("userBookId") Long userBookId);
 }

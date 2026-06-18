@@ -8,6 +8,7 @@ import com.readum.domain.user.userbook.dto.UserBookDeleteResult;
 import com.readum.domain.user.userbook.exception.UserBookErrorCode;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserBookRepository;
@@ -37,6 +38,7 @@ public class UserBookDeleteService {
     private final AiChatMessageRepository aiChatMessageRepository;
     private final AiChatSessionRepository aiChatSessionRepository;
     private final SummaryRepository summaryRepository;
+    private final SummaryJobRepository summaryJobRepository;
 
     @Transactional
     public UserBookDeleteResult execute(UserBookDeleteCommand command) {
@@ -52,13 +54,15 @@ public class UserBookDeleteService {
         Long userBookId = command.userBookId();
 
         int deletedMessages = aiChatMessageRepository.deleteAllByUserBookId(userBookId);
+        // summary_job 은 세션 서브쿼리로 좁히므로 세션 삭제 전에 먼저 지운다(메시지와 같은 이유).
+        int deletedJobs = summaryJobRepository.deleteAllByUserBookId(userBookId);
         int deletedSessions = aiChatSessionRepository.deleteAllByUserBookId(userBookId);
         int deletedSummaries = summaryRepository.deleteAllByUserBookId(userBookId);
         userRepository.clearLastSelectedUserBook(userBookId);
         userBookRepository.deleteById(userBookId);
 
-        log.info("등록 도서 삭제 완료 - userId={}, userBookId={}, deletedSessions={}, deletedMessages={}, deletedSummaries={}",
-                user.getId(), userBookId, deletedSessions, deletedMessages, deletedSummaries);
+        log.info("등록 도서 삭제 완료 - userId={}, userBookId={}, deletedSessions={}, deletedMessages={}, deletedJobs={}, deletedSummaries={}",
+                user.getId(), userBookId, deletedSessions, deletedMessages, deletedJobs, deletedSummaries);
 
         return new UserBookDeleteResult(userBookId, deletedSessions, deletedMessages, deletedSummaries);
     }
