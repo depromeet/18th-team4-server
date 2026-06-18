@@ -54,6 +54,9 @@ public class SummaryDraftService {
 
         summaryDraftPolicy.assertEligible(session);
 
-        enqueueSummaryJobService.execute(sessionId);
+        if (!enqueueSummaryJobService.execute(sessionId).enqueued()) {
+            // 사전 체크를 통과한 동시 요청 간 경합 — 한쪽만 적재되고 나머지는 여기서 409.
+            throw new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS);
+        }
     }
 }

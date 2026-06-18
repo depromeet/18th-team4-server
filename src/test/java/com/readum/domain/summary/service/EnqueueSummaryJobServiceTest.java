@@ -8,7 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
-import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
@@ -31,18 +31,20 @@ class EnqueueSummaryJobServiceTest {
     void 활성작업_없으면_적재한다() {
         given(summaryJobRepository.existsByActiveSessionId(7L)).willReturn(false);
 
-        service.execute(7L);
+        var result = service.execute(7L);
 
         verify(summaryJobInserter).insertPending(7L);
+        assertThat(result.enqueued()).isTrue();
     }
 
     @Test
     void 활성작업_있으면_적재하지_않는다() {
         given(summaryJobRepository.existsByActiveSessionId(7L)).willReturn(true);
 
-        service.execute(7L);
+        var result = service.execute(7L);
 
         verify(summaryJobInserter, never()).insertPending(anyLong());
+        assertThat(result.enqueued()).isFalse();
     }
 
     @Test
@@ -51,7 +53,8 @@ class EnqueueSummaryJobServiceTest {
         doThrow(new DataIntegrityViolationException("dup"))
                 .when(summaryJobInserter).insertPending(7L);
 
-        assertThatCode(() -> service.execute(7L))
-                .doesNotThrowAnyException();
+        var result = service.execute(7L);
+
+        assertThat(result.enqueued()).isFalse();
     }
 }

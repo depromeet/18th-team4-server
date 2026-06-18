@@ -39,8 +39,9 @@ public class SummaryScheduler {
         int enqueued = 0;
         for (Long sessionId : targetSessionIds) {
             try {
-                enqueueSummaryJobService.execute(sessionId);
-                enqueued++;
+                if (enqueueSummaryJobService.execute(sessionId).enqueued()) {
+                    enqueued++;
+                }
             } catch (Exception e) {
                 // 한 세션 적재 실패가 나머지 배치를 막지 않도록 격리
                 log.error("감상문 작업 적재 실패 sessionId={}", sessionId, e);

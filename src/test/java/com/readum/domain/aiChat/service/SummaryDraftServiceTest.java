@@ -5,6 +5,7 @@ import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
+import com.readum.domain.summary.dto.EnqueueSummaryJobResult;
 import com.readum.domain.summary.service.EnqueueSummaryJobService;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
@@ -58,10 +59,27 @@ class SummaryDraftServiceTest {
         given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(user));
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
+        given(enqueueSummaryJobService.execute(SESSION_ID)).willReturn(new EnqueueSummaryJobResult(true));
 
         summaryDraftService.execute(SESSION_ID, USER_SESSION_ID);
 
         verify(enqueueSummaryJobService).execute(SESSION_ID);
+    }
+
+    @Test
+    void 적재_경합으로_적재되지_않으면_409_SUMMARY_IN_PROGRESS() {
+        User user = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(SESSION_ID, USER_BOOK_ID, 2, 600, "제목");
+        UserBook userBook = UserBookFixture.persistedUserBook(USER_BOOK_ID, USER_ID, BOOK_ID);
+        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(user));
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
+        given(enqueueSummaryJobService.execute(SESSION_ID)).willReturn(new EnqueueSummaryJobResult(false));
+
+        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_SESSION_ID))
+                .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
+                .extracting(ConflictException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
     }
 
     @Test
