@@ -31,8 +31,8 @@ public class SummaryEditService {
         aiChatSessionRepository.findByIdAndOwner(command.sessionId(), user.getId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        // 감상문은 성공 기록만 남으므로(write-once, 실패 행 없음) 최신 행이 곧 편집 대상이다.
-        Summary summary = summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(command.sessionId())
+        // 종료 모델에서 세션당 감상문은 한 행(1:1)이므로 그 행이 곧 편집 대상이다.
+        Summary summary = summaryRepository.findByAiChatSessionId(command.sessionId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SUMMARY_NOT_FOUND));
 
         summary.edit(command.title(), command.body());

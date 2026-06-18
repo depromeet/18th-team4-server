@@ -63,10 +63,9 @@ class BookChatSessionSearchServiceTest {
 
         LocalDateTime now = LocalDateTime.now();
 
-        // 오래 전 대화한 세션 — 감상문 2건(최신 본문이 노출돼야)
+        // 오래 전 대화한 세션 — 감상문 1건(1:1 모델)
         AiChatSession older = aiChatSessionRepository.save(AiChatSession.create(userBook.getId()));
         aiChatMessageRepository.save(AiChatMessageFixture.userMessageAt(older.getId(), "옛 대화", now.minusDays(2)));
-        summaryRepository.save(Summary.createCompleted(userBook.getId(), older.getId(), "옛 제목", "옛 본문"));
         summaryRepository.save(Summary.createCompleted(userBook.getId(), older.getId(), "새 제목", "최신 본문"));
 
         // 최근 대화한 세션 — 감상문 없음(null)

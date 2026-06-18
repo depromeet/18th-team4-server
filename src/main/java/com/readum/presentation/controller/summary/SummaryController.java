@@ -1,12 +1,12 @@
 package com.readum.presentation.controller.summary;
 
-import com.readum.domain.summary.dto.MonthlySummaryResult;
+import com.readum.domain.summary.dto.MonthlyReadingRecordResult;
 import com.readum.domain.summary.dto.SummaryHistoryListResult;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.service.SummaryHistorySearchService;
 import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
-import com.readum.presentation.controller.summary.dto.MonthlySummariesResponse;
+import com.readum.presentation.controller.summary.dto.MonthlyReadingRecordsResponse;
 import com.readum.presentation.controller.summary.dto.SummaryDetailResponse;
 import com.readum.presentation.controller.summary.dto.SummaryHistoryListRequest;
 import com.readum.presentation.controller.summary.dto.SummaryHistoryListResponse;
@@ -28,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.YearMonth;
 import java.util.List;
 
-@Tag(name = "감상 기록", description = "완성된 감상문 조회 — 전체 목록(무한스크롤), 홈 캘린더의 월별·날짜별 조회, 단건 상세")
+@Tag(name = "감상 기록", description = "감상문 전체 목록(무한스크롤)·단건 상세, 홈 캘린더의 월별 독서 기록(채팅 세션) 조회")
 @RestController
 @RequestMapping("/api/v1/summaries")
 @RequiredArgsConstructor
@@ -60,11 +60,12 @@ public class SummaryController {
     }
 
     @Operation(
-            summary = "월별 감상 기록 조회 (홈 캘린더)",
+            summary = "월별 독서 기록 조회 (홈 캘린더)",
             description = """
-                    한 달치 완성된 감상문을 평탄한 리스트로 반환한다.
-                    최신순 정렬 — summaryDate 내림차순, 같은 날짜 안에서는 생성 시각 내림차순.
-                    날짜별 그룹핑(캘린더 점 찍기)은 클라이언트가 수행한다.
+                    한 달치 독서 기록(채팅 세션)을 평탄한 리스트로 반환한다.
+                    감상문 생성 여부와 무관하게 포함하며, 감상문이 없는 기록은 summaryId 가 null 이다.
+                    조회·정렬 기준은 마지막 채팅 시각(lastChattedAt) 내림차순 — 같은 시각이면 chatSessionId 내림차순.
+                    채팅이 한 번도 없는 세션은 포함되지 않는다. 날짜별 그룹핑은 클라이언트가 수행한다.
                     기록이 없는 달은 빈 배열을 반환한다.
                     """
     )
@@ -74,12 +75,12 @@ public class SummaryController {
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @GetMapping("/calendar")
-    public ResponseEntity<GlobalApiResponse<MonthlySummariesResponse>> getMonthlySummaries(
+    public ResponseEntity<GlobalApiResponse<MonthlyReadingRecordsResponse>> getMonthlyReadingRecords(
             @CookieValue(name = "user_session") String userSessionId,
             @RequestParam YearMonth yearMonth
     ) {
-        List<MonthlySummaryResult> results = summarySearchService.findMonthly(yearMonth, userSessionId);
-        return GlobalApiResponse.ok(MonthlySummariesResponse.from(results));
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(yearMonth, userSessionId);
+        return GlobalApiResponse.ok(MonthlyReadingRecordsResponse.from(results));
     }
 
     @Operation(

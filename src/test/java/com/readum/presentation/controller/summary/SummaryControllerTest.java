@@ -2,7 +2,7 @@ package com.readum.presentation.controller.summary;
 
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.summary.dto.MonthlySummaryResult;
+import com.readum.domain.summary.dto.MonthlyReadingRecordResult;
 import com.readum.domain.summary.dto.SummaryHistoryItemResult;
 import com.readum.domain.summary.dto.SummaryHistoryListResult;
 import com.readum.domain.summary.dto.SummaryResult;
@@ -20,12 +20,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -110,20 +110,34 @@ class SummaryControllerTest {
     // ===== 월별 달력 조회 (GET /api/v1/summaries/calendar) =====
 
     @Test
-    void 월별_조회는_감상_기록_리스트를_반환한다() throws Exception {
+    void 월별_조회는_독서_기록_리스트를_반환한다() throws Exception {
         given(summarySearchService.findMonthly(eq(YearMonth.of(2026, 6)), anyString()))
-                .willReturn(List.of(new MonthlySummaryResult(
-                        17L, LocalDate.of(2026, 6, 11), "감상문 제목", "감상문 본문", "책 이름")));
+                .willReturn(List.of(new MonthlyReadingRecordResult(
+                        1000L, 17L, "책 이름", "채팅 제목", LocalDateTime.of(2026, 6, 11, 14, 32, 5))));
 
         mockMvc.perform(get("/api/v1/summaries/calendar")
                         .param("yearMonth", "2026-06")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.summaries[0].summaryId").value(17))
-                .andExpect(jsonPath("$.data.summaries[0].summaryDate").value("2026-06-11"))
-                .andExpect(jsonPath("$.data.summaries[0].title").value("감상문 제목"))
-                .andExpect(jsonPath("$.data.summaries[0].body").value("감상문 본문"))
-                .andExpect(jsonPath("$.data.summaries[0].bookTitle").value("책 이름"));
+                .andExpect(jsonPath("$.data.records[0].chatSessionId").value(1000))
+                .andExpect(jsonPath("$.data.records[0].summaryId").value(17))
+                .andExpect(jsonPath("$.data.records[0].bookTitle").value("책 이름"))
+                .andExpect(jsonPath("$.data.records[0].chatSummary").value("채팅 제목"))
+                .andExpect(jsonPath("$.data.records[0].lastChattedAt").value("2026-06-11T14:32:05"));
+    }
+
+    @Test
+    void 월별_조회는_감상문이_없는_기록의_summaryId_를_null_로_반환한다() throws Exception {
+        given(summarySearchService.findMonthly(eq(YearMonth.of(2026, 6)), anyString()))
+                .willReturn(List.of(new MonthlyReadingRecordResult(
+                        1001L, null, "다른 책", "또 다른 제목", LocalDateTime.of(2026, 6, 10, 9, 15, 40))));
+
+        mockMvc.perform(get("/api/v1/summaries/calendar")
+                        .param("yearMonth", "2026-06")
+                        .cookie(USER_SESSION_COOKIE))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].chatSessionId").value(1001))
+                .andExpect(jsonPath("$.data.records[0].summaryId").value(nullValue()));
     }
 
     @Test
@@ -135,8 +149,8 @@ class SummaryControllerTest {
                         .param("yearMonth", "2026-06")
                         .cookie(USER_SESSION_COOKIE))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.summaries").isArray())
-                .andExpect(jsonPath("$.data.summaries").isEmpty());
+                .andExpect(jsonPath("$.data.records").isArray())
+                .andExpect(jsonPath("$.data.records").isEmpty());
     }
 
     @Test

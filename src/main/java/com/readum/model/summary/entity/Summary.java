@@ -16,14 +16,18 @@ import java.time.LocalDateTime;
 
 /**
  * 감상문 — 생성에 성공한 결과의 불변 기록 (write-once).
- * 생성 중에는 행을 만들지 않고(세션 AiChatSession.Status.LOCKED 가 "생성 중" 을 표현),
+ * 생성 중에는 행을 만들지 않고(진행 상태는 summary_job.PROCESSING 이 표현한다),
  * 생성에 성공했을 때만 한 번 기록된다. 실패 시에는 행을 만들지 않는다 (원인은 로그로만 남긴다).
- * 세션과 1:N — 재생성할 때마다 새 행이 추가되며 "현재 감상문" 은 가장 최근 행이다 (과거 행은 이력 보존).
+ * 세션과 1:1 — unique 제약(uk_summary_session)으로 세션당 감상문은 한 행만 허용된다. 감상문 완성 시 세션은 종료(LOCKED)되어 재생성이 없다.
  */
 @Getter
 @Entity
 @Table(
         name = "summary",
+        uniqueConstraints = {
+                @jakarta.persistence.UniqueConstraint(
+                        name = "uk_summary_session", columnNames = "ai_chat_session_id")
+        },
         indexes = {
                 @Index(name = "idx_summary_user_book", columnList = "user_book_id"),
                 @Index(name = "idx_summary_session", columnList = "ai_chat_session_id")
@@ -59,8 +63,8 @@ public class Summary {
     private LocalDateTime updatedAt;
 
     /**
-     * 생성에 성공한 감상문을 새 행으로 기록한다.
-     * 재생성은 기존 행을 고치지 않고 새 행을 추가한다 ("현재 감상문" = 가장 최근 행).
+     * 생성에 성공한 감상문을 한 행으로 기록한다.
+     * 종료 모델에서 세션당 한 번만 생성된다.
      */
     public static Summary createCompleted(Long userBookId, Long aiChatSessionId, String title, String body) {
         LocalDateTime now = LocalDateTime.now();

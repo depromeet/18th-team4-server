@@ -8,6 +8,7 @@ import com.readum.domain.user.userbook.dto.UserBookDeleteResult;
 import com.readum.domain.user.userbook.exception.UserBookErrorCode;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
@@ -52,6 +53,9 @@ class UserBookDeleteServiceTest {
     @Mock
     private SummaryRepository summaryRepository;
 
+    @Mock
+    private SummaryJobRepository summaryJobRepository;
+
     @InjectMocks
     private UserBookDeleteService userBookDeleteService;
 
@@ -72,22 +76,25 @@ class UserBookDeleteServiceTest {
     }
 
     @Test
-    void 소유자_요청_시_메시지_세션_요약_사용자참조_userBook_순서로_삭제하고_삭제_카운트를_반환한다() {
+    void 소유자_요청_시_메시지_작업_세션_요약_사용자참조_userBook_순서로_삭제하고_삭제_카운트를_반환한다() {
         UserBook userBook = UserBookFixture.persistedUserBook(USER_BOOK_ID, USER_ID, BOOK_ID);
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID))
                 .willReturn(Optional.of(userBook));
         given(aiChatMessageRepository.deleteAllByUserBookId(USER_BOOK_ID)).willReturn(7);
+        given(summaryJobRepository.deleteAllByUserBookId(USER_BOOK_ID)).willReturn(1);
         given(aiChatSessionRepository.deleteAllByUserBookId(USER_BOOK_ID)).willReturn(3);
         given(summaryRepository.deleteAllByUserBookId(USER_BOOK_ID)).willReturn(2);
 
         UserBookDeleteResult result = userBookDeleteService.execute(command());
 
-        // 메시지 → 세션 → 요약 → 사용자 마지막선택 정리 → deleteById(부모) 순서.
+        // 메시지 → 작업(summary_job) → 세션 → 요약 → 사용자 마지막선택 정리 → deleteById(부모) 순서.
+        // 작업·메시지는 세션 서브쿼리로 좁히므로 세션 삭제 전에 지운다.
         // 마지막 단계가 delete(엔티티) 가 아니라 deleteById(id) 임을 단언 — detached 엔티티 삭제 회귀 방지.
         InOrder inOrder = inOrder(
-                aiChatMessageRepository, aiChatSessionRepository,
+                aiChatMessageRepository, summaryJobRepository, aiChatSessionRepository,
                 summaryRepository, userRepository, userBookRepository);
         inOrder.verify(aiChatMessageRepository).deleteAllByUserBookId(USER_BOOK_ID);
+        inOrder.verify(summaryJobRepository).deleteAllByUserBookId(USER_BOOK_ID);
         inOrder.verify(aiChatSessionRepository).deleteAllByUserBookId(USER_BOOK_ID);
         inOrder.verify(summaryRepository).deleteAllByUserBookId(USER_BOOK_ID);
         inOrder.verify(userRepository).clearLastSelectedUserBook(USER_BOOK_ID);
@@ -125,6 +132,7 @@ class UserBookDeleteServiceTest {
 
     private void verifyNoDeletes() {
         verify(aiChatMessageRepository, never()).deleteAllByUserBookId(anyLong());
+        verify(summaryJobRepository, never()).deleteAllByUserBookId(anyLong());
         verify(aiChatSessionRepository, never()).deleteAllByUserBookId(anyLong());
         verify(summaryRepository, never()).deleteAllByUserBookId(anyLong());
         verify(userRepository, never()).clearLastSelectedUserBook(anyLong());

@@ -368,7 +368,7 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 스트림_도중_에러가_나면_FAILED_가_저장되고_Error_이벤트가_방출된다() {
+    void 스트림_도중_에러가_나면_FAILED_가_저장되고_Error_이벤트가_방출된다() throws InterruptedException {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_SESSION_ID, sessionId, "질문");
 
@@ -377,6 +377,13 @@ class AiChatMessageSendServiceTest {
                 Flux.just(new AiChatChunk.Token("부분 응답")),
                 Flux.error(new RuntimeException("connection reset"))
         ));
+
+        // saveAssistantFailed 는 boundedElastic 에서 비동기로 일어나므로 완료를 latch 로 기다린다(verify 전 동기화).
+        CountDownLatch persisted = new CountDownLatch(1);
+        willAnswer(invocation -> {
+            persisted.countDown();
+            return null;
+        }).given(persistService).saveAssistantFailed(eq(sessionId), eq("부분 응답"), any());
 
         StepVerifier.create(service.execute(command))
                 .assertNext(event -> assertThat(event).isInstanceOf(MessageStreamEvent.Token.class))
@@ -387,6 +394,9 @@ class AiChatMessageSendServiceTest {
                 })
                 .verifyComplete();
 
+        assertThat(persisted.await(2, TimeUnit.SECONDS))
+                .as("스트림 에러 후 boundedElastic 의 saveAssistantFailed 호출이 일어나야 함")
+                .isTrue();
         verify(persistService, times(1))
                 .saveAssistantFailed(eq(sessionId), eq("부분 응답"), any());
         verify(persistService, never())

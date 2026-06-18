@@ -10,6 +10,7 @@ import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -36,6 +38,7 @@ public class AiChatMessagePersistService {
     private final AiChatMessageRepository aiChatMessageRepository;
     private final AiChatHistorySearchService aiChatHistorySearchService;
     private final AiChatSessionTitleService aiChatSessionTitleService;
+    private final SummaryJobRepository summaryJobRepository;
 
     /**
      * 세션 소유권 및 잠김 여부를 검증하고 이전 이력만 조회한다(USER 메시지는 저장하지 않음).
@@ -48,6 +51,11 @@ public class AiChatMessagePersistService {
         AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, userId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
         if (session.isLocked()) {
+            // 감상문이 완성되어 종료된 세션 — 영구히 대화 불가
+            throw new BadRequestException(AiChatErrorCode.SESSION_ALREADY_SUMMARIZED);
+        }
+        if (summaryJobRepository.existsBlockingSummaryJob(sessionId, LocalDateTime.now())) {
+            // 지금 생성 중 — 일시적으로 전송 불가
             throw new BadRequestException(AiChatErrorCode.SESSION_LOCKED);
         }
         List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);

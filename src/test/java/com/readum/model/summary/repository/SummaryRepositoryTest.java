@@ -17,11 +17,13 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.dao.DataIntegrityViolationException;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Transactional
@@ -62,98 +64,27 @@ class SummaryRepositoryTest {
         return "ext-" + externalSeq;
     }
 
-    // ===== 월별 달력 조회 (findMonthlyCompleted) — 생성일(createdAt) 기간으로 좁히는 derived query =====
-
-    private Summary persistOn(Long userBookId, LocalDate date) {
-        return summaryRepository.save(SummaryFixture.persistedSummaryCreatedAt(
-                null, userBookId, nextSessionId(), "제목", "본문", date.atTime(12, 0)));
-    }
-
-    @Test
-    @DisplayName("findMonthlyCompleted: 월 범위(월초·월말 포함)의 감상문만 반환한다")
-    void findMonthlyCompleted_월_경계_포함() {
-        Long userBookId = nextUserBookId();
-        Summary firstDay = persistOn(userBookId, LocalDate.of(2026, 6, 1));
-        Summary lastDay = persistOn(userBookId, LocalDate.of(2026, 6, 30));
-        persistOn(userBookId, LocalDate.of(2026, 5, 31));
-        persistOn(userBookId, LocalDate.of(2026, 7, 1));
-
-        List<Summary> found = summaryRepository.findMonthlyCompleted(
-                List.of(userBookId), LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30));
-
-        assertThat(found).extracting(Summary::getId)
-                .containsExactly(lastDay.getId(), firstDay.getId());   // 최신순: 6/30 이 먼저
-    }
-
-    @Test
-    @DisplayName("findMonthlyCompleted: 조회 대상 userBookId 가 아닌 감상문은 반환하지 않는다")
-    void findMonthlyCompleted_다른_userBook_제외() {
-        Long mine = nextUserBookId();
-        Long others = nextUserBookId();
-        LocalDate date = LocalDate.of(2026, 6, 10);
-        Summary myRecord = persistOn(mine, date);
-        persistOn(others, date);
-
-        List<Summary> found = summaryRepository.findMonthlyCompleted(
-                List.of(mine), LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30));
-
-        assertThat(found).extracting(Summary::getId).containsExactly(myRecord.getId());
-    }
-
-    @Test
-    @DisplayName("findMonthlyCompleted: 생성일 최신순(createdAt DESC, id DESC)으로 정렬한다")
-    void findMonthlyCompleted_최신순_정렬() {
-        Long userBookId = nextUserBookId();
-        Summary later = persistOn(userBookId, LocalDate.of(2026, 6, 20));
-        Summary middle = persistOn(userBookId, LocalDate.of(2026, 6, 10));
-        Summary earlier = persistOn(userBookId, LocalDate.of(2026, 6, 5));
-
-        List<Summary> found = summaryRepository.findMonthlyCompleted(
-                List.of(userBookId), LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 30));
-
-        assertThat(found).extracting(Summary::getId)
-                .containsExactly(later.getId(), middle.getId(), earlier.getId());
-    }
-
     // ===== 세션 최신 감상문 / 기록 목록 =====
 
     @Test
-    @DisplayName("findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc: 같은 세션의 여러 감상문 중 가장 최근 행을 반환한다")
-    void 최신_감상문_조회() {
-        Long userBookId = persistUserBook(nextUserId(), "데미안");
-        AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
-
-        summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "옛 제목", "옛 본문"));
-        Summary latest = summaryRepository.save(
-                Summary.createCompleted(userBookId, session.getId(), "새 제목", "새 본문"));
-
-        Optional<Summary> found =
-                summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(session.getId());
-
-        assertThat(found).isPresent();
-        assertThat(found.get().getId()).isEqualTo(latest.getId());
-        assertThat(found.get().getBody()).isEqualTo("새 본문");
-    }
-
-    @Test
-    @DisplayName("findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc: 감상문이 없으면 빈 Optional 을 반환한다")
+    @DisplayName("findByAiChatSessionId: 감상문이 없으면 빈 Optional 을 반환한다")
     void 감상문_없으면_빈_Optional() {
         Long userBookId = persistUserBook(nextUserId(), "빈세션책");
         AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
 
-        assertThat(summaryRepository.findFirstByAiChatSessionIdOrderByCreatedAtDescIdDesc(session.getId()))
+        assertThat(summaryRepository.findByAiChatSessionId(session.getId()))
                 .isEmpty();
     }
 
     @Test
-    @DisplayName("findLatestByAiChatSessionIdIn: 여러 세션의 최신 감상문을 세션별로 한 건씩 반환한다")
+    @DisplayName("findLatestByAiChatSessionIdIn: 여러 세션의 감상문을 세션별로 한 건씩 반환한다")
     void 세션별_최신_감상문_일괄조회() {
         Long userBookId = persistUserBook(nextUserId(), "여러세션책");
         AiChatSession sessionA = aiChatSessionRepository.save(AiChatSession.create(userBookId));
         AiChatSession sessionB = aiChatSessionRepository.save(AiChatSession.create(userBookId));
 
-        summaryRepository.save(Summary.createCompleted(userBookId, sessionA.getId(), "A 옛", "A 옛 본문"));
-        summaryRepository.save(Summary.createCompleted(userBookId, sessionA.getId(), "A 새", "A 새 본문"));
+        // 1:1 모델 — 세션당 감상문은 한 행이다
+        summaryRepository.save(Summary.createCompleted(userBookId, sessionA.getId(), "A 제목", "A 본문"));
         summaryRepository.save(Summary.createCompleted(userBookId, sessionB.getId(), "B 하나", "B 본문"));
 
         List<Summary> latest = summaryRepository.findLatestByAiChatSessionIdIn(
@@ -162,16 +93,16 @@ class SummaryRepositoryTest {
         assertThat(latest)
                 .hasSize(2)
                 .extracting(Summary::getBody)
-                .containsExactlyInAnyOrder("A 새 본문", "B 본문");
+                .containsExactlyInAnyOrder("A 본문", "B 본문");
     }
 
     @Test
-    @DisplayName("findLatestHistoryByUserId: 세션당 최신 감상문 1건을 책 제목·본문·생성일과 함께 조회한다")
+    @DisplayName("findLatestHistoryByUserId: 세션의 감상문 1건을 책 제목·본문·생성일과 함께 조회한다")
     void 세션당_최신_감상문을_조회한다() {
         Long userId = nextUserId();
         Long userBookId = persistUserBook(userId, "데미안");
         AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
-        summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "옛 제목", "옛 본문"));
+        // 1:1 모델 — 세션당 감상문은 한 행이다
         summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "새 제목", "내 안에서 솟아 나오려는 것"));
 
         Slice<SummaryHistoryProjection> slice =
@@ -248,6 +179,30 @@ class SummaryRepositoryTest {
 
         assertThat(slice.getContent()).isEmpty();
         assertThat(slice.hasNext()).isFalse();
+    }
+
+    @Test
+    void findByAiChatSessionId_는_세션의_감상문_단건을_반환한다() {
+        long sessionId = nextSessionId();
+        Long userBookId = nextUserBookId();
+        summaryRepository.save(SummaryFixture.persistedSummary(null, userBookId, sessionId, "제목", "본문"));
+
+        Optional<Summary> found = summaryRepository.findByAiChatSessionId(sessionId);
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getTitle()).isEqualTo("제목");
+    }
+
+    @Test
+    void 한_세션에_감상문은_하나만_저장된다() {
+        long sessionId = nextSessionId();
+        Long userBookId = nextUserBookId();
+        summaryRepository.saveAndFlush(SummaryFixture.persistedSummary(null, userBookId, sessionId, "t1", "b1"));
+
+        assertThatThrownBy(() ->
+                        summaryRepository.saveAndFlush(
+                                SummaryFixture.persistedSummary(null, userBookId, sessionId, "t2", "b2")))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     private Long persistUserBook(Long userId, String bookTitle) {

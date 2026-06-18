@@ -11,6 +11,7 @@ import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import com.readum.model.summary.repository.SummaryJobRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -22,12 +23,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,6 +49,9 @@ class AiChatMessagePersistServiceTest {
 
     @Mock
     private AiChatSessionTitleService aiChatSessionTitleService;
+
+    @Mock
+    private SummaryJobRepository summaryJobRepository;
 
     @InjectMocks
     private AiChatMessagePersistService persistService;
@@ -73,14 +79,34 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void loadHistory_잠긴_세션이면_BadRequest_SESSION_LOCKED_를_던진다() {
-        // 감상문 생성이 도는 동안(LOCKED) 메시지 전송이 차단되는 계약.
+    void loadHistory_종료된_세션이면_BadRequest_SESSION_ALREADY_SUMMARIZED_를_던진다() {
+        // 감상문이 완성되어 영구 종료(LOCKED)된 세션에는 메시지 전송이 차단되는 계약.
         Long userId = 1L;
         Long sessionId = 7L;
-        AiChatSession locked = AiChatSessionFixture.persistedLockedSession(
+        AiChatSession locked = AiChatSessionFixture.persistedSummarizedSession(
                 sessionId, 100L, 0, 0, null
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(locked));
+
+        assertThatThrownBy(() -> persistService.loadHistory(sessionId, userId))
+                .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
+                .extracting(BadRequestException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SESSION_ALREADY_SUMMARIZED);
+
+        verify(aiChatMessageRepository, never()).save(any());
+    }
+
+    @Test
+    void loadHistory_활성_세션이지만_차단_작업이_있으면_BadRequest_SESSION_LOCKED_를_던진다() {
+        // 감상문을 생성 중인 세션 — 일시적으로 메시지 전송 불가.
+        Long userId = 1L;
+        Long sessionId = 7L;
+        AiChatSession active = AiChatSessionFixture.persistedActiveSession(
+                sessionId, 100L, 0, 0, null
+        );
+        given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(active));
+        given(summaryJobRepository.existsBlockingSummaryJob(eq(sessionId), any(LocalDateTime.class)))
+                .willReturn(true);
 
         assertThatThrownBy(() -> persistService.loadHistory(sessionId, userId))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -98,6 +124,8 @@ class AiChatMessagePersistServiceTest {
                 sessionId, 100L, 0, 0, null
         );
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(active));
+        given(summaryJobRepository.existsBlockingSummaryJob(eq(sessionId), any(LocalDateTime.class)))
+                .willReturn(false);
         given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of(
                 new HistoryMessage(HistoryMessage.Role.USER, "이전 질문"),
                 new HistoryMessage(HistoryMessage.Role.ASSISTANT, "이전 응답")
