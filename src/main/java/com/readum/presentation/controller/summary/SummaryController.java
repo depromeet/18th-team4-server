@@ -42,7 +42,8 @@ public class SummaryController {
             description = "로그인한 사용자 본인의 감상 기록을 생성일 내림차순(최신순)으로 페이지네이션 조회한다. " +
                     "채팅 세션이 종료(CLOSED)되었고 감상문이 완성(COMPLETED)된 기록만 포함한다 — " +
                     "아직 대화 중인 세션에 자동 생성된 감상문은 제외된다. " +
-                    "감상문 내용은 100자까지만 노출하고 초과분은 \"...\" 로 줄여 응답한다. " +
+                    "각 항목은 상세 이동용 감상문 id(summaryId), 책 제목(bookTitle), 세션 제목(sessionTitle), 생성일(createdAt)을 담는다. " +
+                    "summaryId 는 항상 존재하며, sessionTitle 은 비동기 제목 생성이 실패한 드문 경우에만 null 이다. " +
                     "한 번에 20개씩 조회하며, 기록이 없으면 빈 배열로 200 응답한다."
     )
     @ApiResponses({

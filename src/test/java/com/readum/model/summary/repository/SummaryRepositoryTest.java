@@ -97,21 +97,25 @@ class SummaryRepositoryTest {
     }
 
     @Test
-    @DisplayName("findLatestHistoryByUserId: 세션의 감상문 1건을 책 제목·본문·생성일과 함께 조회한다")
+    @DisplayName("findLatestHistoryByUserId: 세션의 감상문 1건을 감상문 id·책 제목·세션 제목·생성일과 함께 조회한다")
     void 세션당_최신_감상문을_조회한다() {
         Long userId = nextUserId();
         Long userBookId = persistUserBook(userId, "데미안");
         AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
+        session.updateTitle("데미안을 읽고 나서");
+        aiChatSessionRepository.save(session);
         // 1:1 모델 — 세션당 감상문은 한 행이다
-        summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "새 제목", "내 안에서 솟아 나오려는 것"));
+        Summary saved = summaryRepository.save(
+                Summary.createCompleted(userBookId, session.getId(), "새 제목", "내 안에서 솟아 나오려는 것"));
 
         Slice<SummaryHistoryProjection> slice =
                 summaryRepository.findLatestHistoryByUserId(userId, PageRequest.of(0, 20));
 
         assertThat(slice.getContent()).hasSize(1);
         SummaryHistoryProjection row = slice.getContent().get(0);
+        assertThat(row.summaryId()).isEqualTo(saved.getId());
         assertThat(row.bookTitle()).isEqualTo("데미안");
-        assertThat(row.body()).isEqualTo("내 안에서 솟아 나오려는 것");
+        assertThat(row.sessionTitle()).isEqualTo("데미안을 읽고 나서");
         assertThat(row.createdAt()).isNotNull();
     }
 
@@ -144,7 +148,7 @@ class SummaryRepositoryTest {
                 summaryRepository.findLatestHistoryByUserId(userId, PageRequest.of(0, 20));
 
         assertThat(slice.getContent())
-                .extracting(SummaryHistoryProjection::body)
+                .extracting(SummaryHistoryProjection::sessionTitle)
                 .containsExactly("세번째", "두번째", "첫번째");
     }
 
@@ -211,8 +215,10 @@ class SummaryRepositoryTest {
         return userBook.getId();
     }
 
-    private void persistSessionWithSummary(Long userBookId, String body) {
+    private void persistSessionWithSummary(Long userBookId, String sessionTitle) {
         AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBookId));
-        summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "제목", body));
+        session.updateTitle(sessionTitle);
+        aiChatSessionRepository.save(session);
+        summaryRepository.save(Summary.createCompleted(userBookId, session.getId(), "제목", "본문"));
     }
 }
