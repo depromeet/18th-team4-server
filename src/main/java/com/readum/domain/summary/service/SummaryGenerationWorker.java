@@ -68,7 +68,8 @@ public class SummaryGenerationWorker {
             return false;
         }
         runJob(jobId, owner);
-        return true;
+        // 처리 중 인터럽트(예: 셧다운)가 걸렸으면 드레인 루프를 멈춘다.
+        return !Thread.currentThread().isInterrupted();
     }
 
     private void runJob(Long jobId, String owner) {

@@ -37,14 +37,26 @@ public class SummaryCallRateLimiterImpl implements SummaryCallRateLimiter {
     @Override
     public boolean tryAcquire(int estimatedTokens) throws InterruptedException {
         long tokens = Math.max(1, estimatedTokens);
+        long deadline = System.nanoTime() + maxWaitNanos;
         if (!requestBucket.asBlocking().tryConsume(1, maxWaitNanos)) {
             return false;
         }
-        if (!tokenBucket.asBlocking().tryConsume(tokens, maxWaitNanos)) {
-            requestBucket.addTokens(1); // 토큰 예산 부족 — 앞서 차감한 요청 토큰을 환불
+        // 두 양동이에 각각 maxWait 를 주면 총 대기가 2배가 될 수 있다 — 남은 시간만 토큰 양동이에 준다.
+        long remainingNanos = deadline - System.nanoTime();
+        if (remainingNanos <= 0) {
+            requestBucket.addTokens(1); // 요청 토큰 환불
             return false;
         }
-        return true;
+        try {
+            if (!tokenBucket.asBlocking().tryConsume(tokens, remainingNanos)) {
+                requestBucket.addTokens(1); // 토큰 예산 부족 — 앞서 차감한 요청 토큰을 환불
+                return false;
+            }
+            return true;
+        } catch (InterruptedException e) {
+            requestBucket.addTokens(1); // 인터럽트 시에도 요청 토큰을 환불하고 전파
+            throw e;
+        }
     }
 
     @Override
