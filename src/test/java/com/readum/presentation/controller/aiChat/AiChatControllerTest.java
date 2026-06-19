@@ -235,8 +235,8 @@ class AiChatControllerTest {
                 .willReturn(new BookChatSessionsResult(
                         new BookChatSessionsResult.BookInfo("데미안", 2020, "민음사", "http://img/x.jpg"),
                         List.of(
-                                new BookChatSessionsResult.SessionItem(2L, "감상문 제목", "최신 본문", LocalDate.of(2026, 5, 7)),
-                                new BookChatSessionsResult.SessionItem(1L, null, null, LocalDate.of(2026, 5, 5))
+                                new BookChatSessionsResult.SessionItem(2L, "세션 제목 A", "최신 본문", LocalDate.of(2026, 5, 7)),
+                                new BookChatSessionsResult.SessionItem(1L, "세션 제목 B", null, LocalDate.of(2026, 5, 5))
                         )
                 ));
 
@@ -249,11 +249,11 @@ class AiChatControllerTest {
                 .andExpect(jsonPath("$.data.book.coverImageUrl").value("http://img/x.jpg"))
                 .andExpect(jsonPath("$.data.sessions.length()").value(2))
                 .andExpect(jsonPath("$.data.sessions[0].sessionId").value(2))
-                .andExpect(jsonPath("$.data.sessions[0].summaryTitle").value("감상문 제목"))
+                .andExpect(jsonPath("$.data.sessions[0].sessionTitle").value("세션 제목 A"))
                 .andExpect(jsonPath("$.data.sessions[0].latestSummaryContent").value("최신 본문"))
                 .andExpect(jsonPath("$.data.sessions[0].lastChattedDate").value("2026-05-07"))
                 .andExpect(jsonPath("$.data.sessions[1].sessionId").value(1))
-                .andExpect(jsonPath("$.data.sessions[1].summaryTitle").doesNotExist())
+                .andExpect(jsonPath("$.data.sessions[1].sessionTitle").value("세션 제목 B"))
                 .andExpect(jsonPath("$.data.sessions[1].lastChattedDate").value("2026-05-05"));
     }
 

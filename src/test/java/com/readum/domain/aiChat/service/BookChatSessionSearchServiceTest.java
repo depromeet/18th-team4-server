@@ -64,12 +64,16 @@ class BookChatSessionSearchServiceTest {
         LocalDateTime now = LocalDateTime.now();
 
         // 오래 전 대화한 세션 — 감상문 1건(1:1 모델)
-        AiChatSession older = aiChatSessionRepository.save(AiChatSession.create(userBook.getId()));
+        AiChatSession older = AiChatSession.create(userBook.getId());
+        older.updateTitle("오래된 세션 제목");
+        older = aiChatSessionRepository.save(older);
         aiChatMessageRepository.save(AiChatMessageFixture.userMessageAt(older.getId(), "옛 대화", now.minusDays(2)));
         summaryRepository.save(Summary.createCompleted(userBook.getId(), older.getId(), "새 제목", "최신 본문"));
 
-        // 최근 대화한 세션 — 감상문 없음(null)
-        AiChatSession newer = aiChatSessionRepository.save(AiChatSession.create(userBook.getId()));
+        // 최근 대화한 세션 — 감상문 없음
+        AiChatSession newer = AiChatSession.create(userBook.getId());
+        newer.updateTitle("최근 세션 제목");
+        newer = aiChatSessionRepository.save(newer);
         aiChatMessageRepository.save(AiChatMessageFixture.userMessageAt(newer.getId(), "최근 대화", now.minusHours(1)));
 
         BookChatSessionsResult result = bookChatSessionSearchService.findByUserBook(
@@ -83,10 +87,10 @@ class BookChatSessionSearchServiceTest {
         // 마지막 대화일 최신순 — newer 가 먼저
         assertThat(result.sessions()).extracting(BookChatSessionsResult.SessionItem::sessionId)
                 .containsExactly(newer.getId(), older.getId());
-        assertThat(result.sessions().get(0).summaryTitle()).isNull();
+        assertThat(result.sessions().get(0).sessionTitle()).isEqualTo("최근 세션 제목");
         assertThat(result.sessions().get(0).latestSummaryContent()).isNull();
         assertThat(result.sessions().get(0).lastChattedDate()).isEqualTo(now.minusHours(1).toLocalDate());
-        assertThat(result.sessions().get(1).summaryTitle()).isEqualTo("새 제목");
+        assertThat(result.sessions().get(1).sessionTitle()).isEqualTo("오래된 세션 제목");
         assertThat(result.sessions().get(1).latestSummaryContent()).isEqualTo("최신 본문");
         assertThat(result.sessions().get(1).lastChattedDate()).isEqualTo(now.minusDays(2).toLocalDate());
     }

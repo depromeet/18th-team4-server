@@ -11,7 +11,7 @@ public record BookChatSessionsResponse(
 ) {
     public record BookResponse(String title, Integer publishedYear, String publisher, String coverImageUrl) {}
 
-    public record SessionResponse(Long sessionId, String summaryTitle, String latestSummaryContent,
+    public record SessionResponse(Long sessionId, String sessionTitle, String latestSummaryContent,
                                   LocalDate lastChattedDate) {}
 
     public static BookChatSessionsResponse from(BookChatSessionsResult result) {
@@ -21,7 +21,7 @@ public record BookChatSessionsResponse(
                 result.sessions().stream()
                         .map(session -> new SessionResponse(
                                 session.sessionId(),
-                                session.summaryTitle(),
+                                session.sessionTitle(),
                                 session.latestSummaryContent(),
                                 session.lastChattedDate()))
                         .toList());

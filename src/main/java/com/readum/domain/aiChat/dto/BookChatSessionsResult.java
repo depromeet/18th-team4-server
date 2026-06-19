@@ -19,6 +19,6 @@ public record BookChatSessionsResult(
         }
     }
 
-    public record SessionItem(Long sessionId, String summaryTitle, String latestSummaryContent,
+    public record SessionItem(Long sessionId, String sessionTitle, String latestSummaryContent,
                               LocalDate lastChattedDate) {}
 }
