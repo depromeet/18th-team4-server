@@ -53,26 +53,30 @@ public class BookChatSessionSearchService {
         List<AiChatSession> sessions = aiChatSessionRepository.findByUserBookId(userBookId);
         List<Long> sessionIds = sessions.stream().map(AiChatSession::getId).toList();
 
-        Map<Long, String> latestSummaryBySession = latestSummaryBodies(sessionIds);
+        Map<Long, Summary> latestSummaryBySession = latestSummaries(sessionIds);
         Map<Long, LocalDate> lastChattedBySession = lastChattedDates(sessionIds);
 
         List<BookChatSessionsResult.SessionItem> items = sessions.stream()
-                .map(session -> new BookChatSessionsResult.SessionItem(
-                        session.getId(),
-                        latestSummaryBySession.get(session.getId()),
-                        lastChattedBySession.getOrDefault(session.getId(), session.getCreatedAt().toLocalDate())))
+                .map(session -> {
+                    Summary summary = latestSummaryBySession.get(session.getId());
+                    return new BookChatSessionsResult.SessionItem(
+                            session.getId(),
+                            summary != null ? summary.getTitle() : null,
+                            summary != null ? summary.getBody() : null,
+                            lastChattedBySession.getOrDefault(session.getId(), session.getCreatedAt().toLocalDate()));
+                })
                 .sorted(Comparator.comparing(BookChatSessionsResult.SessionItem::lastChattedDate).reversed())
                 .toList();
 
         return new BookChatSessionsResult(BookChatSessionsResult.BookInfo.from(book), items);
     }
 
-    private Map<Long, String> latestSummaryBodies(List<Long> sessionIds) {
+    private Map<Long, Summary> latestSummaries(List<Long> sessionIds) {
         if (sessionIds.isEmpty()) {
             return Map.of();
         }
         return summaryRepository.findLatestByAiChatSessionIdIn(sessionIds).stream()
-                .collect(Collectors.toMap(Summary::getAiChatSessionId, Summary::getBody));
+                .collect(Collectors.toMap(Summary::getAiChatSessionId, summary -> summary));
     }
 
     private Map<Long, LocalDate> lastChattedDates(List<Long> sessionIds) {

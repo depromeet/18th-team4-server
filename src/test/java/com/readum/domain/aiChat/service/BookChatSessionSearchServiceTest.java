@@ -83,8 +83,10 @@ class BookChatSessionSearchServiceTest {
         // 마지막 대화일 최신순 — newer 가 먼저
         assertThat(result.sessions()).extracting(BookChatSessionsResult.SessionItem::sessionId)
                 .containsExactly(newer.getId(), older.getId());
+        assertThat(result.sessions().get(0).summaryTitle()).isNull();
         assertThat(result.sessions().get(0).latestSummaryContent()).isNull();
         assertThat(result.sessions().get(0).lastChattedDate()).isEqualTo(now.minusHours(1).toLocalDate());
+        assertThat(result.sessions().get(1).summaryTitle()).isEqualTo("새 제목");
         assertThat(result.sessions().get(1).latestSummaryContent()).isEqualTo("최신 본문");
         assertThat(result.sessions().get(1).lastChattedDate()).isEqualTo(now.minusDays(2).toLocalDate());
     }
