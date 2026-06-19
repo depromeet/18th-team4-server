@@ -53,13 +53,14 @@ public class BookChatSessionSearchService {
         List<AiChatSession> sessions = aiChatSessionRepository.findByUserBookId(userBookId);
         List<Long> sessionIds = sessions.stream().map(AiChatSession::getId).toList();
 
-        Map<Long, String> latestSummaryBySession = latestSummaryBodies(sessionIds);
+        Map<Long, String> latestSummaryBodyBySession = latestSummaryBodies(sessionIds);
         Map<Long, LocalDate> lastChattedBySession = lastChattedDates(sessionIds);
 
         List<BookChatSessionsResult.SessionItem> items = sessions.stream()
                 .map(session -> new BookChatSessionsResult.SessionItem(
                         session.getId(),
-                        latestSummaryBySession.get(session.getId()),
+                        session.getTitle(),
+                        latestSummaryBodyBySession.get(session.getId()),
                         lastChattedBySession.getOrDefault(session.getId(), session.getCreatedAt().toLocalDate())))
                 .sorted(Comparator.comparing(BookChatSessionsResult.SessionItem::lastChattedDate).reversed())
                 .toList();
