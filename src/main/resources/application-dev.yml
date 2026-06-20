@@ -15,6 +15,11 @@ spring:
     username: ${MYSQL_USER}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    # 요약 워커(summary-job.pool-size=12)의 짧은 DB 단계가 순간적으로 겹쳐도 웹 요청과
+    # 경합하지 않도록 풀을 20 으로 둔다. RDS db.t4g.micro 의 max_connections(약 85)의 24% 수준이라
+    # 외부 접속·인스턴스 증설 여지를 남긴다. (minimum-idle 미지정 시 Hikari 가 max 와 같게 잡아 고정 크기)
+    hikari:
+      maximum-pool-size: 20
   jpa:
     hibernate:
       ddl-auto: validate
