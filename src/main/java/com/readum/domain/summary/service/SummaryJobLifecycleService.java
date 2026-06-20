@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -39,8 +40,12 @@ public class SummaryJobLifecycleService {
     /**
      * 처리 대상 작업을 하나 선점한다. SKIP LOCKED 로 다른 워커와 겹치지 않는다.
      * owner 는 이 선점만의 토큰. 반환된 작업 id 를 워커가 이후 단계에 넘긴다. 없으면 null.
+     *
+     * <p>READ COMMITTED 인 이유: findClaimable 의 PENDING 구간 범위 스캔이 RR 에서 gap lock 을 걸어
+     * 같은 구간으로 들어오는 신규 PENDING INSERT 와 충돌해 락 대기 타임아웃을 냈다(#92).
+     * RC 로 gap lock 을 없애도 SKIP LOCKED 행 락 분배는 그대로라 워커 간 중복 선점은 막힌다.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long claimOne(String owner) {
         List<SummaryJob> candidates = summaryJobRepository.findClaimable(
                 SummaryJob.Status.PENDING, LocalDateTime.now(), PageRequest.of(0, 1));
@@ -94,9 +99,12 @@ public class SummaryJobLifecycleService {
     /**
      * lease 만료된 고아 작업을 PENDING 으로 되돌린다(즉시 재선점 가능). 세션은 건드리지 않는다 —
      * 차단은 PROCESSING 의 유효 lease 가 사라지면 자동 해제되기 때문.
+     *
+     * <p>READ COMMITTED 인 이유: findOrphaned 의 PROCESSING 구간 범위 스캔도 claimOne 과 같은 gap lock
+     * 문제를 일으키므로 RC 로 gap lock 을 없앤다(#92). SKIP LOCKED 행 락 분배는 그대로 유지된다.
      * @return 회수한 작업 수
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public int reclaimOrphans(int batchSize) {
         LocalDateTime now = LocalDateTime.now();
         List<SummaryJob> orphans = summaryJobRepository.findOrphaned(
