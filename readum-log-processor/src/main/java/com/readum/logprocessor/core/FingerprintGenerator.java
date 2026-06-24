@@ -1,4 +1,4 @@
-package com.readum.incident.core;
+package com.readum.logprocessor.core;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

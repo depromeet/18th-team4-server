@@ -1,4 +1,4 @@
-package com.readum.incident.core;
+package com.readum.logprocessor.core;
 
 /**
  * 로그/스택트레이스/요청 정보에서 secret·PII 를 가린다.

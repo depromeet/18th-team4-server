@@ -1,4 +1,4 @@
-package com.readum.incident.core;
+package com.readum.logprocessor.core;
 
 import org.junit.jupiter.api.Test;
 

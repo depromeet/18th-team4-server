@@ -1,4 +1,4 @@
-package com.readum.incident.core;
+package com.readum.logprocessor.core;
 
 /**
  * fingerprint 계산 입력. null 필드는 빈 값으로 취급한다.
