@@ -12,3 +12,4 @@ pluginManagement {
 
 rootProject.name = 'readum'
 include 'readum-api'
+include 'readum-log-processor'
