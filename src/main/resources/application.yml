@@ -40,6 +40,10 @@ ai-chat:
     max-message-count: 5                # 기간 안에 허용되는 COMPLETED USER 메시지 수. 초과 시 HTTP 429.
     rejected-count-period-seconds: 3600 # 거부 메시지 카운트 기간 (초). 어뷰즈 탐지용으로 넓게.
     rejected-max-message-count: 20      # 기간 안에 허용되는 REJECTED USER 메시지 수. 초과 시 HTTP 429.
+  title-generation:                     # 제목 생성 전용 스케줄러(영속화 풀과 격벽 분리).
+    thread-cap: 100                      # 동시 제목 생성 상한. 스레드는 lazy 생성 + 60초 유휴 회수라 평소엔 0 에 수렴.
+                                         # 전용 ChatClient 의 10초 responseTimeout 이 매달린 호출을 끊어 주므로 크게 둬도 blast-radius 가 시간으로 제한된다.
+    queue-cap: 2000                      # 상한 초과분을 흡수하는 큐. 백그라운드라 지연돼도 무방하므로 크게. 초과 시 RejectedExecutionException(로그 후 스킵).
 
 springdoc:
   api-docs:

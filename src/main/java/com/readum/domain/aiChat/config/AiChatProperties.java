@@ -12,7 +12,8 @@ import org.springframework.validation.annotation.Validated;
 public record AiChatProperties(
         @Valid ContextWindow contextWindow,
         @Valid MessageRule message,
-        @Valid RateLimit rateLimit
+        @Valid RateLimit rateLimit,
+        @Valid TitleGeneration titleGeneration
 ) {
 
     /**
@@ -44,5 +45,17 @@ public record AiChatProperties(
             @Positive int rejectedCountPeriodSeconds,
             @Positive int rejectedMaxMessageCount
     ) {
+    }
+
+    /**
+     * 제목 생성 전용 스케줄러 크기.
+     * 제목 생성은 사용자 응답 경로 밖에서 도는 백그라운드 작업이라 latency 가 중요하지 않다.
+     * 영속화(Done 이벤트 직전의 짧은 JDBC)가 쓰는 전역 boundedElastic 과 같은 풀을 쓰면,
+     * 첫 메시지가 몰릴 때 느린 제목 생성 LLM 호출이 스레드를 다 점유해 영속화가 큐에서 밀린다(격벽 부재).
+     * 그래서 전용 풀로 분리하고:
+     * - threadCap 은 작게  : 동시 제목 생성 = 빌려 쓰는 OpenAI 연결·DB 커넥션 수를 제한해 포그라운드 채팅을 보호.
+     * - queueCap 은 크게   : 새 세션 버스트를 큐가 흡수하고 천천히 소진(백그라운드라 지연 무방).
+     */
+    public record TitleGeneration(@Positive int threadCap, @Positive int queueCap) {
     }
 }

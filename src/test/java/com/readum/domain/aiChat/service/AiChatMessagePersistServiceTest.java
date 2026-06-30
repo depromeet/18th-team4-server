@@ -2,6 +2,7 @@ package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.HistoryMessage;
+import com.readum.domain.aiChat.event.FirstAssistantResponseCompletedEvent;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
@@ -13,15 +14,13 @@ import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -48,20 +47,13 @@ class AiChatMessagePersistServiceTest {
     private AiChatHistorySearchService aiChatHistorySearchService;
 
     @Mock
-    private AiChatSessionTitleService aiChatSessionTitleService;
+    private SummaryJobRepository summaryJobRepository;
 
     @Mock
-    private SummaryJobRepository summaryJobRepository;
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private AiChatMessagePersistService persistService;
-
-    @AfterEach
-    void cleanupSynchronization() {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.clear();
-        }
-    }
 
     @Test
     void loadHistory_소유권_없는_세션이면_NotFoundException_을_던진다() {
@@ -185,33 +177,32 @@ class AiChatMessagePersistServiceTest {
     }
 
     @Test
-    void 첫_ASSISTANT_응답_완료_시_제목_생성_트리거가_afterCommit_로_등록된다() {
+    void 첫_ASSISTANT_응답_완료_시_유저_첫_질문을_담은_제목_생성_이벤트가_발행된다() {
         Long sessionId = 7L;
         AiChatSession firstExchangeSession = AiChatSessionFixture.persistedActiveSession(
                 sessionId, 100L, 1, 0, null
         );
+        AiChatMessage firstUserMessage = AiChatMessage.createUserMessage(sessionId, "첫 질문");
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(firstExchangeSession));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
-        given(aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId))
-                .willReturn(List.of());
+        given(aiChatMessageRepository.findFirstUserMessage(sessionId)).willReturn(Optional.of(firstUserMessage));
 
         AiChatChunk.Completion meta = new AiChatChunk.Completion(100, 50, 150, null);
 
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            persistService.saveAssistantSuccess(sessionId, "첫 응답", meta);
+        persistService.saveAssistantSuccess(sessionId, "첫 응답", meta);
 
-            List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
-            assertThat(synchronizations)
-                    .as("첫 교환 완료 후 제목 생성을 트리거할 synchronization 이 등록되어야 한다")
-                    .hasSize(1);
-        } finally {
-            TransactionSynchronizationManager.clear();
-        }
+        ArgumentCaptor<FirstAssistantResponseCompletedEvent> captor =
+                ArgumentCaptor.forClass(FirstAssistantResponseCompletedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        FirstAssistantResponseCompletedEvent event = captor.getValue();
+        assertThat(event.sessionId()).isEqualTo(sessionId);
+        assertThat(event.firstUserMessage())
+                .as("제목 생성 입력은 유저의 첫 질문이어야 한다")
+                .isEqualTo(firstUserMessage);
     }
 
     @Test
-    void 두번째_이후_ASSISTANT_응답이면_제목_생성_트리거가_등록되지_않는다() {
+    void 두번째_이후_ASSISTANT_응답이면_제목_생성_이벤트가_발행되지_않는다() {
         Long sessionId = 7L;
         AiChatSession laterSession = AiChatSessionFixture.persistedActiveSession(
                 sessionId, 100L, 3, 100, "이미 있는 제목"
@@ -221,16 +212,9 @@ class AiChatMessagePersistServiceTest {
 
         AiChatChunk.Completion meta = new AiChatChunk.Completion(100, 50, 150, null);
 
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            persistService.saveAssistantSuccess(sessionId, "후속 응답", meta);
+        persistService.saveAssistantSuccess(sessionId, "후속 응답", meta);
 
-            assertThat(TransactionSynchronizationManager.getSynchronizations())
-                    .as("첫 교환이 아닌 세션은 제목 생성 트리거를 등록하지 않아야 한다")
-                    .isEmpty();
-        } finally {
-            TransactionSynchronizationManager.clear();
-        }
+        verify(eventPublisher, never()).publishEvent(any(FirstAssistantResponseCompletedEvent.class));
     }
 
     @Test
