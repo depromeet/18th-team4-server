@@ -123,7 +123,7 @@ public class AiChatMessageSendService {
                 yield Flux.just(new MessageStreamEvent.Token(token.delta()));
             }
             case AiChatChunk.Completion completion -> {
-                // Done 이벤트는 ASSISTANT 영속화 후 messageId/createdAt 까지 채워서 만들어야 하므로
+                // Done 이벤트는 ASSISTANT 영속화 후 createdAt·tokenCount 까지 채워서 만들어야 하므로
                 // 여기서는 메타만 잡아두고 외부로는 emit 하지 않는다 (concatWith 의 finalize 단계에서 발행).
                 completionRef.set(completion);
                 yield Flux.empty();
@@ -137,7 +137,6 @@ public class AiChatMessageSendService {
         return Mono.fromCallable(() -> aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, completion))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(saved -> new MessageStreamEvent.Done(
-                        saved.getId(),
                         new MessageStreamEvent.TokenCount(
                                 saved.getInputTokens(),
                                 saved.getOutputTokens(),

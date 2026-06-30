@@ -9,8 +9,8 @@ public sealed interface MessageStreamEvent
 
     record Token(String delta) implements MessageStreamEvent {}
 
+    // messageId 는 클라이언트가 사용하지 않아 payload 에서 제외한다(필요해지면 이력 조회로 받는다).
     record Done(
-            Long messageId,
             TokenCount tokenCount,
             LocalDateTime createdAt
     ) implements MessageStreamEvent {

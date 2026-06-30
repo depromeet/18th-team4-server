@@ -352,7 +352,6 @@ class AiChatMessageSendServiceTest {
                 .assertNext(event -> {
                     assertThat(event).isInstanceOf(MessageStreamEvent.Done.class);
                     MessageStreamEvent.Done done = (MessageStreamEvent.Done) event;
-                    assertThat(done.messageId()).isEqualTo(42L);
                     assertThat(done.tokenCount().total()).isEqualTo(370);
                     assertThat(done.tokenCount().input()).isEqualTo(312);
                     assertThat(done.tokenCount().output()).isEqualTo(58);

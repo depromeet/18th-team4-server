@@ -137,7 +137,7 @@ public class AiChatController {
 
                     SSE 이벤트 종류:
                     - **token**: 실시간 텍스트 청크. payload `{"delta": "..."}`
-                    - **done**: 스트림 정상 종료. payload `{"messageId": ..., "tokenCount": {...}, "createdAt": "..."}`
+                    - **done**: 스트림 정상 종료. payload `{"tokenCount": {...}, "createdAt": "..."}`
                     - **error**: 스트림 비정상 종료. payload `{"code": "...", "message": "...", "rateLimit": {...}?}`
 
                     error 이벤트의 code:

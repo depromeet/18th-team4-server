@@ -377,7 +377,7 @@ class AiChatControllerTest {
         given(aiChatMessageSendService.execute(any())).willReturn(Flux.just(
                 new MessageStreamEvent.Token("alpha"),
                 new MessageStreamEvent.Token(" beta"),
-                new MessageStreamEvent.Done(99L,
+                new MessageStreamEvent.Done(
                         new MessageStreamEvent.TokenCount(312, 58, 370),
                         createdAt)
         ));
@@ -401,7 +401,6 @@ class AiChatControllerTest {
                 .contains("data:{\"delta\":\"alpha\"}")
                 .contains("data:{\"delta\":\" beta\"}")
                 .contains("event:done")
-                .contains("\"messageId\":99")
                 .contains("\"total\":370");
     }
 
