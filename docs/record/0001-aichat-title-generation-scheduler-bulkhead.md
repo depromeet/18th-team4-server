@@ -61,7 +61,7 @@ t=수초  제목 생성이 끝나며 슬롯 반납 → 그제서야 영속화 �
 제목 생성이 아무리 몰려도 자기 풀 안에서만 경합하고, 영속화 풀(전역 `boundedElastic`)에는 손대지
 않으므로 사용자 응답 latency 가 보호된다. (배의 격벽처럼 한 칸이 잠겨도 다른 칸으로 안 번지게.)
 
-**5) 전용 풀 크기 — 처음엔 "작게"를 검토했으나, 결국 `threadCap=100`(넉넉)으로 정했다.**
+**5) 전용 풀 크기 — `threadCap 32` / `queueCap 64` (전역 backlog ≈ 2,048).**
 
 처음엔 "작은 threadCap(4)" 을 검토했다. 근거는 "제목 생성이 OpenAI 연결·DB 커넥션을 빌려 쓰니
 작게 잡아 포그라운드 채팅을 보호" 였다. 그러나 두 가지를 따져보니 작게 잡을 이유가 약했다:
@@ -74,14 +74,20 @@ t=수초  제목 생성이 끝나며 슬롯 반납 → 그제서야 영속화 �
   10,000 RPM 이라 무관).
 
 threadCap 이 실제로 제한하던 건 Hikari 가 아니라 **장애 시 blast-radius**(제목 호출이 매달릴 때 묶이는
-스레드·연결 수)였다. 그래서 이 blast-radius 를 **시간으로** 막는 read 타임아웃(아래 "추가 결정" 참고)을
-같이 넣고, threadCap 은 넉넉히 100 으로 정했다:
+스레드·연결 수)였다. 이 blast-radius 는 **시간으로**(전용 ChatClient 의 read 타임아웃, 아래 "추가 결정" 참고)
+막는다. 그래서 풀 크기는 **threadCap 32 / queueCap 64** 로 정했다:
 
-- **`threadCap` 100**: 스레드는 lazy 생성 + 60초 유휴 회수라 평소엔 0 에 수렴한다. 100은 사실상
-  "프리티어 규모에선 무제한" 처럼 동작해 첫 메시지 버스트의 제목을 빠르게 처리한다. 매달린 호출은
-  전용 ChatClient 의 10초 responseTimeout 이 끊어 주므로, 크게 둬도 스레드가 무한정 쌓이지 않는다.
-- **`queueCap` 2000**: 100 동시 실행을 넘는 버스트도 큐가 흡수한다. 초과 시 `RejectedExecutionException`
-  으로 거절(로그 후 스킵) — 백그라운드라 감내 가능.
+- **`threadCap` 32**: 동시 제목 생성 수의 상한. 스레드는 lazy 생성 + 60초 유휴 회수라 평소엔 0 에 수렴한다.
+  제목 생성은 저빈도(세션당 1회)라 도착률 ≪ 처리량이므로 32 면 충분하다. 매달린 호출은 10초 responseTimeout
+  이 끊어 주므로 스레드가 무한정 쌓이지 않는다.
+- **`queueCap` 64**: reactor `newBoundedElastic` 에서 이 값은 **backing thread 1개당 큐 한도(per-thread)** 다.
+  따라서 **전역 backlog 상한 = threadCap × queueCap = 32 × 64 ≈ 2,048**. 이 한도를 넘는 제출은
+  `RejectedExecutionException` 으로 거절(로그 후 스킵) — 백그라운드라 감내 가능.
+
+> 주의(리뷰 반영): `queueCap` 은 전역 큐 상한이 *아니다*. 초기엔 100/2000 으로 두고 "전역 2,000" 으로 오해했으나,
+> reactor 소스(`maxTaskQueuedPerThread`, executor 자기 큐에 대한 `ensureQueueCapacity`)상 per-thread 이므로
+> 그 값이면 전역 상한이 100×2000=200,000 까지 늘어 보호가 의도보다 100배 늦게 작동한다. 전역 한도를 의도대로
+> 두려면 **threadCap × queueCap 의 곱**으로 산정해야 한다 → 32×64.
 
 ## 고려한 대안
 
@@ -107,7 +113,7 @@ threadCap 이 실제로 제한하던 건 Hikari 가 아니라 **장애 시 blast
 전용 HTTP 클라이언트가 필요하다(reactor `.timeout()` 을 블로킹 호출에 걸어봐야 소켓이 안 풀린다 →
 HTTP 클라이언트 레벨이어야 함). 그래서 `AiChatTitleClientConfig` 에 전용 ChatClient 를 만들어
 reactor-netty `responseTimeout(10초)` 를 걸었다(moderation 이 자기 전용 RestClient 를 갖는 것과 동일 패턴).
-이 타임아웃이 위 `threadCap=100` 을 안전하게 만든다. 전용 ChatClient 엔 advisor 를 태우지 않는다 —
+이 타임아웃이 위 `threadCap=32` 의 매달린 호출을 시간으로 끊어 blast-radius 를 가둔다. 전용 ChatClient 엔 advisor 를 태우지 않는다 —
 입력은 이미 채팅 전송 시 moderation 을 통과했고, 출력 moderation advisor 는 제목마다 호출을 더해 비용·지연만 는다.
 
 **C) 트리거 조건 = "moderation 통과 + 성공 응답" 일 때만 (코드 변경 없이 보장 확인)** — 제목 생성은
@@ -130,8 +136,8 @@ reactor-netty `responseTimeout(10초)` 를 걸었다(moderation 이 자기 전�
 ## 결과 / 영향
 
 - **얻는 것**: 첫 메시지 버스트가 와도 영속화 풀이 보호돼 사용자 `Done` 이벤트가 늦지 않는다.
-  `threadCap=100` 으로 버스트의 제목도 빠르게 처리되고, 10초 responseTimeout 이 매달린 호출의 blast-radius 를
-  시간으로 가둔다. 제목은 유저 첫 질문 기반이라 주제가 더 또렷하다.
+  `threadCap=32`(전역 backlog ≈ 2,048)로 저빈도 버스트를 처리하고, 10초 responseTimeout 이 매달린 호출의
+  blast-radius 를 시간으로 가둔다. 제목은 유저 첫 질문 기반이라 주제가 더 또렷하다.
 - **치르는 것**: 스케줄러 빈 + 전용 ChatClient 빈 + 설정 두 값이 늘었다. 전용 풀 스레드(daemon)는
   평소엔 유휴 회수(60초)로 거의 0개에 수렴하므로 상시 비용은 미미하다.
 - **튜닝 여지**: `ai-chat.title-generation.thread-cap` / `queue-cap` 으로 조정 가능. responseTimeout(10초)도
@@ -155,5 +161,6 @@ reactor-netty `responseTimeout(10초)` 를 걸었다(moderation 이 자기 전�
 ## 근거 자료
 
 - 부하 조사 상세: `docs/superpowers/aichat-concurrency-investigation.md`(임시·gitignore)
-- `boundedElastic` 기본 크기(`10 × vCPU`)·큐(`100_000`)·유휴 회수(60초)는 reactor-core 의 기본값이며
-  `Schedulers.newBoundedElastic(...)` 으로 전용 풀을 따로 만들 수 있다.
+- `boundedElastic` 기본 크기(`10 × vCPU`)·큐(`100_000`, **per-thread**)·유휴 회수(60초)는 reactor-core 의
+  기본값이며 `Schedulers.newBoundedElastic(threadCap, queuedTaskCap, ...)` 으로 전용 풀을 따로 만들 수 있다.
+  `queuedTaskCap` 은 backing thread 1개당 한도(`maxTaskQueuedPerThread`)라 전역 backlog 상한 = threadCap × queuedTaskCap.
