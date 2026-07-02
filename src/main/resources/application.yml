@@ -1,6 +1,14 @@
 spring:
   application:
     name: readum
+  # 긴 외부 호출(AI 스트림) 동안 DB 커넥션을 요청 내내 붙잡지 않도록 OSIV 를 끈다 (#103).
+  # 엔티티에 JPA 연관관계가 0개라 트랜잭션 밖 LAZY 접근이 없어 LazyInitializationException 위험이 없다.
+  jpa:
+    open-in-view: false
+  # 블로킹 I/O(입력 moderation 동기 호출 등)를 값싸게 대량 동시 처리 (#103). Java 25 라 synchronized 핀닝은 사실상 해소됨.
+  threads:
+    virtual:
+      enabled: true
   ai:
     chat:
       observations:
