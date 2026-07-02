@@ -86,7 +86,8 @@ class AiChatMessageSendServiceTest {
     private final AiChatProperties aiChatProperties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
             new AiChatProperties.MessageRule(4000),
-            new AiChatProperties.RateLimit(10, 5, 3600, 20)
+            new AiChatProperties.RateLimit(10, 5, 3600, 20),
+            new AiChatProperties.TitleGeneration(4, 2000)
     );
 
     private AiChatMessageSendService service;
@@ -351,7 +352,6 @@ class AiChatMessageSendServiceTest {
                 .assertNext(event -> {
                     assertThat(event).isInstanceOf(MessageStreamEvent.Done.class);
                     MessageStreamEvent.Done done = (MessageStreamEvent.Done) event;
-                    assertThat(done.messageId()).isEqualTo(42L);
                     assertThat(done.tokenCount().total()).isEqualTo(370);
                     assertThat(done.tokenCount().input()).isEqualTo(312);
                     assertThat(done.tokenCount().output()).isEqualTo(58);

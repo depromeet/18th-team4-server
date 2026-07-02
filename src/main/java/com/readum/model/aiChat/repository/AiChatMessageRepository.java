@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Long> {
 
@@ -82,6 +83,18 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
              order by aiChatMessage.createdAt asc
             """)
     List<AiChatMessage> findValidMessagesBySessionIdOrderByCreatedAtAsc(@Param("sessionId") Long sessionId);
+
+    /**
+     * 세션의 첫 정상(COMPLETED) USER 메시지. 제목 생성이 "유저의 첫 질문" 기반으로 동작하도록 사용한다.
+     * REJECTED(가드레일 차단) USER 메시지는 제외되므로, 차단된 입력이 먼저 있었더라도 첫 정상 질문이 잡힌다.
+     */
+    default Optional<AiChatMessage> findFirstUserMessage(Long sessionId) {
+        return findFirstBySessionIdAndRoleAndStatusOrderByCreatedAtAscIdAsc(
+                sessionId, AiChatMessage.Role.USER, AiChatMessage.Status.COMPLETED);
+    }
+
+    Optional<AiChatMessage> findFirstBySessionIdAndRoleAndStatusOrderByCreatedAtAscIdAsc(
+            Long sessionId, AiChatMessage.Role role, AiChatMessage.Status status);
 
     /**
      * 마지막 요약 이후 유효 메시지 조회.

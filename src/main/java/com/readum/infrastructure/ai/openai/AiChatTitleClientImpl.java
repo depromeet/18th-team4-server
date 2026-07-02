@@ -27,7 +27,8 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
     private static final String PROMPT_TEMPLATE_ID = "title-generator-system";
     private static final String PROMPT_TEMPLATE_VERSION = "v1";
 
-    private final ChatClient chatClient;
+    // 제목 생성 전용 ChatClient(10초 responseTimeout, advisor 미적용). 빈 이름으로 주입해 채팅용 chatClient 와 구분한다.
+    private final ChatClient titleGenerationChatClient;
     private final AiPromptAuditLogger auditLogger;
 
     @Value("classpath:prompts/title-generator-system.st")
@@ -37,8 +38,7 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
 
     @PostConstruct
     void init() throws IOException {
-        // ChatClient 의 defaultSystem 은 reading-assistant 용으로 고정돼 있어,
-        // 제목 생성 호출 시에는 .system() 오버라이드로 프롬프트를 교체한다.
+        // 제목 생성 전용 ChatClient 에는 defaultSystem 을 두지 않으므로 호출 시 .system() 으로 제목 프롬프트를 지정한다.
         // 매 호출마다 파일을 읽지 않도록 startup 시 1번만 로드해 캐시.
         this.systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
     }
@@ -55,7 +55,7 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
         long startNanos = System.nanoTime();
         try {
             // content() 대신 chatResponse() 로 받아 토큰/모델 메타데이터를 감사 로그에 남긴다.
-            ChatResponse response = chatClient.prompt()
+            ChatResponse response = titleGenerationChatClient.prompt()
                     .system(systemPrompt)
                     .user(chatHistory)
                     .call()

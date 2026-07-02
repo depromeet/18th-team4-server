@@ -1,8 +1,8 @@
 package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.dto.AiChatChunk;
-import com.readum.domain.aiChat.dto.GenerateSessionTitleCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
+import com.readum.domain.aiChat.event.FirstAssistantResponseCompletedEvent;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
@@ -13,12 +13,9 @@ import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -37,8 +34,9 @@ public class AiChatMessagePersistService {
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final AiChatHistorySearchService aiChatHistorySearchService;
-    private final AiChatSessionTitleService aiChatSessionTitleService;
     private final SummaryJobRepository summaryJobRepository;
+    // 제목 생성을 직접 호출하지 않고 "첫 응답 완료" 이벤트만 발행한다. 실제 생성은 AFTER_COMMIT 리스너가 담당(결합 분리).
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 세션 소유권 및 잠김 여부를 검증하고 이전 이력만 조회한다(USER 메시지는 저장하지 않음).
@@ -92,35 +90,6 @@ public class AiChatMessagePersistService {
 
     public record MessageLoadResult(List<HistoryMessage> history, Long userBookId) {}
 
-    /**
-     * 첫 ASSISTANT 응답 commit 직후 대화 이력 기반으로 세션 제목을 비동기로 생성한다.
-     * 설계 의도:
-     * - commit 전에 호출하면 LLM 실패가 ASSISTANT 메시지 영속화까지 롤백시킨다 — afterCommit 으로 분리.
-     * - afterCommit 콜백은 호출 스레드(보통 servlet 요청 스레드) 에서 실행되므로,
-     *   LLM blocking 호출은 boundedElastic 으로 즉시 던져 응답 latency 에 영향을 주지 않게 한다.
-     * - 제목 생성이 실패해도 사용자 흐름과 무관하므로 예외는 위로 던지지 않고 로그만 남긴다.
-     * - 확장성: 향후 수동 재명명 트리거가 추가되어도 동일한
-     * {@link AiChatSessionTitleService#execute(GenerateSessionTitleCommand)} 진입점만 호출하면 된다.
-     */
-    private void scheduleTitleGenerationAfterCommit(Long sessionId, List<AiChatMessage> messages) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            // 트랜잭션 밖에서 직접 호출되는 경우(테스트/배치) 는 skip — 호출자가 직접 titleService 호출.
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                Mono.fromRunnable(() -> aiChatSessionTitleService.execute(
-                                new GenerateSessionTitleCommand(sessionId, messages)))
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .subscribe(
-                                null,
-                                error -> log.error("세션 제목 생성 실패 sessionId={}", sessionId, error)
-                        );
-            }
-        });
-    }
-
     @Transactional
     public AiChatMessage saveAssistantSuccess(
             Long sessionId, String accumulated, AiChatChunk.Completion meta
@@ -135,15 +104,18 @@ public class AiChatMessagePersistService {
         // 세션 누적치는 ASSISTANT 가 생성한 토큰만 합산한다.
         // totalTokens 는 입력 프롬프트(이전 대화 + 시스템 프롬프트) 까지 포함하므로 누적에 쓰면
         // 같은 컨텍스트가 매 턴 중복 집계되어 실제 생성량보다 부풀려진다.
-        // 첫 ASSISTANT 응답 완료(첫 교환) 시점에 대화 이력 기반으로 세션 제목을 생성한다.
+        // 첫 ASSISTANT 응답이 성공 저장된 시점에, 유저의 첫 질문(첫 COMPLETED USER 메시지)을 담아 "첫 응답 완료" 이벤트를 발행한다.
+        // 실제 제목 생성은 AFTER_COMMIT 리스너가 담당한다(커밋 후 실행 → LLM 실패가 이 트랜잭션을 롤백시키지 않음).
+        // 어시스턴트 응답까지 합치지 않고 첫 질문만 쓰는 이유: 제목은 사용자가 무엇을 물었는지를 요약하면 충분하고,
+        // 긴 답변을 함께 넣으면 주제가 희석된다. (재생성/수동 재명명 등 다른 트리거는 각자 입력을 구성해 호출한다.)
         aiChatSessionRepository.findById(sessionId).ifPresent(session -> {
             if (outputTokens != null && outputTokens > 0) {
                 session.addAssistantTokens(outputTokens);
             }
             if (session.isFirstUserMessage()) {
-                List<AiChatMessage> messages =
-                        aiChatMessageRepository.findValidMessagesBySessionIdOrderByCreatedAtAsc(sessionId);
-                scheduleTitleGenerationAfterCommit(sessionId, messages);
+                aiChatMessageRepository.findFirstUserMessage(sessionId)
+                        .ifPresent(firstUserMessage -> eventPublisher.publishEvent(
+                                new FirstAssistantResponseCompletedEvent(sessionId, firstUserMessage)));
             }
         });
         return saved;

@@ -43,7 +43,6 @@ public class MessageStreamSseSerializer {
 
     private DonePayload toDonePayload(MessageStreamEvent.Done done) {
         return new DonePayload(
-                done.messageId(),
                 new TokenCountPayload(
                         done.tokenCount().input(),
                         done.tokenCount().output(),
@@ -82,7 +81,7 @@ public class MessageStreamSseSerializer {
     // createdAt: 직접 LocalDateTime 으로 둬서 Jackson(JavaTimeModule) 이 일관되게 직렬화하도록 한다.
     // toString() 으로 String 화하면 다른 Response DTO 들(MessageResponse 등) 의 createdAt 직렬화
     // 형식과 어긋나, 같은 의미의 필드가 엔드포인트마다 다른 모양이 될 수 있다.
-    private record DonePayload(Long messageId, TokenCountPayload tokenCount, LocalDateTime createdAt) {}
+    private record DonePayload(TokenCountPayload tokenCount, LocalDateTime createdAt) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record ErrorPayload(String code, String message, Map<String, Object> rateLimit) {}

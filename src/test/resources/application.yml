@@ -38,6 +38,9 @@ ai-chat:
     max-message-count: 5
     rejected-count-period-seconds: 3600
     rejected-max-message-count: 20
+  title-generation:
+    thread-cap: 32
+    queue-cap: 64
 
 aladin:
   ttb-key: test-ttb-key
