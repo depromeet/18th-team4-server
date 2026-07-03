@@ -1,5 +1,6 @@
 package com.readum.domain.aiChat.service;
 
+import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
@@ -45,7 +46,10 @@ class SummaryDraftSearchServiceTest {
     private UserBookRepository userBookRepository;
 
     @Spy
-    private SummaryDraftPolicy summaryDraftPolicy = new SummaryDraftPolicy();
+    private SummaryDraftPolicy summaryDraftPolicy = new SummaryDraftPolicy(new AiChatProperties(
+            null, null, null, null,
+            new AiChatProperties.SummaryDraft(500)
+    ));
 
     @Mock
     private SummaryJobRepository summaryJobRepository;

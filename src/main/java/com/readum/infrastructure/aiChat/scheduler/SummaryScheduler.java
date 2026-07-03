@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 public class SummaryScheduler {
 
     private final SummaryJobRepository summaryJobRepository;
+    private final SummaryDraftPolicy summaryDraftPolicy;
 
     @Scheduled(cron = "0 0 6 * * *")
     @Transactional
@@ -32,7 +33,7 @@ public class SummaryScheduler {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime since = now.minusHours(24);
         int enqueued = summaryJobRepository.enqueuePendingForEligibleSessions(
-                SummaryDraftPolicy.MIN_ACCUMULATED_TOKENS, since, now);
+                summaryDraftPolicy.minAccumulatedTokens(), since, now);
         log.info("감상문 자동 생성 작업 적재 완료 {}건", enqueued);
     }
 }

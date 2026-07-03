@@ -41,6 +41,8 @@ ai-chat:
   title-generation:
     thread-cap: 32
     queue-cap: 64
+  summary-draft:
+    min-accumulated-tokens: 500
 
 aladin:
   ttb-key: test-ttb-key

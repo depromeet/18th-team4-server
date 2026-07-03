@@ -52,6 +52,8 @@ ai-chat:
     thread-cap: 32                       # 동시 제목 생성 상한. 스레드는 lazy 생성 + 60초 유휴 회수라 평소엔 0 에 수렴.
                                          # 저빈도 백그라운드라 32 면 충분. 전용 ChatClient 의 10초 responseTimeout 이 매달린 호출을 끊어 blast-radius 를 시간으로 제한.
     queue-cap: 64                        # backing thread 1개당 큐 한도(per-thread). 전역 backlog 상한 = thread-cap × queue-cap = 32 × 64 ≈ 2,048. 초과 시 RejectedExecutionException(로그 후 스킵).
+  summary-draft:
+    min-accumulated-tokens: 500          # 감상문 생성에 필요한 최소 누적 토큰 (확정 정책값)
 
 springdoc:
   api-docs:
