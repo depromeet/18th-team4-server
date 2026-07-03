@@ -13,7 +13,8 @@ public record AiChatProperties(
         @Valid ContextWindow contextWindow,
         @Valid MessageRule message,
         @Valid RateLimit rateLimit,
-        @Valid TitleGeneration titleGeneration
+        @Valid TitleGeneration titleGeneration,
+        @Valid SummaryDraft summaryDraft
 ) {
 
     /**
@@ -58,5 +59,12 @@ public record AiChatProperties(
      *               따라서 전역 backlog 상한 = threadCap × queueCap 이므로, 둘의 곱이 의도한 한도가 되도록 잡는다.
      */
     public record TitleGeneration(@Positive int threadCap, @Positive int queueCap) {
+    }
+
+    /**
+     * 감상문 초안 생성 자격 정책.
+     * minAccumulatedTokens: 세션의 ASSISTANT 누적 토큰이 이 값 이상이어야 감상문 생성 가능.
+     */
+    public record SummaryDraft(@Positive int minAccumulatedTokens) {
     }
 }
