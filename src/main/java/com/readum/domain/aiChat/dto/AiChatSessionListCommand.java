@@ -1,7 +1,7 @@
 package com.readum.domain.aiChat.dto;
 
 public record AiChatSessionListCommand(
-        String userSessionId,
+        Long userId,
         Long userBookId,
         int page,
         int size

@@ -16,6 +16,7 @@ import com.readum.domain.aiChat.service.SummaryEditService;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
+import com.readum.presentation.common.security.AuthenticatedUserId;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateRequest;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionCreateResponse;
 import com.readum.presentation.controller.aiChat.dto.AiChatSessionListRequest;
@@ -38,7 +39,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -78,10 +78,10 @@ public class AiChatController {
     })
     @PostMapping("/sessions")
     public ResponseEntity<GlobalApiResponse<AiChatSessionCreateResponse>> createSession(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @Valid @RequestBody AiChatSessionCreateRequest request
     ) {
-        AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userSessionId));
+        AiChatSessionCreateResult result = aiChatSessionCreateService.execute(request.toCommand(userId));
         return GlobalApiResponse.created(AiChatSessionCreateResponse.from(result));
     }
 
@@ -103,10 +103,10 @@ public class AiChatController {
     })
     @GetMapping("/sessions")
     public ResponseEntity<GlobalApiResponse<AiChatSessionListResponse>> getSessions(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @Valid @ModelAttribute AiChatSessionListRequest request
     ) {
-        AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(request.toCommand(userSessionId));
+        AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(request.toCommand(userId));
         return GlobalApiResponse.ok(AiChatSessionListResponse.from(result));
     }
 
@@ -123,10 +123,10 @@ public class AiChatController {
     })
     @GetMapping("/books/{userBookId}/sessions")
     public ResponseEntity<GlobalApiResponse<BookChatSessionsResponse>> getBookChatSessions(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long userBookId
     ) {
-        BookChatSessionsResult result = bookChatSessionSearchService.findByUserBook(userBookId, userSessionId);
+        BookChatSessionsResult result = bookChatSessionSearchService.findByUserBook(userBookId, userId);
         return GlobalApiResponse.ok(BookChatSessionsResponse.from(result));
     }
 
@@ -203,12 +203,12 @@ public class AiChatController {
     })
     @PostMapping(value = "/sessions/{sessionId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<Flux<ServerSentEvent<String>>> sendMessage(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
         Flux<ServerSentEvent<String>> stream = aiChatMessageSendService
-                .execute(request.toCommand(userSessionId, sessionId))
+                .execute(request.toCommand(userId, sessionId))
                 .map(messageStreamSseSerializer::toServerSentEvent);
         return ResponseEntity.ok(stream);
     }
@@ -226,11 +226,11 @@ public class AiChatController {
     })
     @GetMapping("/sessions/{sessionId}/messages")
     public ResponseEntity<GlobalApiResponse<MessageListResponse>> getMessages(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId,
             @Valid @ModelAttribute MessageListRequest request
     ) {
-        MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userSessionId, sessionId));
+        MessageListResult result = aiChatMessageSearchService.findBySessionId(request.toCommand(userId, sessionId));
         return GlobalApiResponse.ok(MessageListResponse.from(result));
     }
 
@@ -256,10 +256,10 @@ public class AiChatController {
     })
     @GetMapping("/sessions/{sessionId}/summary")
     public ResponseEntity<GlobalApiResponse<SummaryResponse>> getSummary(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId
     ) {
-        SummaryResult result = summarySearchService.findBySessionId(sessionId, userSessionId);
+        SummaryResult result = summarySearchService.findBySessionId(sessionId, userId);
         return GlobalApiResponse.ok(SummaryResponse.from(result));
     }
 
@@ -275,11 +275,11 @@ public class AiChatController {
     })
     @PutMapping("/sessions/{sessionId}/summary")
     public ResponseEntity<GlobalApiResponse<SummaryResponse>> editSummary(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId,
             @Valid @RequestBody SummaryEditRequest request
     ) {
-        SummaryResult result = summaryEditService.execute(request.toCommand(userSessionId, sessionId));
+        SummaryResult result = summaryEditService.execute(request.toCommand(userId, sessionId));
         return GlobalApiResponse.ok(SummaryResponse.from(result));
     }
 
@@ -296,10 +296,10 @@ public class AiChatController {
     })
     @GetMapping("/sessions/{sessionId}/summary-draft/eligibility")
     public ResponseEntity<GlobalApiResponse<SummaryDraftEligibilityResponse>> getSummaryDraftEligibility(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId
     ) {
-        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(sessionId, userSessionId);
+        SummaryDraftEligibilityResult result = summaryDraftSearchService.findEligibility(sessionId, userId);
         return GlobalApiResponse.ok(SummaryDraftEligibilityResponse.from(result));
     }
 
@@ -324,10 +324,10 @@ public class AiChatController {
     })
     @PostMapping("/sessions/{sessionId}/summary-draft")
     public ResponseEntity<Void> createSummaryDraft(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId
     ) {
-        summaryDraftService.execute(sessionId, userSessionId);
+        summaryDraftService.execute(sessionId, userId);
         return ResponseEntity.accepted().build();
     }
 }

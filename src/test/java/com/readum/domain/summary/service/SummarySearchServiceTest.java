@@ -337,13 +337,12 @@ class SummarySearchServiceTest {
     void 세션_ID로_조회는_감상문을_반환한다() {
         AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
         Summary summary = SummaryFixture.persistedSummary(17L, 10L, SESSION_ID, "감상문 제목", "감상문 본문");
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
         given(summaryJobRepository.existsBlockingSummaryJob(eq(SESSION_ID), any(LocalDateTime.class)))
                 .willReturn(false);
         given(summaryRepository.findByAiChatSessionId(SESSION_ID)).willReturn(Optional.of(summary));
 
-        SummaryResult result = summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID);
+        SummaryResult result = summarySearchService.findBySessionId(SESSION_ID, USER_ID);
 
         assertThat(result.title()).isEqualTo("감상문 제목");
         assertThat(result.body()).isEqualTo("감상문 본문");
@@ -353,12 +352,11 @@ class SummarySearchServiceTest {
     @Test
     void 세션_ID로_조회_시_차단_작업이_있으면_ConflictException_을_던진다() {
         AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
         given(summaryJobRepository.existsBlockingSummaryJob(eq(SESSION_ID), any(LocalDateTime.class)))
                 .willReturn(true);
 
-        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
+        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
                 .isEqualTo(SummaryErrorCode.SUMMARY_IN_PROGRESS);
@@ -367,13 +365,12 @@ class SummarySearchServiceTest {
     @Test
     void 세션_ID로_조회_시_감상문이_없으면_NotFoundException_을_던진다() {
         AiChatSession active = AiChatSessionFixture.persistedActiveSession(SESSION_ID, 10L, 3, 100, null);
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.of(active));
         given(summaryJobRepository.existsBlockingSummaryJob(eq(SESSION_ID), any(LocalDateTime.class)))
                 .willReturn(false);
         given(summaryRepository.findByAiChatSessionId(SESSION_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
+        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(SummaryErrorCode.SUMMARY_NOT_YET_CREATED);
@@ -381,10 +378,9 @@ class SummarySearchServiceTest {
 
     @Test
     void 세션_ID로_조회_시_세션이_없거나_소유권이_없으면_NotFoundException_을_던진다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(aiChatSessionRepository.findByIdAndOwner(SESSION_ID, USER_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_SESSION_ID))
+        assertThatThrownBy(() -> summarySearchService.findBySessionId(SESSION_ID, USER_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);

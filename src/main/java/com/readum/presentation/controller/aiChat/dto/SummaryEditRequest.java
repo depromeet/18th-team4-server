@@ -14,7 +14,7 @@ public record SummaryEditRequest(
         String body
 ) {
 
-    public SummaryEditCommand toCommand(String userSessionId, Long sessionId) {
-        return new SummaryEditCommand(userSessionId, sessionId, title, body);
+    public SummaryEditCommand toCommand(Long userId, Long sessionId) {
+        return new SummaryEditCommand(userId, sessionId, title, body);
     }
 }

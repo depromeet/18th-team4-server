@@ -10,7 +10,7 @@ public record AiChatSessionCreateRequest(
         Long userBookId
 ) {
 
-    public AiChatSessionCreateCommand toCommand(String userSessionId) {
-        return new AiChatSessionCreateCommand(userSessionId, userBookId);
+    public AiChatSessionCreateCommand toCommand(Long userId) {
+        return new AiChatSessionCreateCommand(userId, userBookId);
     }
 }

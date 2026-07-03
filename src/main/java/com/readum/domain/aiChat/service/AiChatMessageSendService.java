@@ -15,13 +15,9 @@ import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.TooManyRequestsException;
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.book.repository.BookRepository;
-import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserBookRepository;
-import com.readum.model.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -45,7 +41,6 @@ public class AiChatMessageSendService {
 
     private static final Pattern WHITESPACE_RUN = Pattern.compile("[\\p{Z}\\s]+");
 
-    private final UserRepository userRepository;
     private final AiChatMessagePersistService aiChatMessagePersistService;
     private final AiChatClient aiChatClient;
     private final AiChatProperties aiChatProperties;
@@ -55,19 +50,17 @@ public class AiChatMessageSendService {
     private final InputModerationClient inputModerationClient;
 
     public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
-        User user = userRepository.findBySessionId(command.userSessionId())
-                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-
         String normalizedContent = validateAndStripContent(command.content());
         Long sessionId = command.sessionId();
+        Long userId = command.userId();
 
         // 사전 단계: rate-limit 검사 / 이력 조회 / 입력 moderation / USER 메시지 영속화는 모두 SSE 시작 전에 끝난다.
         // 여기서 던진 예외는 SSE 이전에 GlobalExceptionHandler 가 처리해 4XX/5XX JSON 응답으로 나간다.
-        verifyUserMessageRateLimit(user.getId());
+        verifyUserMessageRateLimit(userId);
 
         // 이력만 조회(USER 미저장). 세션 검증은 여기서 끝난다.
         AiChatMessagePersistService.MessageLoadResult loaded =
-                aiChatMessagePersistService.loadHistory(sessionId, user.getId());
+                aiChatMessagePersistService.loadHistory(sessionId, userId);
 
         AiChatStreamCommand.BookContext bookContext = resolveBookContext(loaded.userBookId());
 
@@ -77,7 +70,7 @@ public class AiChatMessageSendService {
             case BLOCKED -> {
                 aiChatMessagePersistService.recordRejectedUserMessage(sessionId, normalizedContent);
                 log.warn("[Guardrail] 입력 차단 sessionId={} userId={} categories={}",
-                        sessionId, user.getId(), moderation.flaggedCategories());
+                        sessionId, userId, moderation.flaggedCategories());
                 throw new BadRequestException(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);
             }
             case UNAVAILABLE -> {
@@ -90,7 +83,7 @@ public class AiChatMessageSendService {
         }
 
         // 통과한 경우에만 USER 메시지를 COMPLETED 로 저장(턴 카운트 포함).
-        aiChatMessagePersistService.recordUserMessage(sessionId, user.getId(), normalizedContent);
+        aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
         List<HistoryMessage> withCurrent = new ArrayList<>(loaded.history().size() + 1);
         withCurrent.addAll(loaded.history());

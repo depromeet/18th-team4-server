@@ -1,7 +1,7 @@
 package com.readum.domain.aiChat.dto;
 
 public record SummaryEditCommand(
-        String userSessionId,
+        Long userId,
         Long sessionId,
         String title,
         String body

@@ -130,11 +130,8 @@ public class SummarySearchService {
     }
 
     @Transactional(readOnly = true)
-    public SummaryResult findBySessionId(Long sessionId, String userSessionId) {
-        User user = userRepository.findBySessionId(userSessionId)
-                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-
-        AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, user.getId())
+    public SummaryResult findBySessionId(Long sessionId, Long userId) {
+        AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, userId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         // "생성 중" 은 차단 판정 조건(PENDING 또는 유효 점유 PROCESSING)으로 판정(폴링 계약: 409 유지)

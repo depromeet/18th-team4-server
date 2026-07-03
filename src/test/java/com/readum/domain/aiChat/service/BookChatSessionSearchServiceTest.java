@@ -77,7 +77,7 @@ class BookChatSessionSearchServiceTest {
         aiChatMessageRepository.save(AiChatMessageFixture.userMessageAt(newer.getId(), "최근 대화", now.minusHours(1)));
 
         BookChatSessionsResult result = bookChatSessionSearchService.findByUserBook(
-                userBook.getId(), user.getSessionId());
+                userBook.getId(), user.getId());
 
         assertThat(result.book().title()).isEqualTo("데미안");
         assertThat(result.book().publishedYear()).isEqualTo(2020);
@@ -104,7 +104,7 @@ class BookChatSessionSearchServiceTest {
         AiChatSession session = aiChatSessionRepository.save(AiChatSession.create(userBook.getId()));
 
         BookChatSessionsResult result = bookChatSessionSearchService.findByUserBook(
-                userBook.getId(), user.getSessionId());
+                userBook.getId(), user.getId());
 
         assertThat(result.sessions()).hasSize(1);
         assertThat(result.sessions().get(0).lastChattedDate())
@@ -120,7 +120,7 @@ class BookChatSessionSearchServiceTest {
         UserBook userBook = userBookRepository.save(UserBook.create(owner.getId(), book.getId()));
 
         assertThatThrownBy(() -> bookChatSessionSearchService.findByUserBook(
-                userBook.getId(), other.getSessionId()))
+                userBook.getId(), other.getId()))
                 .isInstanceOf(NotFoundException.class);
     }
 }
