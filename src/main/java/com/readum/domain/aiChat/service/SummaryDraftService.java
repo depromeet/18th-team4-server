@@ -1,5 +1,6 @@
 package com.readum.domain.aiChat.service;
 
+import com.readum.domain.aiChat.dto.SummaryDraftCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.ConflictException;
@@ -32,7 +33,10 @@ public class SummaryDraftService {
     private final EnqueueSummaryJobService enqueueSummaryJobService;
 
     @Transactional
-    public void execute(Long sessionId, Long userId) {
+    public void execute(SummaryDraftCommand command) {
+        Long sessionId = command.sessionId();
+        Long userId = command.userId();
+
         AiChatSession session = aiChatSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 

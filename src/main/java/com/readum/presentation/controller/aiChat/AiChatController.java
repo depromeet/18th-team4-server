@@ -4,6 +4,7 @@ import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
+import com.readum.domain.aiChat.dto.SummaryDraftCommand;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
@@ -327,7 +328,7 @@ public class AiChatController {
             @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId
     ) {
-        summaryDraftService.execute(sessionId, userId);
+        summaryDraftService.execute(new SummaryDraftCommand(userId, sessionId));
         return ResponseEntity.accepted().build();
     }
 }

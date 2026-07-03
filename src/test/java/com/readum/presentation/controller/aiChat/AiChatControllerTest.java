@@ -8,6 +8,7 @@ import com.readum.domain.aiChat.dto.AiChatSessionResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.MessageResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
+import com.readum.domain.aiChat.dto.SummaryDraftCommand;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.summary.dto.SummaryResult;
@@ -585,7 +586,7 @@ class AiChatControllerTest {
     @Test
     void 감상문_초안_누적_토큰이_부족하면_422를_반환한다() throws Exception {
         org.mockito.Mockito.doThrow(new UnprocessableEntityException(AiChatErrorCode.CHAT_VOLUME_NOT_ENOUGH))
-                .when(summaryDraftService).execute(eq(1L), eq(USER_ID));
+                .when(summaryDraftService).execute(any(SummaryDraftCommand.class));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft"))
                 .andExpect(status().isUnprocessableEntity())
@@ -595,7 +596,7 @@ class AiChatControllerTest {
     @Test
     void 감상문_초안_종료된_세션이면_409를_반환한다() throws Exception {
         org.mockito.Mockito.doThrow(new ConflictException(AiChatErrorCode.SESSION_ALREADY_SUMMARIZED))
-                .when(summaryDraftService).execute(eq(1L), eq(USER_ID));
+                .when(summaryDraftService).execute(any(SummaryDraftCommand.class));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft"))
                 .andExpect(status().isConflict())
@@ -605,7 +606,7 @@ class AiChatControllerTest {
     @Test
     void 감상문_초안_존재하지_않는_세션이면_404를_반환한다() throws Exception {
         org.mockito.Mockito.doThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND))
-                .when(summaryDraftService).execute(eq(1L), eq(USER_ID));
+                .when(summaryDraftService).execute(any(SummaryDraftCommand.class));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/1/summary-draft"))
                 .andExpect(status().isNotFound())

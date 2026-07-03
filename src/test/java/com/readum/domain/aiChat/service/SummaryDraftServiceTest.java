@@ -1,5 +1,6 @@
 package com.readum.domain.aiChat.service;
 
+import com.readum.domain.aiChat.dto.SummaryDraftCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.service.policy.SummaryDraftPolicy;
 import com.readum.domain.exception.ConflictException;
@@ -53,7 +54,7 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
         given(enqueueSummaryJobService.execute(SESSION_ID)).willReturn(new EnqueueSummaryJobResult(true));
 
-        summaryDraftService.execute(SESSION_ID, USER_ID);
+        summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID));
 
         verify(enqueueSummaryJobService).execute(SESSION_ID);
     }
@@ -66,7 +67,7 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
         given(enqueueSummaryJobService.execute(SESSION_ID)).willReturn(new EnqueueSummaryJobResult(false));
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID)))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
@@ -76,7 +77,7 @@ class SummaryDraftServiceTest {
     void 세션이_없으면_NotFoundException이_발생한다() {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID)))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
@@ -89,7 +90,7 @@ class SummaryDraftServiceTest {
         given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID)))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
@@ -105,7 +106,7 @@ class SummaryDraftServiceTest {
         willThrow(new ConflictException(AiChatErrorCode.SUMMARY_IN_PROGRESS))
                 .given(summaryDraftPolicy).assertEligible(session);
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID)))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
@@ -120,7 +121,7 @@ class SummaryDraftServiceTest {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
         given(summaryJobRepository.existsByActiveSessionId(SESSION_ID)).willReturn(true);
 
-        assertThatThrownBy(() -> summaryDraftService.execute(SESSION_ID, USER_ID))
+        assertThatThrownBy(() -> summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID)))
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
