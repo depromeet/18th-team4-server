@@ -77,7 +77,7 @@ public class UserController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @GetMapping("/me")
     public ResponseEntity<GlobalApiResponse<UserSessionInfoResponse>> getSessionInfo(
@@ -92,7 +92,7 @@ public class UserController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @GetMapping("/me/profile")
     public ResponseEntity<GlobalApiResponse<UserProfileResponse>> getProfile(
@@ -107,7 +107,7 @@ public class UserController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "온보딩 완료 처리 성공"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @PostMapping("/me/onboarding")
     public ResponseEntity<GlobalApiResponse<CompleteOnboardingResponse>> completeOnboarding(
@@ -124,7 +124,7 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "닉네임 수정 성공"),
             @ApiResponse(responseCode = "400", description = "닉네임 형식이 올바르지 않음"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @PutMapping("/me/nickname")
     public ResponseEntity<GlobalApiResponse<UpdateNicknameResponse>> updateNickname(

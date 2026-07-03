@@ -71,7 +71,7 @@ public class UserBookController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공 (등록 도서 0건이면 빈 배열)"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @GetMapping
     public ResponseEntity<GlobalApiResponse<UserBookListResponse>> list(
@@ -89,7 +89,7 @@ public class UserBookController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "삭제 성공 (응답 본문 없음)"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "본인 책장에 등록되지 않은 도서")
     })
     @DeleteMapping("/{userBookId}")
