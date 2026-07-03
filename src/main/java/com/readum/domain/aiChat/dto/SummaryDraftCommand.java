@@ -1,7 +1,7 @@
 package com.readum.domain.aiChat.dto;
 
-public record AiChatSessionCreateCommand(
+public record SummaryDraftCommand(
         Long userId,
-        Long userBookId
+        Long sessionId
 ) {
 }

@@ -10,6 +10,7 @@ import com.readum.domain.user.service.CreateUserSessionService;
 import com.readum.domain.user.service.UpdateNicknameService;
 import com.readum.domain.user.service.UserSearchService;
 import com.readum.presentation.common.GlobalApiResponse;
+import com.readum.presentation.common.security.AuthenticatedUserId;
 import com.readum.presentation.controller.user.dto.CompleteOnboardingResponse;
 import com.readum.presentation.controller.user.dto.CreateUserSessionResponse;
 import com.readum.presentation.controller.user.dto.UpdateNicknameRequest;
@@ -26,7 +27,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -77,12 +77,12 @@ public class UserController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @GetMapping("/me")
     public ResponseEntity<GlobalApiResponse<UserSessionInfoResponse>> getSessionInfo(
-            @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
-        UserSessionInfoResult result = userSearchService.findSessionInfo(sessionId);
+            @AuthenticatedUserId Long userId) {
+        UserSessionInfoResult result = userSearchService.findSessionInfo(userId);
         return GlobalApiResponse.ok(UserSessionInfoResponse.from(result));
     }
 
@@ -92,12 +92,12 @@ public class UserController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @GetMapping("/me/profile")
     public ResponseEntity<GlobalApiResponse<UserProfileResponse>> getProfile(
-            @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
-        UserProfileResult result = userSearchService.findProfile(sessionId);
+            @AuthenticatedUserId Long userId) {
+        UserProfileResult result = userSearchService.findProfile(userId);
         return GlobalApiResponse.ok(UserProfileResponse.from(result));
     }
 
@@ -107,12 +107,12 @@ public class UserController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "온보딩 완료 처리 성공"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @PostMapping("/me/onboarding")
     public ResponseEntity<GlobalApiResponse<CompleteOnboardingResponse>> completeOnboarding(
-            @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId) {
-        CompleteOnboardingResult result = completeOnboardingService.execute(sessionId);
+            @AuthenticatedUserId Long userId) {
+        CompleteOnboardingResult result = completeOnboardingService.execute(userId);
         return GlobalApiResponse.ok(CompleteOnboardingResponse.from(result));
     }
 
@@ -124,13 +124,13 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "닉네임 수정 성공"),
             @ApiResponse(responseCode = "400", description = "닉네임 형식이 올바르지 않음"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @PutMapping("/me/nickname")
     public ResponseEntity<GlobalApiResponse<UpdateNicknameResponse>> updateNickname(
-            @CookieValue(name = USER_SESSION_COOKIE, required = true) String sessionId,
+            @AuthenticatedUserId Long userId,
             @RequestBody UpdateNicknameRequest request) {
-        UpdateNicknameResult result = updateNicknameService.execute(request.toCommand(sessionId));
+        UpdateNicknameResult result = updateNicknameService.execute(request.toCommand(userId));
         return GlobalApiResponse.ok(UpdateNicknameResponse.from(result));
     }
 

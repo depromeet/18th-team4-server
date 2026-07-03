@@ -3,8 +3,6 @@ package com.readum.domain.aiChat.service;
 import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
@@ -14,10 +12,8 @@ import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.repository.SummaryRepository;
-import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
-import com.readum.model.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -35,17 +31,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class BookChatSessionSearchService {
 
-    private final UserRepository userRepository;
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final SummaryRepository summaryRepository;
 
-    public BookChatSessionsResult findByUserBook(Long userBookId, String userSessionId) {
-        User user = userRepository.findBySessionId(userSessionId)
-                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-        UserBook userBook = userBookRepository.findByIdAndUserId(userBookId, user.getId())
+    public BookChatSessionsResult findByUserBook(Long userBookId, Long userId) {
+        UserBook userBook = userBookRepository.findByIdAndUserId(userBookId, userId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.USER_BOOK_NOT_FOUND));
         Book book = bookRepository.findById(userBook.getBookId())
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.USER_BOOK_NOT_FOUND));

@@ -7,6 +7,7 @@ import com.readum.domain.user.userbook.service.UserBookCreateService;
 import com.readum.domain.user.userbook.service.UserBookDeleteService;
 import com.readum.domain.user.userbook.service.UserBookSearchService;
 import com.readum.presentation.common.GlobalApiResponse;
+import com.readum.presentation.common.security.AuthenticatedUserId;
 import com.readum.presentation.controller.user.dto.UserBookCreateRequest;
 import com.readum.presentation.controller.user.dto.UserBookListResponse;
 import com.readum.presentation.controller.user.dto.UserBookResponse;
@@ -18,7 +19,6 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -51,9 +51,9 @@ public class UserBookController {
     })
     @PostMapping
     public ResponseEntity<GlobalApiResponse<UserBookResponse>> create(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @Valid @RequestBody UserBookCreateRequest request) {
-        UserBookCreateResult result = userBookCreateService.execute(request.toCommand(userSessionId));
+        UserBookCreateResult result = userBookCreateService.execute(request.toCommand(userId));
         UserBookResponse response = UserBookResponse.from(result);
 
         return ResponseEntity
@@ -71,12 +71,12 @@ public class UserBookController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "조회 성공 (등록 도서 0건이면 빈 배열)"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션")
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청")
     })
     @GetMapping
     public ResponseEntity<GlobalApiResponse<UserBookListResponse>> list(
-            @CookieValue(name = "user_session") String userSessionId) {
-        UserBookSearchResult result = userBookSearchService.findMyBooks(userSessionId);
+            @AuthenticatedUserId Long userId) {
+        UserBookSearchResult result = userBookSearchService.findMyBooks(userId);
         return GlobalApiResponse.ok(UserBookListResponse.from(result));
     }
 
@@ -89,14 +89,14 @@ public class UserBookController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "삭제 성공 (응답 본문 없음)"),
-            @ApiResponse(responseCode = "401", description = "user_session 쿠키 누락 또는 유효하지 않은 세션"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "본인 책장에 등록되지 않은 도서")
     })
     @DeleteMapping("/{userBookId}")
     public ResponseEntity<Void> delete(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long userBookId) {
-        userBookDeleteService.execute(new UserBookDeleteCommand(userSessionId, userBookId));
+        userBookDeleteService.execute(new UserBookDeleteCommand(userId, userBookId));
         return ResponseEntity.noContent().build();
     }
 }

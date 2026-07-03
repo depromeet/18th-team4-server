@@ -19,7 +19,7 @@ public record AiChatSessionListRequest(
         int size
 ) {
 
-    public AiChatSessionListCommand toCommand(String userSessionId) {
-        return new AiChatSessionListCommand(userSessionId, userBookId, page, size);
+    public AiChatSessionListCommand toCommand(Long userId) {
+        return new AiChatSessionListCommand(userId, userBookId, page, size);
     }
 }

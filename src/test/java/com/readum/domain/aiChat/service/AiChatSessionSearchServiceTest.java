@@ -6,17 +6,11 @@ import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.AiChatSessionResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.aiChat.repository.projection.AiChatSessionListProjection;
-import com.readum.model.user.entity.User;
-import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
-import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -32,18 +26,13 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 class AiChatSessionSearchServiceTest {
 
-    private static final String USER_SESSION_ID = "test-session-id";
     private static final Long USER_ID = 1L;
     private static final Long USER_BOOK_ID = 100L;
-
-    @Mock
-    private UserRepository userRepository;
 
     @Mock
     private AiChatSessionRepository aiChatSessionRepository;
@@ -54,30 +43,12 @@ class AiChatSessionSearchServiceTest {
     @InjectMocks
     private AiChatSessionSearchService aiChatSessionSearchService;
 
-    @BeforeEach
-    void setUp() {
-        User testUser = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
-        lenient().when(userRepository.findBySessionId(USER_SESSION_ID)).thenReturn(Optional.of(testUser));
-    }
-
-    @Test
-    void 유효하지_않은_user_session_쿠키면_UnauthorizedException() {
-        given(userRepository.findBySessionId("invalid")).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> aiChatSessionSearchService.findByUserBookId(
-                new AiChatSessionListCommand("invalid", USER_BOOK_ID, 1, 20)
-        ))
-                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
-                .extracting(UnauthorizedException::getErrorCode)
-                .isEqualTo(UserErrorCode.INVALID_SESSION);
-    }
-
     @Test
     void 소유권_없는_userBookId_면_NotFoundException() {
         given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> aiChatSessionSearchService.findByUserBookId(
-                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
+                new AiChatSessionListCommand(USER_ID, USER_BOOK_ID, 1, 20)
         ))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
@@ -92,7 +63,7 @@ class AiChatSessionSearchServiceTest {
         )).willReturn(new SliceImpl<>(List.of(), PageRequest.of(0, 20), false));
 
         AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(
-                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
+                new AiChatSessionListCommand(USER_ID, USER_BOOK_ID, 1, 20)
         );
 
         assertThat(result.sessions()).isEmpty();
@@ -118,7 +89,7 @@ class AiChatSessionSearchServiceTest {
         )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 20), false));
 
         AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(
-                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 20)
+                new AiChatSessionListCommand(USER_ID, USER_BOOK_ID, 1, 20)
         );
 
         assertThat(result.sessions()).hasSize(3);
@@ -145,7 +116,7 @@ class AiChatSessionSearchServiceTest {
         )).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 2), true));
 
         AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(
-                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 1, 2)
+                new AiChatSessionListCommand(USER_ID, USER_BOOK_ID, 1, 2)
         );
 
         assertThat(result.hasNext()).isTrue();
@@ -159,7 +130,7 @@ class AiChatSessionSearchServiceTest {
         )).willReturn(new SliceImpl<>(List.of(), PageRequest.of(2, 10), false));
 
         AiChatSessionListResult result = aiChatSessionSearchService.findByUserBookId(
-                new AiChatSessionListCommand(USER_SESSION_ID, USER_BOOK_ID, 3, 10)
+                new AiChatSessionListCommand(USER_ID, USER_BOOK_ID, 3, 10)
         );
 
         assertThat(result.page()).isEqualTo(3);

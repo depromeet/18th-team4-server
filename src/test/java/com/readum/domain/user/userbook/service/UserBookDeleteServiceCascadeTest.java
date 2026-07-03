@@ -84,7 +84,7 @@ class UserBookDeleteServiceCascadeTest {
         long bookMasterCountBefore = bookRepository.count();
 
         UserBookDeleteResult result = userBookDeleteService.execute(
-                new UserBookDeleteCommand(user.getSessionId(), userBook1.getId()));
+                new UserBookDeleteCommand(user.getId(), userBook1.getId()));
 
         // 삭제 카운트가 실제 삭제된 행 수와 일치
         assertThat(result.userBookId()).isEqualTo(userBook1.getId());
@@ -140,7 +140,7 @@ class UserBookDeleteServiceCascadeTest {
         Summary summaryB = persistSummary(userBookB.getId(), sessionB.getId());
 
         userBookDeleteService.execute(
-                new UserBookDeleteCommand(userA.getSessionId(), userBookA.getId()));
+                new UserBookDeleteCommand(userA.getId(), userBookA.getId()));
 
         // A 의 도서와 연관 데이터는 사라짐
         assertThat(userBookRepository.findById(userBookA.getId())).isEmpty();

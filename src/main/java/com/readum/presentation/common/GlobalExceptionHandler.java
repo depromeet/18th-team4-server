@@ -149,7 +149,8 @@ public class GlobalExceptionHandler {
         return GlobalApiResponse.error(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    // @CookieValue(required = true) 로 선언된 쿠키가 요청에 없을 때 (user_session 등 인증 쿠키 → 401)
+    // @CookieValue(required = true) 로 선언된 인증 쿠키가 요청에 없을 때 (refresh_token → 401).
+    // user_session 은 인증 필터가 처리하므로 여기 오지 않는다 — 이 핸들러는 auth 재발급 경로 전용.
     @ExceptionHandler(MissingRequestCookieException.class)
     public ResponseEntity<GlobalApiResponse<?>> handleMissingCookie(MissingRequestCookieException ex) {
         log.warn("Missing cookie: {}", ex.getCookieName());

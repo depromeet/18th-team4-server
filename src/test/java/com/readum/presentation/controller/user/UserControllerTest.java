@@ -1,21 +1,25 @@
 package com.readum.presentation.controller.user;
 
-import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.user.dto.UserProfileResult;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.user.service.CompleteOnboardingService;
 import com.readum.domain.user.service.CreateUserSessionService;
 import com.readum.domain.user.service.UpdateNicknameService;
 import com.readum.domain.user.service.UserSearchService;
 import com.readum.presentation.common.GlobalExceptionHandler;
-import jakarta.servlet.http.Cookie;
+import com.readum.presentation.common.security.AuthenticatedUserIdArgumentResolver;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.List;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.BDDMockito.given;
@@ -26,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class UserControllerTest {
 
-    private static final Cookie USER_SESSION_COOKIE = new Cookie("user_session", "test-session-id");
+    private static final Long USER_ID = 1L;
 
     @Mock
     private CreateUserSessionService createUserSessionService;
@@ -48,42 +52,34 @@ class UserControllerTest {
                 createUserSessionService, userSearchService, completeOnboardingService, updateNicknameService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
+                .setCustomArgumentResolvers(new AuthenticatedUserIdArgumentResolver())
                 .build();
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                USER_ID, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void 유효한_세션으로_프로필을_조회하면_닉네임을_반환한다() throws Exception {
-        given(userSearchService.findProfile("test-session-id"))
+    void 인증된_사용자가_프로필을_조회하면_닉네임을_반환한다() throws Exception {
+        given(userSearchService.findProfile(USER_ID))
                 .willReturn(new UserProfileResult("문장수집가"));
 
-        mockMvc.perform(get("/api/v1/users/me/profile").cookie(USER_SESSION_COOKIE))
+        mockMvc.perform(get("/api/v1/users/me/profile"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.profile.nickname").value("문장수집가"));
     }
 
     @Test
     void 닉네임이_없는_기존_사용자도_프로필_조회시_닉네임_키가_null_로_노출된다() throws Exception {
-        given(userSearchService.findProfile("test-session-id"))
+        given(userSearchService.findProfile(USER_ID))
                 .willReturn(new UserProfileResult(null));
 
-        mockMvc.perform(get("/api/v1/users/me/profile").cookie(USER_SESSION_COOKIE))
+        mockMvc.perform(get("/api/v1/users/me/profile"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.profile.nickname").value(nullValue()));
-    }
-
-    @Test
-    void 세션_쿠키가_없으면_401_을_반환한다() throws Exception {
-        mockMvc.perform(get("/api/v1/users/me/profile"))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void 유효하지_않은_세션이면_401_을_반환한다() throws Exception {
-        given(userSearchService.findProfile("test-session-id"))
-                .willThrow(new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-
-        mockMvc.perform(get("/api/v1/users/me/profile").cookie(USER_SESSION_COOKIE))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.message").value(UserErrorCode.INVALID_SESSION.getMessage()));
     }
 }

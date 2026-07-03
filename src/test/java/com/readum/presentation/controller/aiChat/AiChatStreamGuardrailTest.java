@@ -17,7 +17,6 @@ import com.readum.model.user.entity.UserBookFixture;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import com.readum.presentation.controller.aiChat.dto.SendMessageRequest;
-import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -27,12 +26,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,6 +42,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -85,13 +88,13 @@ class AiChatStreamGuardrailTest {
 
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
-    private Cookie cookie;
+    private Long userId;
     private Long sessionId;
 
     @BeforeEach
     void setUp() {
         User user = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
-        cookie = new Cookie("user_session", user.getSessionId());
+        userId = user.getId();
 
         Book book = bookRepository.save(BookFixture.persistedBook(
                 null, "guardrail-ext-" + UUID.randomUUID(), "살인의 추억", "작가", "출판사", 2003, null));
@@ -116,7 +119,8 @@ class AiChatStreamGuardrailTest {
         // (Accept: text/event-stream 만 보내면 JSON 에러 본문이 협상에 실패해 ServletException 으로 샌다.)
         SendMessageRequest body = new SendMessageRequest(content);
         return mockMvc.perform(post("/api/v1/ai-chat/sessions/" + sessionId + "/messages")
-                .cookie(cookie)
+                .with(authentication(new UsernamePasswordAuthenticationToken(
+                        userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER")))))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)));
     }

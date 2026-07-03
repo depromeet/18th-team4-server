@@ -6,6 +6,7 @@ import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.service.SummaryHistorySearchService;
 import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
+import com.readum.presentation.common.security.AuthenticatedUserId;
 import com.readum.presentation.controller.summary.dto.MonthlyReadingRecordsResponse;
 import com.readum.presentation.controller.summary.dto.SummaryDetailResponse;
 import com.readum.presentation.controller.summary.dto.SummaryHistoryListRequest;
@@ -17,7 +18,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -53,10 +53,10 @@ public class SummaryController {
     })
     @GetMapping
     public ResponseEntity<GlobalApiResponse<SummaryHistoryListResponse>> getMyHistory(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @Valid @ModelAttribute SummaryHistoryListRequest request
     ) {
-        SummaryHistoryListResult result = summaryHistorySearchService.findMyHistory(request.toCommand(userSessionId));
+        SummaryHistoryListResult result = summaryHistorySearchService.findMyHistory(request.toCommand(userId));
         return GlobalApiResponse.ok(SummaryHistoryListResponse.from(result));
     }
 
@@ -77,10 +77,10 @@ public class SummaryController {
     })
     @GetMapping("/calendar")
     public ResponseEntity<GlobalApiResponse<MonthlyReadingRecordsResponse>> getMonthlyReadingRecords(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @RequestParam YearMonth yearMonth
     ) {
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(yearMonth, userSessionId);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(yearMonth, userId);
         return GlobalApiResponse.ok(MonthlyReadingRecordsResponse.from(results));
     }
 
@@ -99,10 +99,10 @@ public class SummaryController {
     })
     @GetMapping("/{summaryId}")
     public ResponseEntity<GlobalApiResponse<SummaryDetailResponse>> getSummaryDetail(
-            @CookieValue(name = "user_session") String userSessionId,
+            @AuthenticatedUserId Long userId,
             @PathVariable Long summaryId
     ) {
-        SummaryResult result = summarySearchService.findById(summaryId, userSessionId);
+        SummaryResult result = summarySearchService.findById(summaryId, userId);
         return GlobalApiResponse.ok(SummaryDetailResponse.from(result));
     }
 }

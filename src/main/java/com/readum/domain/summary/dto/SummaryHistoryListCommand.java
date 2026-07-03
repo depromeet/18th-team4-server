@@ -1,7 +1,7 @@
 package com.readum.domain.summary.dto;
 
 public record SummaryHistoryListCommand(
-        String userSessionId,
+        Long userId,
         int page
 ) {
 }

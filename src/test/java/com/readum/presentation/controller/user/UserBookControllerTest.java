@@ -3,8 +3,6 @@ package com.readum.presentation.controller.user;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.user.userbook.dto.UserBookCreateResult;
 import com.readum.domain.user.userbook.dto.UserBookDeleteResult;
 import com.readum.domain.user.userbook.dto.UserBookSearchItemResult;
@@ -14,8 +12,9 @@ import com.readum.domain.user.userbook.service.UserBookCreateService;
 import com.readum.domain.user.userbook.service.UserBookDeleteService;
 import com.readum.domain.user.userbook.service.UserBookSearchService;
 import com.readum.presentation.common.GlobalExceptionHandler;
+import com.readum.presentation.common.security.AuthenticatedUserIdArgumentResolver;
 import com.readum.presentation.controller.user.dto.UserBookCreateRequest;
-import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,6 +22,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -32,7 +34,6 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -44,7 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class UserBookControllerTest {
 
-    private static final Cookie USER_SESSION_COOKIE = new Cookie("user_session", "test-session-id");
+    private static final Long USER_ID = 1L;
 
     @Mock
     private UserBookCreateService userBookCreateService;
@@ -64,8 +65,16 @@ class UserBookControllerTest {
                 new UserBookController(userBookCreateService, userBookSearchService, userBookDeleteService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
+                .setCustomArgumentResolvers(new AuthenticatedUserIdArgumentResolver())
                 .build();
         objectMapper = new ObjectMapper();
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                USER_ID, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
     }
 
     private String validRequestBody() throws Exception {
@@ -82,7 +91,6 @@ class UserBookControllerTest {
         given(userBookCreateService.execute(any())).willReturn(result);
 
         mockMvc.perform(post("/api/v1/user-books")
-                        .cookie(USER_SESSION_COOKIE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequestBody()))
                 .andExpect(status().isCreated())
@@ -99,19 +107,9 @@ class UserBookControllerTest {
         String bodyWithoutExternalId = objectMapper.writeValueAsString(new UserBookCreateRequest(null));
 
         mockMvc.perform(post("/api/v1/user-books")
-                        .cookie(USER_SESSION_COOKIE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(bodyWithoutExternalId))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.message").exists());
-    }
-
-    @Test
-    void user_session_쿠키가_없으면_401을_반환한다() throws Exception {
-        mockMvc.perform(post("/api/v1/user-books")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(validRequestBody()))
-                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error.message").exists());
     }
 
@@ -126,7 +124,6 @@ class UserBookControllerTest {
                 .willThrow(new ConflictException(UserBookErrorCode.ALREADY_EXISTS, existingResult));
 
         mockMvc.perform(post("/api/v1/user-books")
-                        .cookie(USER_SESSION_COOKIE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequestBody()))
                 .andExpect(status().isConflict())
@@ -136,14 +133,14 @@ class UserBookControllerTest {
     }
 
     @Test
-    void 유효한_user_session_쿠키로_GET_요청시_200과_등록_도서_목록을_반환한다() throws Exception {
+    void 인증된_사용자가_GET_요청시_200과_등록_도서_목록을_반환한다() throws Exception {
         UserBookSearchResult searchResult = new UserBookSearchResult(List.of(
                 new UserBookSearchItemResult(20L, 2L, "최근 등록한 책", "출판사B", 2025, "http://example.com/b.jpg", 3L),
                 new UserBookSearchItemResult(10L, 1L, "이전에 등록한 책", "출판사A", 2024, "http://example.com/a.jpg", 0L)
         ));
-        given(userBookSearchService.findMyBooks("test-session-id")).willReturn(searchResult);
+        given(userBookSearchService.findMyBooks(USER_ID)).willReturn(searchResult);
 
-        mockMvc.perform(get("/api/v1/user-books").cookie(USER_SESSION_COOKIE))
+        mockMvc.perform(get("/api/v1/user-books"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.books.length()").value(2))
                 .andExpect(jsonPath("$.data.books[0].userBookId").value(20))
@@ -162,63 +159,27 @@ class UserBookControllerTest {
 
     @Test
     void 등록_도서가_없으면_빈_books_배열을_200과_함께_반환한다() throws Exception {
-        given(userBookSearchService.findMyBooks("test-session-id"))
+        given(userBookSearchService.findMyBooks(USER_ID))
                 .willReturn(new UserBookSearchResult(List.of()));
 
-        mockMvc.perform(get("/api/v1/user-books").cookie(USER_SESSION_COOKIE))
+        mockMvc.perform(get("/api/v1/user-books"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.books.length()").value(0))
                 .andExpect(jsonPath("$.error").doesNotExist());
     }
 
     @Test
-    void GET_요청에_user_session_쿠키가_없으면_401을_반환한다() throws Exception {
-        mockMvc.perform(get("/api/v1/user-books"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.message").exists());
-    }
-
-    @Test
-    void GET_요청에_유효하지_않은_user_session_이면_401을_반환한다() throws Exception {
-        given(userBookSearchService.findMyBooks(any()))
-                .willThrow(new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-
-        mockMvc.perform(get("/api/v1/user-books").cookie(USER_SESSION_COOKIE))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.message").value("유효하지 않은 세션입니다."));
-    }
-
-    @Test
-    void DELETE_요청_시_204를_본문_없이_반환하고_경로의_userBookId와_쿠키_세션으로_삭제를_위임한다() throws Exception {
+    void DELETE_요청_시_204를_본문_없이_반환하고_경로의_userBookId와_인증된_userId로_삭제를_위임한다() throws Exception {
         given(userBookDeleteService.execute(any()))
                 .willReturn(new UserBookDeleteResult(100L, 3, 7, 2));
 
-        mockMvc.perform(delete("/api/v1/user-books/100").cookie(USER_SESSION_COOKIE))
+        mockMvc.perform(delete("/api/v1/user-books/100"))
                 .andExpect(status().isNoContent())
                 .andExpect(jsonPath("$").doesNotExist());
 
         verify(userBookDeleteService).execute(argThat(command ->
-                command.userSessionId().equals("test-session-id")
+                command.userId().equals(USER_ID)
                         && command.userBookId().equals(100L)));
-    }
-
-    @Test
-    void DELETE_요청에_user_session_쿠키가_없으면_401을_반환하고_삭제를_위임하지_않는다() throws Exception {
-        mockMvc.perform(delete("/api/v1/user-books/100"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.message").exists());
-
-        verify(userBookDeleteService, never()).execute(any());
-    }
-
-    @Test
-    void DELETE_요청에_유효하지_않은_user_session_이면_401을_반환한다() throws Exception {
-        given(userBookDeleteService.execute(any()))
-                .willThrow(new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-
-        mockMvc.perform(delete("/api/v1/user-books/100").cookie(USER_SESSION_COOKIE))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.message").value("유효하지 않은 세션입니다."));
     }
 
     @Test
@@ -226,7 +187,7 @@ class UserBookControllerTest {
         given(userBookDeleteService.execute(any()))
                 .willThrow(new NotFoundException(UserBookErrorCode.NOT_FOUND));
 
-        mockMvc.perform(delete("/api/v1/user-books/100").cookie(USER_SESSION_COOKIE))
+        mockMvc.perform(delete("/api/v1/user-books/100"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.message").value("등록되지 않은 도서입니다."));
     }
