@@ -1,8 +1,6 @@
 package com.readum.domain.user.userbook.service;
 
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.user.userbook.dto.UserBookDeleteCommand;
 import com.readum.domain.user.userbook.dto.UserBookDeleteResult;
 import com.readum.domain.user.userbook.exception.UserBookErrorCode;
@@ -10,7 +8,6 @@ import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
-import com.readum.model.user.entity.User;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -42,13 +39,10 @@ public class UserBookDeleteService {
 
     @Transactional
     public UserBookDeleteResult execute(UserBookDeleteCommand command) {
-        User user = userRepository.findBySessionId(command.userSessionId())
-                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-
         // 소유권 검증. 미소유/미존재를 구분하지 않고 404 로 응답해 타인 도서의 존재 여부를 누설하지 않는다.
         // 여기서 로드한 엔티티는 인가 판정·로깅에만 쓴다 — 첫 벌크 삭제(clearAutomatically) 시점에
         // 영속성 컨텍스트가 비워져 detached 가 되므로, 실제 부모 삭제는 deleteById(id) 로 수행한다.
-        userBookRepository.findByIdAndUserId(command.userBookId(), user.getId())
+        userBookRepository.findByIdAndUserId(command.userBookId(), command.userId())
                 .orElseThrow(() -> new NotFoundException(UserBookErrorCode.NOT_FOUND));
 
         Long userBookId = command.userBookId();
@@ -62,7 +56,7 @@ public class UserBookDeleteService {
         userBookRepository.deleteById(userBookId);
 
         log.info("등록 도서 삭제 완료 - userId={}, userBookId={}, deletedSessions={}, deletedMessages={}, deletedJobs={}, deletedSummaries={}",
-                user.getId(), userBookId, deletedSessions, deletedMessages, deletedJobs, deletedSummaries);
+                command.userId(), userBookId, deletedSessions, deletedMessages, deletedJobs, deletedSummaries);
 
         return new UserBookDeleteResult(userBookId, deletedSessions, deletedMessages, deletedSummaries);
     }

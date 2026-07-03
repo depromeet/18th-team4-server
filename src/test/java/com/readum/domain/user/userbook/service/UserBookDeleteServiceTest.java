@@ -1,8 +1,6 @@
 package com.readum.domain.user.userbook.service;
 
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.user.userbook.dto.UserBookDeleteCommand;
 import com.readum.domain.user.userbook.dto.UserBookDeleteResult;
 import com.readum.domain.user.userbook.exception.UserBookErrorCode;
@@ -10,14 +8,11 @@ import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
-import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.entity.UserBookFixture;
-import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserBookRepository;
 import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -60,19 +55,11 @@ class UserBookDeleteServiceTest {
     private UserBookDeleteService userBookDeleteService;
 
     private static final Long USER_ID = 1L;
-    private static final String USER_SESSION_ID = "test-session-id";
     private static final Long BOOK_ID = 10L;
     private static final Long USER_BOOK_ID = 100L;
 
     private UserBookDeleteCommand command() {
-        return new UserBookDeleteCommand(USER_SESSION_ID, USER_BOOK_ID);
-    }
-
-    @BeforeEach
-    void setUp() {
-        User user = UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
-        org.mockito.Mockito.lenient().when(userRepository.findBySessionId(USER_SESSION_ID))
-                .thenReturn(Optional.of(user));
+        return new UserBookDeleteCommand(USER_ID, USER_BOOK_ID);
     }
 
     @Test
@@ -104,18 +91,6 @@ class UserBookDeleteServiceTest {
         assertThat(result.deletedMessages()).isEqualTo(7);
         assertThat(result.deletedSessions()).isEqualTo(3);
         assertThat(result.deletedSummaries()).isEqualTo(2);
-    }
-
-    @Test
-    void 유효하지_않은_세션이면_UnauthorizedException_이_발생하고_어떤_삭제도_실행되지_않는다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> userBookDeleteService.execute(command()))
-                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(UserErrorCode.INVALID_SESSION));
-
-        verify(userBookRepository, never()).findByIdAndUserId(anyLong(), anyLong());
-        verifyNoDeletes();
     }
 
     @Test

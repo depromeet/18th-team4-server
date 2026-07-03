@@ -1,14 +1,8 @@
 package com.readum.domain.user.userbook.service;
 
-import com.readum.domain.exception.UnauthorizedException;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.domain.user.userbook.dto.UserBookSearchResult;
-import com.readum.model.user.entity.User;
-import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserBookRepository;
-import com.readum.model.user.repository.UserRepository;
 import com.readum.model.user.repository.projection.UserBookListItemProjection;
-import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -16,17 +10,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
 @ExtendWith(MockitoExtension.class)
 class UserBookSearchServiceTest {
-
-    @Mock
-    private UserRepository userRepository;
 
     @Mock
     private UserBookRepository userBookRepository;
@@ -35,22 +24,16 @@ class UserBookSearchServiceTest {
     private UserBookSearchService userBookSearchService;
 
     private static final Long USER_ID = 1L;
-    private static final String USER_SESSION_ID = "test-session-id";
-
-    private User stubUser() {
-        return UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
-    }
 
     @Test
-    void 유효한_user_session_으로_조회하면_등록한_도서_목록을_반환한다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
+    void 인증된_사용자로_조회하면_등록한_도서_목록을_반환한다() {
         given(userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(USER_ID))
                 .willReturn(List.of(
                         new UserBookListItemProjection(20L, 2L, "최근 등록한 책", "출판사B", 2025, "http://example.com/b.jpg", 3L),
                         new UserBookListItemProjection(10L, 1L, "이전에 등록한 책", "출판사A", 2024, "http://example.com/a.jpg", 0L)
                 ));
 
-        UserBookSearchResult result = userBookSearchService.findMyBooks(USER_SESSION_ID);
+        UserBookSearchResult result = userBookSearchService.findMyBooks(USER_ID);
 
         assertThat(result.books()).hasSize(2);
         assertThat(result.books().get(0).userBookId()).isEqualTo(20L);
@@ -68,21 +51,11 @@ class UserBookSearchServiceTest {
 
     @Test
     void 등록된_도서가_없으면_빈_books_리스트를_반환한다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findAllByUserIdOrderByCreatedAtDescIdDesc(USER_ID))
                 .willReturn(List.of());
 
-        UserBookSearchResult result = userBookSearchService.findMyBooks(USER_SESSION_ID);
+        UserBookSearchResult result = userBookSearchService.findMyBooks(USER_ID);
 
         assertThat(result.books()).isEmpty();
-    }
-
-    @Test
-    void 세션이_유효하지_않으면_UnauthorizedException_을_던진다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> userBookSearchService.findMyBooks(USER_SESSION_ID))
-                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
-                .satisfies(ex -> assertThat(ex.getErrorCode()).isEqualTo(UserErrorCode.INVALID_SESSION));
     }
 }
