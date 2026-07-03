@@ -58,7 +58,7 @@
 ## 검증 (핵심만)
 
 1. **OSIV on/off A/B (N=40, 다른 조건 고정):** on = 성공률 52% / off = **100%**. → 천장 1(DB connection pool 고갈) 확인.
-2. **reactor vs JDK moderation A/B (N=100, 동일 조건):** reactor = **0%**·60 실패 / JDK = **100%**·0 실패. boundedElastic 직렬화는 양쪽 동일한데 결과가 갈렸다. → 근원은 boundedElastic 이 아니라 **클라이언트**.
+2. **reactor vs JDK moderation A/B (N=100, 동일 조건):** 성공률 = reactor **0%**(100 요청 전부 실패) / JDK **100%**. 성공률과 별개 축의 지표로, 그 아래 moderation `PrematureClose`(RST) 발생 건수 = reactor **60** / JDK **0** — 이 60 은 *붕괴 메커니즘의 신호*이지 실패한 요청 수가 아니다(재시도로 부풀 수 있어 요청 수와 1:1 아님; reactor 의 실제 실패 요청 100건 내역은 client HttpTimeout 83 + STALL 17). boundedElastic 직렬화는 양쪽 동일한데 결과가 갈렸다 → 근원은 boundedElastic 이 아니라 **클라이언트**.
 3. **프레임·바이트 로그 분석:** 실패 = 헤더만 전송하고 **body 없이 ~15.0초 후** OpenAI 가 끊음(H2 = RST_STREAM `PROTOCOL_ERROR`, HTTP/1.1 = connection 종료). 성공은 `헤더 → body → 응답`. → 메커니즘 = request body starvation, 프로토콜 무관 동일.
 4. **최종 config (JDK + HTTP/1.1 + 무재시도, OSIV off + VT on, 그 외 전부 기본값) N=50·100 = 100%**, 재시도 0, PrematureClose 0. 무재시도라 raw 성공률 100% = 재시도로 가릴 실패가 애초에 없음 = 근본 확정.
 
