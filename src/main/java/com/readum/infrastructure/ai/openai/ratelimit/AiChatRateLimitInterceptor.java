@@ -6,23 +6,19 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.security.Principal;
+
 /**
- * AI 채팅 rate limit interceptor.
- * /api/v1/ai-chat/** 엔드포인트에만 적용되며, 한도 초과 시 HTTP 429 응답을 반환한다.
+ * AI 채팅 호출 한도 interceptor.
+ * 비싼 LLM 호출(메시지 전송, 감상문 초안 생성 — POST)에만 적용되며, 초과 시 HTTP 429 를 반환한다.
  *
- * key 우선순위:
- *   1) Spring Security 의 인증 principal (Long userId 형태) — 인증 활성화 시
- *   2) ServletRequest.getRemoteAddr()
- *
- * 클라이언트가 임의로 설정 가능한 X-Forwarded-For 헤더는 신뢰하지 않는다.
- * (현 인프라는 단일 EC2 + nginx 직결이라 getRemoteAddr() 가 실제 클라이언트 IP 다.)
- * 향후 ALB / CDN 등 신뢰된 프록시 뒤로 들어가게 되면 Spring 의
- * `server.forward-headers-strategy: native` 설정으로 위임하여 인프라 레벨에서 처리한다.
+ * 키는 인증된 사용자(userId) 기준이다. 이 인터셉터가 붙는 경로는 전부 인증 필수(SecurityConfig)이므로
+ * principal 은 항상 존재한다 — 없다면 보안 설정이 무너진 것이므로 IP 등으로 조용히 대체하지 않고
+ * IllegalStateException 으로 즉시 드러낸다 (2026-06-20 429 사고의 교훈: IP 대체 동작이
+ * 프론트 프록시 IP 를 키로 만들어 서로 다른 사용자들이 한 버킷을 공유했다).
  */
 @Slf4j
 @Component
@@ -44,12 +40,16 @@ public class AiChatRateLimitInterceptor implements HandlerInterceptor {
         if (!rateLimiter.isEnabled()) {
             return true;
         }
+        // 읽기(GET 등)는 한도를 소비하지 않는다 — 비싼 LLM 호출(POST)만 대상.
+        if (!"POST".equals(request.getMethod())) {
+            return true;
+        }
         String key = resolveKey(request);
         if (rateLimiter.tryConsume(key)) {
             return true;
         }
 
-        log.info("[Guardrail] rate limit exceeded: keyHash={}", Integer.toHexString(key.hashCode()));
+        log.info("[Guardrail] 호출 한도 초과: key={}", key);
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
@@ -59,13 +59,11 @@ public class AiChatRateLimitInterceptor implements HandlerInterceptor {
     }
 
     private String resolveKey(HttpServletRequest request) {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null && authentication.isAuthenticated()
-                && authentication.getPrincipal() != null
-                && !"anonymousUser".equals(authentication.getPrincipal())) {
-            return "user:" + authentication.getPrincipal();
+        Principal principal = request.getUserPrincipal();
+        if (principal == null) {
+            throw new IllegalStateException(
+                    "호출 한도 대상 요청에 인증 principal 이 없음 — 보안 설정 확인 필요: " + request.getRequestURI());
         }
-        String remote = request.getRemoteAddr();
-        return "ip:" + (remote == null ? "unknown" : remote);
+        return "user:" + principal.getName();
     }
 }

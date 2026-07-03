@@ -1,117 +1,123 @@
 package com.readum.infrastructure.ai.openai.ratelimit;
 
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
-@Tag("guardrail")
+@ExtendWith(MockitoExtension.class)
 class AiChatRateLimitInterceptorTest {
 
-    @AfterEach
-    void clearContext() {
-        SecurityContextHolder.clearContext();
+    @Mock
+    private AiChatRateLimiter rateLimiter;
+
+    private AiChatRateLimitInterceptor interceptor;
+    private MockHttpServletRequest request;
+    private MockHttpServletResponse response;
+
+    @BeforeEach
+    void setUp() {
+        interceptor = new AiChatRateLimitInterceptor(rateLimiter);
+        request = new MockHttpServletRequest("POST", "/api/v1/ai-chat/sessions/1/messages");
+        response = new MockHttpServletResponse();
+    }
+
+    private void authenticateAs(long userId) {
+        request.setUserPrincipal(new UsernamePasswordAuthenticationToken(
+                userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
     }
 
     @Test
-    void 한도_내_요청은_통과한다() throws Exception {
-        AiChatRateLimiter limiter = mock(AiChatRateLimiter.class);
-        given(limiter.isEnabled()).willReturn(true);
-        given(limiter.tryConsume(any())).willReturn(true);
-        AiChatRateLimitInterceptor interceptor = new AiChatRateLimitInterceptor(limiter);
+    void 한도_키는_사용자_userId_기준이다() throws Exception {
+        given(rateLimiter.isEnabled()).willReturn(true);
+        given(rateLimiter.tryConsume(anyString())).willReturn(true);
+        authenticateAs(7L);
 
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/ai-chat/stream");
-        request.setRemoteAddr("203.0.113.10");
-        MockHttpServletResponse response = new MockHttpServletResponse();
+        interceptor.preHandle(request, response, new Object());
 
-        boolean proceeded = interceptor.preHandle(request, response, new Object());
-
-        assertThat(proceeded).isTrue();
-        assertThat(response.getStatus()).isEqualTo(200);
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(rateLimiter).tryConsume(keyCaptor.capture());
+        assertThat(keyCaptor.getValue()).isEqualTo("user:7");
     }
 
     @Test
-    void 한도_초과시_429_응답을_반환하고_체인을_중단한다() throws Exception {
-        AiChatRateLimiter limiter = mock(AiChatRateLimiter.class);
-        given(limiter.isEnabled()).willReturn(true);
-        given(limiter.tryConsume(any())).willReturn(false);
-        AiChatRateLimitInterceptor interceptor = new AiChatRateLimitInterceptor(limiter);
+    void 같은_IP_라도_사용자가_다르면_다른_키로_소비한다() throws Exception {
+        // 6/20 사고 재현 방지: 프록시가 IP 를 합쳐도 사용자별 버킷이 분리되어야 한다.
+        given(rateLimiter.isEnabled()).willReturn(true);
+        given(rateLimiter.tryConsume(anyString())).willReturn(true);
 
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/ai-chat/stream");
-        request.setRemoteAddr("203.0.113.10");
-        MockHttpServletResponse response = new MockHttpServletResponse();
+        request.setRemoteAddr("13.236.146.104");
+        authenticateAs(1L);
+        interceptor.preHandle(request, response, new Object());
 
-        boolean proceeded = interceptor.preHandle(request, response, new Object());
+        MockHttpServletRequest secondRequest =
+                new MockHttpServletRequest("POST", "/api/v1/ai-chat/sessions/2/messages");
+        secondRequest.setRemoteAddr("13.236.146.104");
+        secondRequest.setUserPrincipal(new UsernamePasswordAuthenticationToken(
+                2L, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        interceptor.preHandle(secondRequest, response, new Object());
 
-        assertThat(proceeded).isFalse();
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(rateLimiter, times(2)).tryConsume(keyCaptor.capture());
+        assertThat(keyCaptor.getAllValues()).containsExactly("user:1", "user:2");
+    }
+
+    @Test
+    void principal_이_없으면_IP_로_대체하지_않고_설정_버그로_드러낸다() throws Exception {
+        given(rateLimiter.isEnabled()).willReturn(true);
+
+        assertThatThrownBy(() -> interceptor.preHandle(request, response, new Object()))
+                .isInstanceOf(IllegalStateException.class);
+        verify(rateLimiter, never()).tryConsume(anyString());
+    }
+
+    @Test
+    void POST_가_아닌_요청은_한도를_소비하지_않는다() throws Exception {
+        given(rateLimiter.isEnabled()).willReturn(true);
+        MockHttpServletRequest getRequest =
+                new MockHttpServletRequest("GET", "/api/v1/ai-chat/sessions/1/messages");
+
+        boolean allowed = interceptor.preHandle(getRequest, response, new Object());
+
+        assertThat(allowed).isTrue();
+        verify(rateLimiter, never()).tryConsume(anyString());
+    }
+
+    @Test
+    void 한도_초과면_429_와_에러_본문을_반환한다() throws Exception {
+        given(rateLimiter.isEnabled()).willReturn(true);
+        given(rateLimiter.tryConsume(anyString())).willReturn(false);
+        authenticateAs(7L);
+
+        boolean allowed = interceptor.preHandle(request, response, new Object());
+
+        assertThat(allowed).isFalse();
         assertThat(response.getStatus()).isEqualTo(429);
-        assertThat(response.getContentAsString()).contains("AI 채팅 호출 한도를 초과했습니다");
+        assertThat(response.getContentAsString()).contains("호출 한도");
     }
 
     @Test
     void enabled_가_false_면_무조건_통과한다() throws Exception {
-        AiChatRateLimiter limiter = mock(AiChatRateLimiter.class);
-        given(limiter.isEnabled()).willReturn(false);
-        AiChatRateLimitInterceptor interceptor = new AiChatRateLimitInterceptor(limiter);
-
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/ai-chat/stream");
-        MockHttpServletResponse response = new MockHttpServletResponse();
+        given(rateLimiter.isEnabled()).willReturn(false);
 
         boolean proceeded = interceptor.preHandle(request, response, new Object());
 
         assertThat(proceeded).isTrue();
-    }
-
-    @Test
-    void 인증_principal_이_있으면_user_key_를_사용한다() throws Exception {
-        AiChatRateLimiter limiter = mock(AiChatRateLimiter.class);
-        given(limiter.isEnabled()).willReturn(true);
-        given(limiter.tryConsume("user:42")).willReturn(true);
-        AiChatRateLimitInterceptor interceptor = new AiChatRateLimitInterceptor(limiter);
-
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(42L, null, List.of())
-        );
-
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/ai-chat/stream");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        boolean proceeded = interceptor.preHandle(request, response, new Object());
-
-        assertThat(proceeded).isTrue();
-    }
-
-    @Test
-    void X_Forwarded_For_헤더는_신뢰하지_않고_getRemoteAddr_만_사용한다() throws Exception {
-        // 클라이언트가 X-Forwarded-For 헤더만 바꿔서 IP bucket 을 갈아치우려 해도,
-        // 실제 식별자는 getRemoteAddr() 기준으로 결정되어야 한다.
-        AiChatRateLimiter limiter = mock(AiChatRateLimiter.class);
-        given(limiter.isEnabled()).willReturn(true);
-        given(limiter.tryConsume("ip:203.0.113.10")).willReturn(true);
-        AiChatRateLimitInterceptor interceptor = new AiChatRateLimitInterceptor(limiter);
-
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/ai-chat/stream");
-        request.setRemoteAddr("203.0.113.10");
-        request.addHeader("X-Forwarded-For", "1.2.3.4, 5.6.7.8");      // 무시되어야 함
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        boolean proceeded = interceptor.preHandle(request, response, new Object());
-
-        assertThat(proceeded).isTrue();
-        // limiter.tryConsume("ip:203.0.113.10") 만 매칭되도록 stubbing 했으므로,
-        // XFF 의 "1.2.3.4" 가 사용됐다면 stubbed 된 mock 이 false 를 반환해 429 가 됐을 것.
-        assertThat(response.getStatus()).isEqualTo(200);
     }
 }
