@@ -8,7 +8,7 @@ public record SummaryHistoryListRequest(
         int page
 ) {
 
-    public SummaryHistoryListCommand toCommand(String userSessionId) {
-        return new SummaryHistoryListCommand(userSessionId, page);
+    public SummaryHistoryListCommand toCommand(Long userId) {
+        return new SummaryHistoryListCommand(userId, page);
     }
 }

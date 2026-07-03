@@ -3,11 +3,9 @@ package com.readum.domain.summary.service;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.summary.dto.MonthlyReadingRecordResult;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.exception.SummaryErrorCode;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
@@ -18,10 +16,8 @@ import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.summary.entity.Summary;
 import com.readum.model.summary.repository.SummaryRepository;
-import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.repository.UserBookRepository;
-import com.readum.model.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,7 +38,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SummarySearchService {
 
-    private final UserRepository userRepository;
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatMessageRepository aiChatMessageRepository;
     private final SummaryRepository summaryRepository;
@@ -51,11 +46,8 @@ public class SummarySearchService {
     private final BookRepository bookRepository;
 
     @Transactional(readOnly = true)
-    public List<MonthlyReadingRecordResult> findMonthly(YearMonth yearMonth, String userSessionId) {
-        User user = userRepository.findBySessionId(userSessionId)
-                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-
-        List<UserBook> userBooks = userBookRepository.findByUserId(user.getId());
+    public List<MonthlyReadingRecordResult> findMonthly(YearMonth yearMonth, Long userId) {
+        List<UserBook> userBooks = userBookRepository.findByUserId(userId);
         if (userBooks.isEmpty()) {
             return List.of();
         }
@@ -116,14 +108,11 @@ public class SummarySearchService {
     }
 
     @Transactional(readOnly = true)
-    public SummaryResult findById(Long summaryId, String userSessionId) {
-        User user = userRepository.findBySessionId(userSessionId)
-                .orElseThrow(() -> new UnauthorizedException(UserErrorCode.INVALID_SESSION));
-
+    public SummaryResult findById(Long summaryId, Long userId) {
         Summary summary = summaryRepository.findById(summaryId)
                 .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_FOUND));
 
-        userBookRepository.findByIdAndUserId(summary.getUserBookId(), user.getId())
+        userBookRepository.findByIdAndUserId(summary.getUserBookId(), userId)
                 .orElseThrow(() -> new NotFoundException(SummaryErrorCode.SUMMARY_NOT_FOUND));
 
         return SummaryResult.from(summary);

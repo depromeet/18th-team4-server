@@ -3,11 +3,9 @@ package com.readum.domain.summary.service;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.exception.UnauthorizedException;
 import com.readum.domain.summary.dto.MonthlyReadingRecordResult;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.exception.SummaryErrorCode;
-import com.readum.domain.user.exception.UserErrorCode;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
@@ -21,12 +19,9 @@ import com.readum.model.summary.entity.SummaryFixture;
 import com.readum.model.summary.repository.SummaryJobRepository;
 import com.readum.model.summary.repository.SummaryRepository;
 import com.readum.model.book.repository.BookRepository;
-import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserBook;
 import com.readum.model.user.entity.UserBookFixture;
-import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserBookRepository;
-import com.readum.model.user.repository.UserRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,9 +45,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 class SummarySearchServiceTest {
 
     @Mock
-    private UserRepository userRepository;
-
-    @Mock
     private AiChatSessionRepository aiChatSessionRepository;
 
     @Mock
@@ -74,12 +66,7 @@ class SummarySearchServiceTest {
     private SummarySearchService summarySearchService;
 
     private static final Long USER_ID = 1L;
-    private static final String USER_SESSION_ID = "test-session-id";
     private static final YearMonth JUNE = YearMonth.of(2026, 6);
-
-    private User stubUser() {
-        return UserFixture.persistedUser(USER_ID, USER_SESSION_ID);
-    }
 
     private static final LocalDateTime JUNE_11 = LocalDateTime.of(2026, 6, 11, 14, 32, 5);
 
@@ -91,7 +78,6 @@ class SummarySearchServiceTest {
         AiChatSession session = AiChatSessionFixture.persistedActiveSession(1000L, 10L, 3, 100, "채팅 제목");
         Summary summary = SummaryFixture.persistedSummary(17L, 10L, 1000L, "감상문 제목", "감상문 본문");
 
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
         given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L))).willReturn(List.of(session));
         given(aiChatMessageRepository.findLastChattedAtBySessionIds(List.of(1000L), AiChatMessage.Status.COMPLETED))
@@ -99,7 +85,7 @@ class SummarySearchServiceTest {
         given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L))).willReturn(List.of(summary));
         given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
 
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_ID);
 
         assertThat(results).hasSize(1);
         MonthlyReadingRecordResult record = results.get(0);
@@ -117,7 +103,6 @@ class SummarySearchServiceTest {
                 100L, "ext-1", "테스트 책", "저자", "출판사", 2024, "http://example.com/c.jpg");
         AiChatSession session = AiChatSessionFixture.persistedActiveSession(1000L, 10L, 3, 100, "채팅 제목");
 
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
         given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L))).willReturn(List.of(session));
         given(aiChatMessageRepository.findLastChattedAtBySessionIds(List.of(1000L), AiChatMessage.Status.COMPLETED))
@@ -125,7 +110,7 @@ class SummarySearchServiceTest {
         given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L))).willReturn(List.of());
         given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
 
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_ID);
 
         assertThat(results).hasSize(1);
         assertThat(results.get(0).summaryId()).isNull();
@@ -140,7 +125,6 @@ class SummarySearchServiceTest {
         AiChatSession chatted = AiChatSessionFixture.persistedActiveSession(1000L, 10L, 3, 100, "대화함");
         AiChatSession empty = AiChatSessionFixture.persistedActiveSession(1001L, 10L, 0, 0, null);
 
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
         given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L)))
                 .willReturn(List.of(chatted, empty));
@@ -150,7 +134,7 @@ class SummarySearchServiceTest {
         given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L))).willReturn(List.of());
         given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
 
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_ID);
 
         assertThat(results).extracting(MonthlyReadingRecordResult::chatSessionId).containsExactly(1000L);
     }
@@ -163,7 +147,6 @@ class SummarySearchServiceTest {
         AiChatSession june = AiChatSessionFixture.persistedActiveSession(1000L, 10L, 3, 100, "6월 대화");
         AiChatSession may = AiChatSessionFixture.persistedActiveSession(1001L, 10L, 3, 100, "5월 대화");
 
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
         given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L)))
                 .willReturn(List.of(june, may));
@@ -175,7 +158,7 @@ class SummarySearchServiceTest {
         given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L))).willReturn(List.of());
         given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
 
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_ID);
 
         assertThat(results).extracting(MonthlyReadingRecordResult::chatSessionId).containsExactly(1000L);
     }
@@ -188,7 +171,6 @@ class SummarySearchServiceTest {
         AiChatSession older = AiChatSessionFixture.persistedActiveSession(1000L, 10L, 3, 100, "오래된 대화");
         AiChatSession newer = AiChatSessionFixture.persistedActiveSession(1001L, 10L, 3, 100, "최근 대화");
 
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
         given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L)))
                 .willReturn(List.of(older, newer));
@@ -200,7 +182,7 @@ class SummarySearchServiceTest {
         given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L, 1001L))).willReturn(List.of());
         given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
 
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_ID);
 
         assertThat(results).extracting(MonthlyReadingRecordResult::chatSessionId)
                 .containsExactly(1001L, 1000L);
@@ -215,7 +197,6 @@ class SummarySearchServiceTest {
         AiChatSession monthEnd = AiChatSessionFixture.persistedActiveSession(1001L, 10L, 3, 100, "월말");
         AiChatSession nextMonth = AiChatSessionFixture.persistedActiveSession(1002L, 10L, 3, 100, "다음달 0시");
 
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
         given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L)))
                 .willReturn(List.of(monthStart, monthEnd, nextMonth));
@@ -228,7 +209,7 @@ class SummarySearchServiceTest {
         given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L, 1001L))).willReturn(List.of());
         given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
 
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_ID);
 
         // 월말(1001)이 최신순으로 앞, 월초(1000)가 뒤. 다음달 0시(1002)는 제외.
         assertThat(results).extracting(MonthlyReadingRecordResult::chatSessionId)
@@ -243,7 +224,6 @@ class SummarySearchServiceTest {
         AiChatSession lower = AiChatSessionFixture.persistedActiveSession(1000L, 10L, 3, 100, "같은 시각 A");
         AiChatSession higher = AiChatSessionFixture.persistedActiveSession(1001L, 10L, 3, 100, "같은 시각 B");
 
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of(userBook));
         given(aiChatSessionRepository.findByUserBookIdIn(List.of(10L)))
                 .willReturn(List.of(lower, higher));
@@ -255,7 +235,7 @@ class SummarySearchServiceTest {
         given(summaryRepository.findLatestByAiChatSessionIdIn(List.of(1000L, 1001L))).willReturn(List.of());
         given(bookRepository.findAllById(List.of(100L))).willReturn(List.of(book));
 
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_ID);
 
         assertThat(results).extracting(MonthlyReadingRecordResult::chatSessionId)
                 .containsExactly(1001L, 1000L);
@@ -263,34 +243,22 @@ class SummarySearchServiceTest {
 
     @Test
     void 등록한_책이_없으면_세션_조회_없이_빈_리스트를_반환한다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(userBookRepository.findByUserId(USER_ID)).willReturn(List.of());
 
-        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_SESSION_ID);
+        List<MonthlyReadingRecordResult> results = summarySearchService.findMonthly(JUNE, USER_ID);
 
         assertThat(results).isEmpty();
         verifyNoInteractions(aiChatSessionRepository, aiChatMessageRepository, summaryRepository, bookRepository);
     }
 
     @Test
-    void 월별_조회_시_세션이_유효하지_않으면_UnauthorizedException_을_던진다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> summarySearchService.findMonthly(JUNE, USER_SESSION_ID))
-                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
-                .extracting(UnauthorizedException::getErrorCode)
-                .isEqualTo(UserErrorCode.INVALID_SESSION);
-    }
-
-    @Test
     void 상세_조회는_본인_소유의_감상문을_반환한다() {
         Summary summary = SummaryFixture.persistedSummary(17L, 10L, 1000L, "감상문 제목", "감상문 본문");
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(summaryRepository.findById(17L)).willReturn(Optional.of(summary));
         given(userBookRepository.findByIdAndUserId(10L, USER_ID))
                 .willReturn(Optional.of(UserBookFixture.persistedUserBook(10L, USER_ID, 100L)));
 
-        SummaryResult result = summarySearchService.findById(17L, USER_SESSION_ID);
+        SummaryResult result = summarySearchService.findById(17L, USER_ID);
 
         assertThat(result.aiChatSessionId()).isEqualTo(1000L);
         assertThat(result.title()).isEqualTo("감상문 제목");
@@ -298,21 +266,10 @@ class SummarySearchServiceTest {
     }
 
     @Test
-    void 상세_조회_시_세션이_유효하지_않으면_UnauthorizedException_을_던진다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
-                .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))
-                .extracting(UnauthorizedException::getErrorCode)
-                .isEqualTo(UserErrorCode.INVALID_SESSION);
-    }
-
-    @Test
     void 존재하지_않는_감상문을_상세_조회하면_NotFoundException_을_던진다() {
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(summaryRepository.findById(99L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summarySearchService.findById(99L, USER_SESSION_ID))
+        assertThatThrownBy(() -> summarySearchService.findById(99L, USER_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND);
@@ -321,11 +278,10 @@ class SummarySearchServiceTest {
     @Test
     void 남의_감상문을_상세_조회하면_NotFoundException_을_던진다() {
         Summary summary = SummaryFixture.persistedSummary(17L, 10L, 1000L, "감상문 제목", "감상문 본문");
-        given(userRepository.findBySessionId(USER_SESSION_ID)).willReturn(Optional.of(stubUser()));
         given(summaryRepository.findById(17L)).willReturn(Optional.of(summary));
         given(userBookRepository.findByIdAndUserId(10L, USER_ID)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> summarySearchService.findById(17L, USER_SESSION_ID))
+        assertThatThrownBy(() -> summarySearchService.findById(17L, USER_ID))
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(SummaryErrorCode.SUMMARY_NOT_FOUND);
