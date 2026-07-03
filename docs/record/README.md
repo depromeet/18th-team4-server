@@ -12,3 +12,5 @@
 | 번호 | 제목 | 상태 |
 |---|---|---|
 | [0001](0001-aichat-title-generation-scheduler-bulkhead.md) | 제목 생성 전용 스케줄러 분리 (격벽) | 채택 |
+| [0002](0002-chat-data-scale-storage-strategy.md) | 대용량 채팅 데이터 저장/조회·쓰기 전략 (현재는 MySQL 유지) | 채택 |
+| [0003](0003-aichat-concurrency-moderation-http-client.md) | AI 채팅 동시성 — moderation HTTP 클라이언트 구조 + OSIV/virtual thread 전환 | 채택 |
