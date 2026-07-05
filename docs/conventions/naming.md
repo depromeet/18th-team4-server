@@ -6,6 +6,7 @@
 |------|------|------|
 | Command 서비스 | `{Action}Service` | `SignUpService` |
 | Query 서비스 | `{Domain}SearchService` | `UserSearchService` |
+| 트랜잭션 경계 협력자 빈 | `{동작대상}Writer`(쓰기) / `{동작대상}Reader`(읽기), package-private | `UserBookRegistrationWriter`, `UserBookConflictReader` |
 | Command DTO | `{Action}Command` | `SignUpCommand` |
 | Result DTO | `{Action}Result` / `{Domain}Result` | `SignUpResult`, `ExampleResult` |
 | Request DTO | `{Action}Request` | `ExampleCreateRequest` |
