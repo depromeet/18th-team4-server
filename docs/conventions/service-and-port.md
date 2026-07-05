@@ -14,6 +14,11 @@
 
 - **Port** 인터페이스: `domain/{feature}/out/` 에 위치
 - **Adapter** 구현체: `infrastructure/{feature}/{provider}/` 에 위치, `Impl` 접미사 사용
-- **적용 기준**: 구현체가 교체될 여지가 있거나 외부 시스템(API, 메시징, 캐시 백엔드 등)을 추상화해야 할 때만 도입한다. 단순 JPA Repository 접근은 `Service → Repository` 직접 호출로 충분하므로 Port 를 두지 않는다.
-  - O `TokenBlacklistStore` — 현재 in-memory (Caffeine) 구현이지만 Redis 등으로 교체 여지가 있어 Port 유지
-  - X `RefreshTokenStore` — JPA Repository 를 단순 래핑하는 수준이라 Port 없이 Service 가 `RefreshTokenRepository` 를 직접 사용
+- **적용 기준 두 가지를 모두 만족할 때만 도입한다**:
+  1. 그 동작을 **domain 이 호출한다** (Port 는 domain 이 인프라 구현을 모르게 하는 장치다 — 소비자가 인프라뿐이면 교체 여지가 있어도 인프라 안에서 해결한다)
+  2. 구현체가 교체될 여지가 있거나 외부 시스템(API, 메시징, 캐시 백엔드 등)을 추상화해야 한다 (단순 JPA Repository 접근은 `Service → Repository` 직접 호출로 충분)
+- 사례:
+  - O `TokenBlacklistStore` — domain/auth 서비스가 호출 + 현재 in-memory (Caffeine) 구현이지만 Redis 등으로 교체 여지
+  - O `SummaryCallRateLimiter` — domain 의 `SummaryGenerationWorker` 가 호출 + in-memory 구현 교체 여지
+  - X `RefreshTokenStore` — JPA Repository 를 단순 래핑하는 수준이라 Port 없이 Service 가 `RefreshTokenRepository` 를 직접 사용 (기준 2 불충족)
+  - X `AiChatRateLimiter` — Redis 교체 여지는 있지만 소비자가 같은 infrastructure 계층의 `AiChatRateLimitInterceptor` 뿐이라 Port 를 두지 않음 (기준 1 불충족). rate limit 정책 판단이 도메인 규칙이 되는 시점(예: 사용자 등급별 한도)에 Port 승격을 재검토 (2026-07-05 PR #119 리뷰 논의에서 확정)
