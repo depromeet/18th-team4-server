@@ -72,7 +72,7 @@ aladin:
   output: JS
   version: 20131101
   cover: Big
-  request-timeout: PT1S
+  request-timeout: PT3S
   search-result-limit: 200
 
 springdoc:
