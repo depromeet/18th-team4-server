@@ -1,6 +1,6 @@
 # Test Convention
 
-CLAUDE.md 의 "Testing Conventions" 섹션을 보충하는 상세 문서.
+테스트 작성·리뷰 규칙의 원본(canonical) 문서.
 
 이 문서의 목적은 **테스트 본문을 한 줄씩 읽지 않고도 그 테스트가 좋은지 수초 안에 판단 가능하게** 만드는 것이다. 도구가 테스트를 대량 생성하는 환경에서 검증(리뷰)이 개발의 주 작업이 됐기 때문에, 이 규칙들의 목표는 스타일 통일이 아니라 **리뷰 가능성** 그 자체다. 아래는 권장이 아니라 규범이다 — 위반은 머지 전 수정 대상.
 
@@ -19,7 +19,7 @@ void refreshToken_test_2()
 ```
 
 - 한 테스트는 **한 행위**만 단정한다. 이름이 하나의 주장으로 안 써지면 테스트를 쪼갠다.
-- 한글 행위 이름을 쓴다 (CLAUDE.md "Testing Conventions").
+- 한글 행위 이름을 쓴다 (이 문서 "Testing Conventions" 규칙).
 
 ## 2. 준비(arrange) 상태는 운영 DB 에 존재 가능해야 한다
 
@@ -29,7 +29,7 @@ void refreshToken_test_2()
 2. **운영 DB 에 존재할 수 없는 모순 상태** (`nullable=false` 인 `content` 에 null, `issuedAt > expiresAt`, role/status 모순 등) → 만들면 안 됨. 이런 입력에서의 동작을 "검증"하는 테스트는 거짓 커버리지다
 3. **객체 API 로는 불가하나 저장소 레벨(JPQL update, 마이그레이션·import 등)에선 발생하는 상태** → 픽스처로 만드는 게 정당
 
-상태의 정당성은 **식별자만 보고 판단 가능**해야 한다. 그래서 픽스처는 모든 필드를 받는 범용 생성이 아니라 유효 상태를 이름으로 드러내는 명명 팩토리만 노출한다 (상세는 CLAUDE.md "Entity Convention").
+상태의 정당성은 **식별자만 보고 판단 가능**해야 한다. 그래서 픽스처는 모든 필드를 받는 범용 생성이 아니라 유효 상태를 이름으로 드러내는 명명 팩토리만 노출한다 (상세는 [entity.md](entity.md)).
 
 ```java
 // O — revokedToken 이라는 이름으로 "운영에 존재 가능한 폐기 상태"가 드러남
@@ -52,7 +52,7 @@ assertThat(token.isInGrace(now)).isTrue();
 ```
 
 - 프로덕션 코드에 없는 동작을 테스트만을 위해 노출하지 않는다.
-- 예외 검증은 **타입 + ErrorCode 를 함께**, 메서드 레퍼런스로 한다 (리플렉션 문자열 키 금지). 상세 패턴은 [`docs/exception-convention.md`](exception-convention.md) "예외 검증 테스트 패턴".
+- 예외 검증은 **타입 + ErrorCode 를 함께**, 메서드 레퍼런스로 한다 (리플렉션 문자열 키 금지). 상세 패턴은 [exception-handling.md](exception-handling.md) "예외 검증 테스트 패턴".
 - 한 테스트가 바꾸는 준비 값은 "기준선과의 차이 하나"만 보이게 한다 — 그 차이가 곧 이 테스트가 검증하는 변수다.
 
 ## 4. 존재할 수 없는 상태는 타입으로 막고, 테스트하지 않는다

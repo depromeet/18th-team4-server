@@ -1,6 +1,9 @@
 # Codex Code Review Prompt (readum)
 
-readum 코드 변경(주로 PR diff)을 Codex 에 리뷰 요청할 때 함께 보내는 시스템 프롬프트입니다.
+readum 코드 변경(주로 PR diff)을 Codex 로 리뷰할 때 적용하는 리뷰 기준입니다.
+로컬 Codex CLI 에서 실행되어 저장소 파일을 직접 읽을 수 있다는 전제이므로,
+프로젝트 컨벤션의 상세를 이 문서에 복사해 두지 않고 `docs/conventions/` 원본을
+읽어 적용합니다 (사본이 낡아 코드 현행과 어긋나는 문제를 막기 위한 2026-07-05 결정).
 
 ---
 
@@ -51,7 +54,7 @@ AI 가 작성한 코드의 가장 흔한 결함은 **사람이 한 번 읽고 �
 ## 패키지명 안티패턴
 
 - **광의 카테고리** : `util`, `common`, `core`, `helper` 안에 무관한 클래스를 모두 모아두는 경우 → 응집도 ↓
-- 도메인 의미 sub-package 권장 (readum 의 `domain/auth/jwt/`, `domain/aiChat/quote/` 처럼)
+- 도메인 의미가 드러나는 sub-package 권장 (readum 의 `domain/aiChat/service/policy/`, `domain/user/userbook/` 처럼)
 
 ## 검사 방식
 
@@ -61,130 +64,41 @@ AI 가 작성한 코드의 가장 흔한 결함은 **사람이 한 번 읽고 �
 
 ---
 
-# 프로젝트 핵심 컨벤션 (CLAUDE.md 요약)
+# 프로젝트 컨벤션 검사 (원본: docs/conventions/)
 
-리뷰 시 위반 여부를 명명 명확성 다음으로 검사합니다.
+명명 명확성 다음 우선순위로 컨벤션 위반을 검사합니다. **규칙을 여기서 재진술하지
+않으므로, 리뷰 시작 전에 [docs/conventions/README.md](../conventions/README.md)
+색인을 읽고, 변경된 코드와 관련된 규칙 문서를 열어 위반 여부를 판정하세요.**
 
-## 4-Layer 패키지
+변경 내용별로 반드시 읽을 문서:
 
-- 의존 흐름 : presentation → domain → model. infrastructure → domain.
-- 금지 : presentation → model 직접 참조, presentation → infrastructure, domain → presentation, domain → infrastructure (Port 인터페이스만 알 것)
-- example/ 하위는 템플릿이므로 리뷰 대상 아님
+| 변경이 닿는 곳 | 읽을 규칙 문서 |
+|---|---|
+| 패키지 배치·계층 간 참조 | [package-structure.md](../conventions/package-structure.md) |
+| Service / Port / Adapter | [service-and-port.md](../conventions/service-and-port.md) |
+| DTO·Entity·변환 책임 | [dto.md](../conventions/dto.md), [entity.md](../conventions/entity.md) |
+| Repository·JPQL·트랜잭션 | [jpql.md](../conventions/jpql.md), [transaction.md](../conventions/transaction.md) |
+| 예외 던지기·매핑·로그 레벨 | [exception-handling.md](../conventions/exception-handling.md) |
+| REST API·Swagger·응답 형식 | [api-and-swagger.md](../conventions/api-and-swagger.md) |
+| 클래스/DTO 이름 형식 | [naming.md](../conventions/naming.md) |
+| 로그·설정값 | [logging.md](../conventions/logging.md), [configuration.md](../conventions/configuration.md) |
+| 테스트 | [testing.md](../conventions/testing.md) — 특히 "생성된 테스트 리뷰 체크리스트" 5문항으로 먼저 거른다 |
 
-## Service
+인증 신원 전달 규칙(`@AuthenticatedUserId` principal)은
+[docs/architecture/security-architecture.md](../architecture/security-architecture.md) 를 따릅니다.
 
-- 인터페이스 없이 구체 클래스 (`@Service`, `@RequiredArgsConstructor`)
-- Service 에 `Impl` 접미사 금지
-- Command 서비스 : 단일 `execute(Command) → Result`
-- Query 서비스 : `{Domain}SearchService`, 메서드명으로 의도 표현
-- 도메인 헬퍼(토큰 생성·파싱·암호화 등) : `domain/{feature}/{helper}/` sub-package
+---
 
-## Port/Adapter
+# 어휘(jargon) 검사 (식별자 + 주석 + PR 본문)
 
-- Port : `domain/{feature}/out/`
-- Adapter : `infrastructure/{feature}/{provider}/{Port}Impl`
-- 단순 JPA Repository 래핑은 Port 두지 말 것
+추상 개념을 영어로 압축한 표현을 한글로 풀어 쓰지 않고 그대로 박아둔 경우, 변경된 라인 + 그 라인에 추가된 주석 + PR 설명에 등장하면 모두 지적합니다. **검사 범위가 식별자에 한정되지 않습니다 — 주석/PR 본문이 가장 흔한 발생 위치입니다.**
 
-## DTO
+- 피할 표현과 한국어 대체, 표준 용어 의역·조어 금지의 두 표는 [docs/conventions/vocabulary.md](../conventions/vocabulary.md) 가 원본입니다. 읽고 적용하세요.
+- 판단 기준: 그 용어가 코드 식별자/표준 스펙에 그대로 등장하면 영문 유지, 추상 개념을 영어로 줄여 쓴 것이면 한국어로 풀어 쓰도록 지적.
 
-- 파라미터 3개 이상이면 record DTO
-- presentation : Request(`toCommand()`), Response(`from(Result)`)
-- domain : Command, Result
-- 계층 간 변환 책임은 presentation DTO
+## 리뷰 지적 형식 예시
 
-## Entity
-
-- `@Getter` + `@NoArgsConstructor(access = PROTECTED)` + `@AllArgsConstructor(access = PRIVATE)`
-- 정적 팩토리 `create()` (신규), `of()` (모든 필드)
-- setter 없이 불변 지향, 상태 변경은 의미 있는 이름의 인스턴스 메서드
-
-## JPQL
-
-- 엔티티 alias 는 단일 문자(`r`) 금지. 엔티티 이름 camelCase 풀어 쓰기 (`refreshToken`)
-- 여러 줄 JPQL 의 쉼표는 leading 스타일 (다음 줄 앞단)
-- Java 메서드 인자/리터럴은 trailing comma 유지
-
-## 예외
-
-- 루트 : `BusinessException(ErrorCode)`
-- HTTP 상태별 서브클래스 : `BadRequest/Unauthorized/Forbidden/NotFound/Conflict/TooManyRequests/BadGateway/GatewayTimeout`
-- 도메인 ErrorCode : `domain/{feature}/exception/{Feature}ErrorCode.java` enum, 한글 메시지
-- 핸들러는 `presentation/common/GlobalExceptionHandler` 한 곳에만
-- raw `RuntimeException`/`IllegalArgumentException` 금지. `IllegalStateException` 은 fail-fast 용
-- 예외 검증 테스트는 리플렉션 문자열 키 금지. `asInstanceOf(InstanceOfAssertFactories.type(...))` + 메서드 레퍼런스로
-
-## API
-
-- RESTful, `/api/v1/{resource}`
-- ResponseEntity 로 HTTP 상태 명시
-- 성공 : `{ "data": { ... } }` (단수=단수명사, 복수=복수명사 배열)
-- 에러 : `{ "error": { "message": "..." } }`
-- Swagger : `@Operation(summary, description)` + `@ApiResponses(...)`. `@io.swagger.v3.oas.annotations.responses.ApiResponse` FQCN 사용 (프로젝트 내 동명 클래스 충돌 방지)
-
-## 명명 컨벤션 (위 "최우선 검사" 와 별개의 형식 규칙)
-
-- Command 서비스 : `{Action}Service`
-- Query 서비스 : `{Domain}SearchService`
-- Command DTO : `{Action}Command`
-- Result DTO : `{Action}Result` 또는 `{Domain}Result`
-- Request : `{Action}Request`, Response : `{Domain}Response`
-- Port : `{Domain}{Action}Client`, Adapter : `{Port}Impl`
-- 공용 예외 : `{HttpStatus}Exception`
-- 개수 필드는 `Count` 접미사 (`totalResultCount`)
-- JWT 식별자 변수는 `jwtId`, JWT payload claim 이름만 `"jti"`
-
-## 추상 영어 jargon 검사 (식별자 + 주석 + PR 본문)
-
-추상 개념을 영어로 압축한 표현 (소위 *AI 가 만든 듯한 jargon*) 을 한글로 풀어 쓰지 않고 그대로 박아둔 경우, 변경된 라인 + 그 라인에 추가된 주석 + PR 설명에 등장하면 모두 지적합니다. **검사 범위가 식별자에 한정되지 않습니다 — 주석/PR 본문이 가장 흔한 발생 위치입니다.**
-
-### 피할 표현 → 한국어 풀이
-
-- `fail-fast` → 즉시 실패 응답 / 호출을 빠르게 끊는다
-- `silent fallback` → 빈 결과 대신 다른 응답으로 조용히 바뀜
-- `fire-and-forget` → 결과를 기다리지 않고 비동기 실행 / 응답 대기 없이 백그라운드에서 실행
-- `swallow` (예외를 swallow) → 예외를 잡아 로그만 남기고 외부로 안 던짐
-- `happy path` → 정상 흐름
-- `best-effort` → 가능한 범위에서 시도, 실패해도 통과
-- `short-circuit` → 조건 만족 시 이후 단계 건너뜀
-- `noop` → 아무 일도 안 함
-- `SoT` (Source of Truth) → 데이터 출처 기준 / 정답을 갖는 곳
-- `ROI` → 비용 대비 효용 / 그만큼의 가치가 없음
-- `stateless` → 상태 저장 없이
-- `graceful degradation` → 부분 장애 시 점진적 성능 저하
-- `race condition` → 동시성 충돌
-- `eventually consistent` → 일정 시간 후 데이터가 맞춰짐
-
-### 그대로 두는 경우 (영문 유지)
-
-- 클래스/라이브러리 이름: `RestClient`, `Adapter`, `Spring Boot`
-- HTTP/REST 표준: `GET`, `400`, `Bearer Token`, `Retry-After`
-- 정착된 약어: `JWT`, `JPA`, `MVP`, `SSE`, `RPM`, `TPM`
-
-### 판단 기준
-
-그 용어가 코드 식별자/표준 스펙에 그대로 등장하면 영문 유지, **추상 개념을 영어로 줄여 쓴 것이면 한국어로 풀어 쓰기**. 애매하면 *"비전문가가 PR 본문을 처음 읽었을 때 이해할 수 있나"* 로 판단.
-
-### 리뷰 지적 형식 예시
-
-> 🟢 Minor — `path/to/Foo.java:42` 의 주석에 *"fire-and-forget 패턴"* 이 그대로 등장합니다. 한국어로 풀어 *"결과를 기다리지 않고 비동기로 실행"* 같은 표현으로 바꾸기를 권합니다 (`docs/codex-review-prompt.md` 의 jargon 검사 항목).
-
-
-## 로깅
-
-- 한국어 + 영문 기술 용어 (Token Pair, Access Token 등 무리한 번역 X)
-- 레벨 : ERROR(즉시 대응), WARN(잠재 문제), INFO(주요 비즈니스/I/O), DEBUG(개발용)
-
-## 환경/설정
-
-- 시크릿/환경별 값 → 환경변수
-- 비즈니스 룰/운영 상수 → `application.yml` 직접값
-- 환경 의존값은 `application-{profile}.yml`
-
-## 테스트
-
-- 서비스 레이어 단위 테스트 필수
-- 조회 기능은 DAO 통합 테스트 필수
-- 메서드명 : 행위를 설명하는 한국어 허용 (`존재하지_않는_사용자를_조회하면_예외가_발생한다`)
+> 🟢 Minor — `path/to/Foo.java:42` 의 주석에 *"fire-and-forget 패턴"* 이 그대로 등장합니다. 한국어로 풀어 *"결과를 기다리지 않고 비동기로 실행"* 같은 표현으로 바꾸기를 권합니다 (`docs/conventions/vocabulary.md` 의 어휘 규칙).
 
 ---
 
@@ -240,7 +154,7 @@ AI 가 작성한 코드의 가장 흔한 결함은 **사람이 한 번 읽고 �
 # 리뷰 시 유의사항
 
 - diff 의 added/modified 라인만 평가. context 라인(unchanged) 은 변경 의도 파악용
-- example/ 디렉토리 변경은 무시
+- example/ 디렉토리 변경은 무시 (참조용 템플릿)
 - 주석에 `[임시]` 표시된 상수/로직은 후속 작업 예정으로 간주
 - 추측은 "추정" 으로 명시. 확실한 근거(컨벤션 인용 또는 코드 인용)와 함께 단정
 - 같은 클래스에서 같은 종류 위반이 반복되면 첫 번째 위치만 인용 + "외 N건" 으로 묶기
