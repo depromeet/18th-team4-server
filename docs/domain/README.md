@@ -2,12 +2,16 @@
 
 readum 의 기능이 어느 도메인에 있는지 찾는 색인. 상세는 각 도메인 문서로.
 
-**이 디렉토리의 문서 채택 기준** — 표준 경로(Controller → Service →
-Repository, CLAUDE.md 4계층)를 그대로 타는 기능은 컨벤션이 문서를 대신하므로
-따로 설명하지 않는다. 도메인 문서에 적는 것은 코드가 말할 수 없는 것들이다:
-설계 의도(왜), 도메인 경계와 배치 근거, 불변식, 표준 경로를 벗어나는
-흐름(비동기·크로스 도메인·사고 이력). 엔드포인트별 요청/응답 계약은 Swagger
-(`@Operation`)가 원천이다.
+**이 디렉토리의 구성** — 세 층으로 나뉜다.
+
+- **도메인 문서** (`{domain}.md`): 코드가 말할 수 없는 것 — 설계 의도(왜),
+  도메인 경계와 배치 근거, 불변식. 휘발성이 낮아 도메인 설계가 바뀔 때만
+  갱신한다.
+- **시나리오 참조** (`scenarios/{domain}.md`): 도메인의 모든 흐름을 mermaid
+  다이어그램으로. 정상·에러 분기를 하나의 다이어그램에 통합하며, 기능이
+  추가·변경될 때 함께 갱신한다.
+- **엔드포인트별 요청/응답 계약**: 문서가 아니라 Swagger(`@Operation`)가
+  원천이다.
 
 ## auth — 인증
 
@@ -19,8 +23,8 @@ Repository, CLAUDE.md 4계층)를 그대로 타는 기능은 컨벤션이 문서
 | Access Token 재발급 | `POST /api/v1/auth/refresh` |
 | 로그아웃 | `POST /api/v1/auth/logout` |
 
-문서: (미작성) · 패키지: `domain/auth`, `infrastructure/security`,
-`presentation/common/security`
+문서: (미작성) · 시나리오: [scenarios/auth.md](scenarios/auth.md) · 패키지:
+`domain/auth`, `infrastructure/security`, `presentation/common/security`
 
 ## user — 회원
 
@@ -34,7 +38,8 @@ Repository, CLAUDE.md 4계층)를 그대로 타는 기능은 컨벤션이 문서
 | 온보딩 완료 처리 | `POST /api/v1/users/me/onboarding` |
 | 닉네임 수정 | `PUT /api/v1/users/me/nickname` |
 
-문서: (미작성) · 패키지: `domain/user`, `model/user`
+문서: (미작성) · 시나리오: [scenarios/user.md](scenarios/user.md) · 패키지:
+`domain/user`, `model/user`
 
 ## user/userbook — 내 책장
 
@@ -47,7 +52,8 @@ Epic #117 이관 심사 대상).
 | 내 책장 도서 목록 조회 | `GET /api/v1/user-books` |
 | 내 책장 도서 삭제 | `DELETE /api/v1/user-books/{userBookId}` |
 
-문서: (미작성) · 패키지: `domain/user/userbook`
+문서: (미작성) · 시나리오: [scenarios/userbook.md](scenarios/userbook.md) ·
+패키지: `domain/user/userbook`
 
 ## book — 도서 검색
 
@@ -58,7 +64,8 @@ Epic #117 이관 심사 대상).
 |---|---|
 | 키워드 도서 검색 | `GET /api/v1/books` |
 
-문서: (미작성) · 패키지: `domain/book`, `infrastructure/book/aladin`
+문서: (미작성) · 시나리오: [scenarios/book.md](scenarios/book.md) · 패키지:
+`domain/book`, `infrastructure/book/aladin`
 
 ## aiChat — AI 채팅
 
@@ -78,8 +85,9 @@ Epic #117 이관 심사 대상).
 | 감상문 초안 생성 요청 | `POST /api/v1/ai-chat/sessions/{sessionId}/summary-draft` |
 | (백그라운드) 세션 제목 자동 생성 | 첫 응답 커밋 후 이벤트 |
 
-문서: [ai-chat.md](ai-chat.md) · 패키지: `domain/aiChat`, `model/aiChat`,
-`infrastructure/ai`
+문서: [ai-chat.md](ai-chat.md) · 시나리오:
+[scenarios/ai-chat.md](scenarios/ai-chat.md) · 패키지: `domain/aiChat`,
+`model/aiChat`, `infrastructure/ai`
 
 ## summary — 감상 기록
 
@@ -95,5 +103,5 @@ Epic #117 이관 심사 대상).
 | (백그라운드) 감상문 자동 생성 적재 | 매일 06:00 스케줄러 |
 | (백그라운드) 생성 작업 실행·고아 회수 | 2초 간격 디스패처 / 60초 리퍼 |
 
-문서: (미작성) · 패키지: `domain/summary`, `model/summary`,
-`infrastructure/summary`
+문서: (미작성) · 시나리오: [scenarios/summary.md](scenarios/summary.md) ·
+패키지: `domain/summary`, `model/summary`, `infrastructure/summary`
