@@ -4,7 +4,7 @@
 
 ## 예외 계층 구조
 
-```
+```text
 RuntimeException
  └─ BusinessException                (domain/exception/)
      ├─ BadRequestException          → 400
@@ -274,7 +274,7 @@ public void handleError(URI url, HttpMethod method, ClientHttpResponse response)
 
 ### 데이터 흐름
 
-```
+```text
 OpenAI 응답 (status 429 + headers)
         │
         ▼

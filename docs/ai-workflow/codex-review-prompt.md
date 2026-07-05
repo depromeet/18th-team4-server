@@ -126,7 +126,7 @@ AI 가 작성한 코드의 가장 흔한 결함은 **사람이 한 번 읽고 �
 
 전형적인 응답 구조 :
 
-```
+```text
 ## 발견사항
 
 🔴 Critical — `path/to/SomeService.java:42` 의 `handleChunk` 메서드는 ...

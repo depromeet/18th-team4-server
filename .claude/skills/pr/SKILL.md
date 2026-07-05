@@ -186,11 +186,7 @@ EOF
 
 ## 어휘 가이드
 
-어휘 규칙의 원본은 [docs/conventions/vocabulary.md](../../../docs/conventions/vocabulary.md) 다. PR 본문 작성 전에 그 문서의 두 표를 읽고 적용한다.
-
-- 은유·합성 조어·모호한 약어(swallow, silent fallback, fail-fast, SoT, ROI…) → **한국어로 풀어 쓴다**.
-- 정착된 표준 용어(race condition, happy path, token bucket, rate limiter…) → **영문 그대로, 의역·조어 금지**. 익숙지 않을 수 있는 용어는 첫 등장에 괄호로 한 줄 풀이.
-- 공통 판단 기준: "**개발자가 그 표현을 보고 바로 이해하는가**". 독자는 개발자다(일반인 아님).
+어휘 규칙의 원본은 [docs/conventions/vocabulary.md](../../../docs/conventions/vocabulary.md) 다. PR 본문 작성 전에 그 문서를 읽고 따른다 (풀어 쓸 것 / 그대로 쓸 것의 구분과 판단 기준은 그 문서가 정한다 — 여기 다시 적지 않는다).
 
 ## readum 고유 컨벤션 디테일
 
@@ -204,8 +200,7 @@ EOF
 ## 안티패턴 (피할 것)
 
 - 단순 코드 diff 나열 ("X.java 파일 추가, Y.java 수정") — 기능/이유 관점으로 재구성.
-- 은유·합성 조어·모호한 약어 (fail-fast, silent fallback, fire-and-forget, swallow, ROI, SoT 등) — 위 어휘 가이드대로 한국어로 풀어 쓰기. (happy path, noop, stateless 같은 정착 표준 용어는 그대로 씀 — vocabulary.md 의 "그대로 쓸 것" 목록 참조)
-- 표준 기술 용어를 임의 의역/조어로 바꾸기 (token bucket→"양동이", rate limiter→"페이서", "무벌점 반납", "owner 펜싱" 류) — 어휘 가이드 둘째 표대로 표준어 + 한 줄 풀이로.
+- 어휘 규칙 위반 — 은유·합성 조어·모호한 약어를 그대로 쓰거나, 반대로 표준 기술 용어를 임의 의역/조어로 바꾸기. 구분과 목록은 [docs/conventions/vocabulary.md](../../../docs/conventions/vocabulary.md) 를 따른다.
 - 영문 본문, 영문 섹션 헤더 (`## Summary`, `## Test plan`) — 한국어로.
 - 사용자 confirm 없이 `gh pr create` 자동 호출 — 반드시 본문 보여주고 OK 받기.
 - 미커밋 변경이 남은 채로 PR 생성 — commit 부터.

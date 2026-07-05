@@ -2,7 +2,7 @@
 
 ## 브랜치 네이밍
 
-```
+```text
 main ← dev ← feature|bugfix|hotfix/{이슈번호}-{간단한-설명}
 ```
 
@@ -10,7 +10,7 @@ main ← dev ← feature|bugfix|hotfix/{이슈번호}-{간단한-설명}
 
 ## 커밋 메시지 (Angular Convention)
 
-```
+```text
 <type>(<scope>): <subject>
 ```
 

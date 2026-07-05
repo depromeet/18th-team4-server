@@ -35,12 +35,24 @@ Spring AI 의 `spring-ai-starter-model-openai` (BOM 2.0.0-M4, build.gradle:32) �
   Adapter `infrastructure/auth/inmemory/TokenBlacklistStoreImpl`.
 - **rate limit 버킷**: bucket4j + Caffeine, `infrastructure/ai/openai/ratelimit/AiChatRateLimiter`.
 
-## Port / Adapter 목록
+## Port / Adapter 전체 목록
 
-| Port (domain) | Adapter (infrastructure) | 용도 |
+`domain/*/out/` 의 Port 전부와 대응 Adapter (example 제외).
+
+| Port (domain/*/out/) | Adapter (infrastructure) | 용도 |
 |------|------|------|
-| `domain/aiChat/out/InputModerationClient` | `OpenAiInputModerationClientImpl` | OpenAI 입력 moderation |
-| `domain/auth/out/TokenBlacklistStore` | `TokenBlacklistStoreImpl` (Caffeine) | 로그아웃한 토큰 블랙리스트 |
+| `aiChat/out/AiChatClient` | `ai/openai/AiChatClientImpl` | OpenAI 채팅 스트리밍 |
+| `aiChat/out/AiChatTitleClient` | `ai/openai/AiChatTitleClientImpl` | 세션 제목 자동 생성 |
+| `aiChat/out/AiSummaryClient` | `ai/openai/AiSummaryClientImpl` | 감상문 초안 생성 |
+| `aiChat/out/InputModerationClient` | `ai/openai/OpenAiInputModerationClientImpl` | OpenAI 입력 moderation |
+| `auth/out/TokenGenerator` | `security/jwt/JwtTokenGeneratorImpl` | JWT 생성·파싱 |
+| `auth/out/TokenBlacklistStore` | `auth/inmemory/TokenBlacklistStoreImpl` (Caffeine) | 로그아웃한 토큰 블랙리스트 |
+| `book/out/BookSearchClient` | `book/aladin/AladinBookSearchClientImpl` | 알라딘 키워드 검색 |
+| `book/out/BookLookupClient` | `book/aladin/AladinBookLookupClientImpl` | 알라딘 단건 조회 |
+| `summary/out/SummaryCallRateLimiter` | `ai/openai/ratelimit/SummaryCallRateLimiterImpl` | 감상문 생성 호출 속도 제어 |
+| `summary/out/SummaryCallBreaker` | `ai/openai/circuitbreaker/InMemorySummaryCallBreaker` | 감상문 생성 circuit breaker |
 
-> 도서 검색/조회 Adapter(`Aladin...ClientImpl`) 와 rate limit(`AiChatRateLimiter`) 도
-> 같은 Port/Adapter 규칙을 따른다. 새 연동을 추가할 때 이 표에 함께 채워 넣는다.
+새 연동을 추가할 때 이 표에 함께 채워 넣는다.
+
+> `AiChatRateLimiter` 는 Port 가 없다 — 같은 infrastructure 계층의
+> `AiChatRateLimitInterceptor` 만 사용하므로 domain 을 거치지 않는다.

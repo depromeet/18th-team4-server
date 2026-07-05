@@ -15,8 +15,10 @@ readum 의 기능이 어느 도메인에 있는지 찾는 색인. 상세는 각 
 
 ## auth — 인증
 
-세션 쿠키 기반 인증. 신원 해석은 `SessionCookieAuthenticationFilter` 가
-전담하고 컨트롤러에는 `@AuthenticatedUserId Long userId` 로만 전달된다.
+인증 필터 두 개가 신원을 해석한다 — `JwtAuthenticationFilter` 가
+`Authorization: Bearer` Access Token 을 먼저 처리하고, 인증이 비어 있으면
+`SessionCookieAuthenticationFilter` 가 `user_session` 쿠키를 해석한다.
+어느 경로든 컨트롤러에는 `@AuthenticatedUserId Long userId` 로만 전달된다.
 
 | 기능 | API |
 |---|---|

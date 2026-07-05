@@ -19,7 +19,7 @@ flowchart TD
 
 ## 2. 세션 쿠키 인증 (보호된 API 공통 전처리)
 
-`/me` 계열을 포함한 모든 보호된 API 는 요청 처리 전에 인증 필터가 `user_session` 쿠키를 userId 로 해석해 principal 을 채우고, 컨트롤러는 `@AuthenticatedUserId Long userId` 로만 신원을 받는다.
+`/me` 계열을 포함한 모든 보호된 API 는 요청 처리 전에 `JwtAuthenticationFilter` 가 `Authorization: Bearer` 토큰을 먼저 인증 시도하고, 인증이 비어 있으면 `SessionCookieAuthenticationFilter` 가 `user_session` 쿠키를 userId 로 해석해 principal 을 채운다. 컨트롤러는 `@AuthenticatedUserId Long userId` 로만 신원을 받는다.
 
 ```mermaid
 flowchart TD

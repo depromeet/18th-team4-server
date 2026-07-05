@@ -4,7 +4,7 @@
 
 ## 4계층 구조
 
-```
+```text
 com.readum
 ├── presentation/                # API 계층
 │   └── controller/{feature}/
