@@ -186,51 +186,7 @@ EOF
 
 ## 어휘 가이드
 
-본문은 **한국어 + 보편적으로 통용되는 코드/기술 용어** 만 사용한다. 독자는 **개발자**다(일반인 아님). 두 실패 모드를 함께 피한다 — ① 추상 개념을 영어로 압축한 jargon(소위 AI 가 만든 듯한 표현)은 평이한 한국어로 풀어 쓰고(아래 첫 표), ② **표준 기술 용어를 임의로 한국어 의역하거나 그 PR 에서만 통하는 조어를 만들지 않는다**(아래 둘째 표).
-
-**피할 표현 → 한국어 대체 예시**
-
-| 피할 표현 | 한국어 대체 |
-|---|---|
-| fail-fast | 즉시 실패 응답 / 호출을 빠르게 끊는다 |
-| silent fallback | 빈 결과 대신 다른 응답으로 조용히 바뀜 |
-| fire-and-forget | 결과를 기다리지 않고 비동기 실행 / 응답 대기 없이 백그라운드에서 실행 |
-| swallow (예외를 swallow) | 예외를 잡아 로그만 남기고 외부로 안 던짐 |
-| happy path | 정상 흐름 |
-| best-effort | 가능한 범위에서 시도, 실패해도 통과 |
-| short-circuit | 조건 만족 시 이후 단계 건너뜀 |
-| noop | 아무 일도 안 함 |
-| ROI | 비용 대비 효용 / 그만큼의 가치가 없음 |
-| SoT (Source of Truth) | 데이터 출처 기준 / 정답을 갖는 곳 |
-| stateless | 상태 저장 없이 / 상태를 두지 않고 |
-| graceful degradation | 부분 장애 시 점진적 성능 저하 |
-| race condition | 동시성 충돌 |
-| eventually consistent | 일정 시간 후 데이터가 맞춰짐 |
-
-**그대로 영문을 쓰는 경우** — 코드 식별자, 표준 스펙, 잘 알려진 라이브러리/타입 이름:
-- 클래스/메서드/패키지: `RestClient`, `JdkClientHttpRequestFactory`, `Adapter`, `Port`, `BookSearchService`
-- HTTP/REST 표준: `GET`, `POST`, `400`, `Bearer Token`
-- 잘 정착된 약어: `JWT`, `JPA`, `MVP`
-
-**판단 기준**: 그 용어가 코드 식별자나 표준 스펙에 그대로 등장하면 영문 유지, 추상 개념을 영어로 줄여 쓴 것이면 한국어로 풀어 쓴다.
-
-### 표준 기술 용어를 의역·조어로 바꾸지 않는다 (둘째 실패 모드)
-
-독자가 개발자이므로, 널리 통용되는 **표준 기술 용어는 표준어 그대로** 쓴다. 한국어로 억지 의역하거나(token bucket → "양동이"), 동작을 그 PR 에서만 통하는 조어로 압축하지(재시도 횟수 미증가 반납 → "무벌점 반납") 않는다 — 둘 다 개발자가 한 번 더 해석하게 만든다. 익숙지 않을 수 있는 표준어만 처음 등장 시 괄호로 한 줄 풀이한다.
-
-| 쓰지 말 것 (자작 의역/조어) | 쓸 것 (표준어 + 필요 시 한 줄 풀이) |
-|---|---|
-| 양동이 | 토큰 버킷(token bucket) |
-| 페이서 | rate limiter(호출 속도 제어) |
-| 무벌점 반납 | 재시도 횟수를 올리지 않고 큐로 되돌림 |
-| owner 펜싱 | 소유권 검증(fencing) — `lock_owner` 토큰 일치 확인 |
-| 헛호출 / 헛probe | 불필요한 반복 호출 |
-
-그대로 쓰는 표준 용어 예: `token bucket`, `rate limiter`, `circuit breaker`, `lease`, `fencing`, `backpressure`, `idempotent`, 비관적 락, `SKIP LOCKED`, `exponential backoff`, `TPM/RPM`.
-
-> 정리 — 공통 판단 기준은 "**개발자가 그 표현을 보고 바로 이해하는가**":
-> - 추상 영어 숙어(fail-fast, silent fallback, ROI…) → **한국어로 풀어 쓴다**(첫 표).
-> - 표준 명사형 기술 용어(token bucket, rate limiter…) → **표준어 유지, 의역·조어 금지**(둘째 표).
+어휘 규칙의 원본은 [docs/conventions/vocabulary.md](../../../docs/conventions/vocabulary.md) 다. PR 본문 작성 전에 그 문서를 읽고 따른다 (풀어 쓸 것 / 그대로 쓸 것의 구분과 판단 기준은 그 문서가 정한다 — 여기 다시 적지 않는다).
 
 ## readum 고유 컨벤션 디테일
 
@@ -244,8 +200,7 @@ EOF
 ## 안티패턴 (피할 것)
 
 - 단순 코드 diff 나열 ("X.java 파일 추가, Y.java 수정") — 기능/이유 관점으로 재구성.
-- 추상 영어 jargon (fail-fast, silent fallback, fire-and-forget, swallow, happy path, best-effort, noop, ROI, SoT, stateless 등) — 위 어휘 가이드대로 한국어로 풀어 쓰기.
-- 표준 기술 용어를 임의 의역/조어로 바꾸기 (token bucket→"양동이", rate limiter→"페이서", "무벌점 반납", "owner 펜싱" 류) — 어휘 가이드 둘째 표대로 표준어 + 한 줄 풀이로.
+- 어휘 규칙 위반 — 은유·합성 조어·모호한 약어를 그대로 쓰거나, 반대로 표준 기술 용어를 임의 의역/조어로 바꾸기. 구분과 목록은 [docs/conventions/vocabulary.md](../../../docs/conventions/vocabulary.md) 를 따른다.
 - 영문 본문, 영문 섹션 헤더 (`## Summary`, `## Test plan`) — 한국어로.
 - 사용자 confirm 없이 `gh pr create` 자동 호출 — 반드시 본문 보여주고 OK 받기.
 - 미커밋 변경이 남은 채로 PR 생성 — commit 부터.

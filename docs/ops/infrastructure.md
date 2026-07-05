@@ -1,5 +1,8 @@
 # 인프라 구성
 
+> 이 문서는 코드로 확인할 수 없는 콘솔 설정 세부(보안 그룹 규칙, 버킷 목록 등)는 담지 않는다.
+> 그런 값은 문서가 금방 낡아 거짓이 되므로 AWS 콘솔을 원본으로 본다 (2026-07-05 결정).
+
 ## 구성도
 
 ### 개발 서버 (AWS)
@@ -25,15 +28,15 @@
            │                 │
            │  Nginx          │
            │  :80 → :443     │
-           └───┬─────────┬───┘
-               │         │
-    ┌──────────▼───┐  ┌───▼──────────────────┐
-    │     RDS      │  │          S3          │
-    │  MySQL 8.4   │  │  readum-{account-id} │
-    │  db.t4g.micro│  │  -ap-northeast-2-an  │
-    │  단일 AZ      │  │  이미지/파일 저장        │
-    │  :3306       │  │                      │
-    └──────────────┘  └──────────────────────┘
+           └────────┬────────┘
+                    │
+           ┌────────▼─────┐
+           │     RDS      │
+           │  MySQL 8.4   │
+           │  db.t4g.micro│
+           │  단일 AZ      │
+           │  :3306       │
+           └──────────────┘
 ```
 
 ---
@@ -66,14 +69,6 @@
 | SSL | 필수 |
 | 퍼블릭 액세스 | 활성화 (개발 편의용) |
 
-### S3
-
-| 항목 | 값 |
-|------|----|
-| 버킷명 | readum-{account-id}-ap-northeast-2-an |
-| 리전 | ap-northeast-2 |
-| 역할 | 이미지 및 파일 업로드 스토리지 |
-
 ### 도메인 / HTTPS
 
 | 항목 | 값 |
@@ -83,27 +78,6 @@
 | 백엔드 API 도메인 | api.readum.kr |
 | SSL 인증서 | Let's Encrypt (Certbot) |
 | 갱신 | Certbot 자동 갱신 |
-
----
-
-## 보안 그룹
-
-### EC2 보안 그룹 (readwith-dev-sg)
-
-| 포트 | 프로토콜 | 소스 | 용도 |
-|------|---------|------|------|
-| 22 | TCP | 개발자 IP/32 | SSH |
-| 80 | TCP | 0.0.0.0/0 | HTTP |
-| 443 | TCP | 0.0.0.0/0 | HTTPS |
-
-### RDS 보안 그룹 (rds-ec2-2)
-
-| 포트 | 프로토콜 | 소스 | 용도 |
-|------|---------|------|------|
-| 3306 | TCP | EC2 보안 그룹 | EC2 → RDS 연결 |
-| 3306 | TCP | 개발자 로컬 IP | 로컬 개발 접속 |
-
-> ⚠️ 로컬에서 RDS 접속 시 본인 IP를 RDS 보안 그룹 인바운드 규칙에 추가해야 합니다.
 
 ---
 
@@ -132,16 +106,9 @@ mysql -h {RDS_ENDPOINT} \
       --ssl-ca=~/global-bundle.pem
 ```
 
-### 로컬 환경 변수 설정 (IntelliJ Run Configuration)
+> 접속이 거부되면 RDS 보안 그룹 인바운드에 본인 IP 를 추가해야 한다 (AWS 콘솔에서 직접).
 
-```
-SPRING_PROFILES_ACTIVE=dev
-MYSQL_HOST={RDS_ENDPOINT}
-MYSQL_PORT=3306
-MYSQL_DATABASE=readum
-MYSQL_USER={DB_USER}
-MYSQL_PASSWORD={비밀번호}
-```
+애플리케이션 실행에 필요한 환경 변수는 `src/main/resources/application*.yml` 의 `${...}` 플레이스홀더가 원본이다.
 
 ---
 

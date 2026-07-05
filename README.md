@@ -1,45 +1,18 @@
 # readum
 
-## 로컬 개발 환경 세팅
+AI 와 대화하며 독서 감상을 기록하는 서비스의 백엔드 서버. Spring Boot 로 구현했다.
 
-### 사전 요구사항
-
-| 도구 | 버전 |
-|------|------|
-| Java | 25 |
-| MySQL | 8.x |
-
----
-
-### 환경 변수
-
-| 변수명 | 설명 |
-|--------|------|
-| `OPENAI_API_KEY` | OpenAI API 키 |
-| `MYSQL_HOST` | MySQL 호스트 |
-| `MYSQL_PORT` | MySQL 포트 (기본값: `3306`) |
-| `MYSQL_DATABASE` | 데이터베이스 이름 |
-| `MYSQL_USER` | DB 유저 |
-| `MYSQL_PASSWORD` | DB 비밀번호 |
-
----
-
-### 실행
-
-**Active profiles:** `dev`
-
-IntelliJ Run Configuration에서 환경 변수를 설정합니다.
-
-```dotenv
-OPENAI_API_KEY=...;MYSQL_HOST=...;MYSQL_PORT=3306;MYSQL_DATABASE=...;MYSQL_USER=...;MYSQL_PASSWORD=...
-```
-
----
-
-## 빌드 & 테스트
+## 빠른 시작
 
 ```bash
-./gradlew build
-./gradlew test
-./gradlew clean build
+./gradlew bootRun
 ```
+
+실행 전 필요한 환경 변수(OpenAI 키·DB 접속 정보)는
+`src/main/resources/application*.yml` 의 `${...}` 플레이스홀더를 참조한다.
+
+## 문서
+
+문서 지도는 [docs/README.md](docs/README.md) 에서 시작한다.
+
+AI 작업자(Claude Code 등)는 [CLAUDE.md](CLAUDE.md) 의 지침을 따른다.

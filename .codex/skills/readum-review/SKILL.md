@@ -22,7 +22,7 @@ description: readum 서버 저장소에서 PR, diff, 코드 리뷰를 요청할 
    - 가능하면 `git diff`, PR diff, 변경 파일 목록, 관련 테스트를 함께 본다.
    - `example/` 하위 변경은 리뷰 대상에서 제외한다.
 
-2. 상세 기준은 반드시 [docs/codex-review-prompt.md](../../../docs/codex-review-prompt.md)를 따른다.
+2. 상세 기준은 반드시 [docs/ai-workflow/codex-review-prompt.md](../../../docs/ai-workflow/codex-review-prompt.md)를 따른다.
    - 특히 명명 명확성 검사를 가장 먼저 수행한다.
    - 그 다음 4-layer 패키지, Service, Port/Adapter, DTO, Entity, JPQL, 예외, API, 테스트 컨벤션 위반을 본다.
    - 이후 더 나은 설계/구현 방향, 보안, 데이터 무결성, 로직 오류, 불필요한 추상화/중복을 점검한다.
@@ -46,7 +46,7 @@ description: readum 서버 저장소에서 PR, diff, 코드 리뷰를 요청할 
 - 이름만 보고 5초 안에 의도를 추측할 수 있는가
 - 계층 의존 방향이 깨지지 않았는가
 - 추상적 `Manager`, `Helper`, `process`, `handle` 같은 이름이 새로 들어오지 않았는가
-- 영어 jargon (`fire-and-forget`, `swallow`, `fail-fast`, `happy path`, `best-effort`, `noop`, `SoT` 등) 이 주석/PR 본문/식별자에 그대로 박혀 있지 않은가 — 자세한 목록은 [codex-review-prompt.md 의 jargon 검사 섹션](../../../docs/codex-review-prompt.md) 참조
+- 은유·합성 조어·모호한 약어 (`fire-and-forget`, `swallow`, `fail-fast`, `silent fallback`, `SoT` 등) 가 주석/PR 본문/식별자에 그대로 박혀 있지 않은가 — 풀어 쓸 것/그대로 쓸 것 구분은 [docs/conventions/vocabulary.md](../../../docs/conventions/vocabulary.md) 참조 (`happy path`, `race condition` 같은 정착 표준 용어는 그대로 쓰는 게 맞음)
 - DTO/Entity/Exception 구조가 팀 컨벤션에 맞는가
 - 변경 범위 안에서 더 단순하고 안전한 설계/구현 방향이 보이는가
 - 트랜잭션, 소유권 검증, 입력 검증, 민감 정보 노출 문제가 없는가

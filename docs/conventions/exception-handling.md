@@ -1,22 +1,45 @@
 # Exception Convention
 
-CLAUDE.md 의 "Exception Convention" 섹션을 보충하는 상세 문서. 예외 계층 요약·do/don't 규칙은 CLAUDE.md 에 있고, 여기에는 **실제 작성 예시**와 **확장 절차**를 둔다.
+예외 처리 규칙의 원본(canonical) 문서. CLAUDE.md 에는 링크만 둔다.
 
 ## 예외 계층 구조
 
-```
+```text
 RuntimeException
- └─ BusinessException            (domain/exception/)
-     ├─ BadRequestException      → 400
-     ├─ UnauthorizedException    → 401
-     ├─ ForbiddenException       → 403
-     ├─ NotFoundException        → 404
-     ├─ ConflictException        → 409
-     └─ TooManyRequestsException → 429
+ └─ BusinessException                (domain/exception/)
+     ├─ BadRequestException          → 400
+     ├─ UnauthorizedException        → 401
+     ├─ ForbiddenException           → 403
+     ├─ NotFoundException            → 404
+     ├─ ConflictException            → 409
+     ├─ UnprocessableEntityException → 422
+     ├─ TooManyRequestsException     → 429
+     ├─ ServiceUnavailableException  → 503 (+ Retry-After 헤더)
+     └─ ExternalApiException         → 500 (외부 API 실패의 공통 부모)
+         ├─ BadGatewayException      → 502
+         └─ GatewayTimeoutException  → 504
 ```
 
+(HTTP 상태는 `GlobalExceptionHandler` 의 각 핸들러에서 확인한 현행 매핑. `BadGateway`/`GatewayTimeout` 은 `BusinessException` 직속이 아니라 `ExternalApiException` 을 상속한다.)
+
+각 서브클래스의 용도 — 실제 사용처 기준:
+
+| Exception | HTTP | 용도 | 실제 사용처 |
+|-----------|:----:|------|------------|
+| `BadRequestException` | 400 | 검증 실패, 비즈니스 규칙 위반 | 전 도메인 |
+| `UnauthorizedException` | 401 | 인증 실패 (토큰 무효/만료) | auth |
+| `ForbiddenException` | 403 | 인증됐지만 권한 없음 | 소유권 검증 |
+| `NotFoundException` | 404 | 리소스 미존재 | 전 도메인 |
+| `ConflictException` | 409 | 상태 충돌 (중복, 동시성) | 전 도메인 |
+| `UnprocessableEntityException` | 422 | 요청 형식은 유효하나 도메인 상태가 처리 조건 미달 | `SummaryDraftPolicy` — 대화량 부족(`CHAT_VOLUME_NOT_ENOUGH`) 시 감상문 초안 생성 거절 |
+| `TooManyRequestsException` | 429 | 호출 한도 초과 (`RateLimitInfo` 운반 — 아래 절 참조) | LLM rate limit, 자체 rate limiter |
+| `ServiceUnavailableException` | 503 | 일시 장애 — 클라이언트 재시도 유도. `retryAfterSeconds` 필드(기본 30)가 `Retry-After` 헤더로 나감 | moderation 장애로 입력 안전 검사 불가 시 (`GUARDRAIL_MODERATION_UNAVAILABLE`) |
+| `ExternalApiException` | 500 | 502/504 로 분류되지 않는 외부 API 실패 | 알라딘 기타 `RestClientException` (`LOOKUP_FAILED`/`SEARCH_FAILED`) |
+| `BadGatewayException` | 502 | 외부 API 의 5xx 응답, 네트워크 IO 실패 | 알라딘 5xx (`*_GATEWAY_ERROR`), IO 실패 (`LOOKUP_IO_FAILURE`) |
+| `GatewayTimeoutException` | 504 | 외부 API 타임아웃 | 알라딘 connect/read 타임아웃 (`*_TIMEOUT`) |
+
 - `BusinessException` 은 `ErrorCode` 하나만 필드로 들고 있음
-- 서브클래스는 **HTTP 상태 매핑** 용도일 뿐 추가 필드 없음
+- 서브클래스는 원칙적으로 **HTTP 상태 매핑** 용도일 뿐 추가 필드 없음. 예외 두 개: `TooManyRequestsException` 은 `RateLimitInfo`, `ServiceUnavailableException` 은 `retryAfterSeconds` 를 운반한다 (둘 다 "언제 다시 시도할지"를 클라이언트에 전달하기 위한 필드)
 - 세부 분기 정보는 `ErrorCode` enum 값으로 표현
 
 ## ErrorCode enum 템플릿
@@ -86,7 +109,7 @@ throw new IllegalStateException("email format invalid");  // BadRequestException
 ## GlobalExceptionHandler
 
 - 위치: `presentation/common/GlobalExceptionHandler`
-- 책임: `BusinessException` 하위 타입별로 HTTP 상태 매핑 + `ApiResponse.error(status, message)` 생성
+- 책임: `BusinessException` 하위 타입별로 HTTP 상태 매핑 + `GlobalApiResponse.error(...)` 생성
 - 개별 컨트롤러에 `@ExceptionHandler` 붙이지 않는다 — 매핑은 여기 한 곳에만
 
 응답 형식:
@@ -128,18 +151,18 @@ void REUSE_DETECTED_결과면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한�
 3. 서비스/어댑터에서 `throw new {HttpStatus}Exception({Feature}ErrorCode.XXX)` 로 던짐
 4. 테스트에서 위 assertion 패턴으로 검증
 
-> `GlobalExceptionHandler` 는 대부분의 경우 **건드릴 필요 없다**. 기존 6개 HTTP 상태 서브클래스 안에서 끝난다.
+> `GlobalExceptionHandler` 는 대부분의 경우 **건드릴 필요 없다**. 기존 HTTP 상태 서브클래스 안에서 끝난다.
 
 ## 신규 HTTP 상태 추가 (드문 경우)
 
-기존 6개(400/401/403/404/409/429)로 표현 불가능한 상태가 필요할 때만:
+기존 11개 서브클래스로 표현 불가능한 상태가 필요할 때만:
 
-1. `domain/exception/{Status}Exception.java` 추가 (`extends BusinessException`)
+1. `domain/exception/{Status}Exception.java` 추가 (`extends BusinessException`, 외부 API 실패 계열이면 `extends ExternalApiException`)
 2. `GlobalExceptionHandler` 에 `@ExceptionHandler({Status}Exception.class)` 핸들러 추가
 3. 해당 ErrorCode 추가
-4. `CLAUDE.md` 의 "Exception Convention" 표에 행 추가
+4. 이 문서의 예외 계층 도표에 행 추가
 
-> 참고로 `TooManyRequestsException(429)` 는 외부 LLM rate limit 매핑을 위해 도입됐다 (`AiChatErrorCode.AI_RATE_LIMIT_BURST` / `AI_QUOTA_EXHAUSTED`). 503(Service Unavailable, DB 장애 외) 등이 다음 후보. 추가 전에 기존 분류로 표현 가능한지 먼저 검토.
+> 참고로 `TooManyRequestsException(429)` 는 외부 LLM rate limit 매핑을 위해 (`AiChatErrorCode.AI_RATE_LIMIT_BURST` / `AI_QUOTA_EXHAUSTED`), `ServiceUnavailableException(503)` 은 moderation 장애 대응을 위해 도입됐다. 추가 전에 기존 분류로 표현 가능한지 먼저 검토.
 
 ## DB 계층 예외
 
@@ -148,7 +171,7 @@ void REUSE_DETECTED_결과면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한�
 
 ## 예외 발생 지점의 로그 레벨
 
-CLAUDE.md 의 일반 로그 레벨 표에서 한 단계 더 들어가, **예외를 잡거나 던지는 지점** 에서 어느 레벨로 남길지의 결정 기준.
+[logging.md](logging.md) 의 일반 로그 레벨 표에서 한 단계 더 들어가, **예외를 잡거나 던지는 지점** 에서 어느 레벨로 남길지의 결정 기준.
 
 핵심 원칙: **"누가, 어느 시급도로 봐야 하는 로그인가"** 로 정한다.
 
@@ -251,7 +274,7 @@ public void handleError(URI url, HttpMethod method, ClientHttpResponse response)
 
 ### 데이터 흐름
 
-```
+```text
 OpenAI 응답 (status 429 + headers)
         │
         ▼
