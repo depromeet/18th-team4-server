@@ -4,7 +4,7 @@
 #   sudo ./setup.sh <repo 의 infra 디렉토리 경로>
 #
 # 이 스크립트가 하는 일: 디렉토리 구조 / systemd 유닛 / sudoers 설치.
-# 하지 않는 일(운영 트래픽에 영향을 주는 것들 — docs/ops/deployment.md 의 절차로 수동 수행):
+# 하지 않는 일(운영 트래픽에 영향을 주는 것들 — docs/ops/infrastructure.md 의 절차로 수동 수행):
 #   - nginx 설정 교체와 reload (전환 시점을 사람이 정해야 함)
 #   - Docker·Redis 설치와 기동
 #   - 스왑 증설
@@ -39,4 +39,4 @@ echo "==> sudoers 설치 (ubuntu 가 배포에 필요한 명령만 비밀번호 
 visudo -cf "$INFRA_DIR"/sudoers/readum-deploy
 install -m 0440 -o root -g root "$INFRA_DIR"/sudoers/readum-deploy /etc/sudoers.d/readum-deploy
 
-echo "==> 완료. 다음 단계(.env 배치, nginx 전환, Docker/Redis)는 docs/ops/deployment.md 의 절차를 따른다."
+echo "==> 완료. 다음 단계(.env 배치, nginx 전환, Docker/Redis)는 docs/ops/infrastructure.md 의 절차를 따른다."

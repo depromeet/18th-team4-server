@@ -4,8 +4,7 @@
 
 | 파일 | 내용 |
 |------|------|
-| [infrastructure.md](infrastructure.md) | 개발 서버 AWS 인프라 구성 (EC2·RDS·도메인·접속 방법) |
-| [deployment.md](deployment.md) | blue/green 배포 구조·절차·최초 전환(cutover) runbook (#108) |
+| [infrastructure.md](infrastructure.md) | 개발 서버 구성 일체 — EC2·blue/green 배포 구조·Docker MySQL/Redis·도메인·접속 방법 |
 | [_template.md](_template.md) | 운영 문서 작성 템플릿 |
 
 ## 이 디렉토리에 적지 않는 것 (2026-07-05 결정)
