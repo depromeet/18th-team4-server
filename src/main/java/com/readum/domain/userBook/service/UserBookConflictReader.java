@@ -1,4 +1,4 @@
-package com.readum.domain.user.userbook.service;
+package com.readum.domain.userBook.service;
 
 import com.readum.model.userBook.entity.UserBook;
 import com.readum.model.userBook.repository.UserBookRepository;

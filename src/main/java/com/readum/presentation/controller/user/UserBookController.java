@@ -1,11 +1,11 @@
 package com.readum.presentation.controller.user;
 
-import com.readum.domain.user.userbook.dto.UserBookCreateResult;
-import com.readum.domain.user.userbook.dto.UserBookDeleteCommand;
-import com.readum.domain.user.userbook.dto.UserBookSearchResult;
-import com.readum.domain.user.userbook.service.UserBookCreateService;
-import com.readum.domain.user.userbook.service.UserBookDeleteService;
-import com.readum.domain.user.userbook.service.UserBookSearchService;
+import com.readum.domain.userBook.dto.UserBookCreateResult;
+import com.readum.domain.userBook.dto.UserBookDeleteCommand;
+import com.readum.domain.userBook.dto.UserBookSearchResult;
+import com.readum.domain.userBook.service.UserBookCreateService;
+import com.readum.domain.userBook.service.UserBookDeleteService;
+import com.readum.domain.userBook.service.UserBookSearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.common.security.AuthenticatedUserId;
 import com.readum.presentation.controller.user.dto.UserBookCreateRequest;

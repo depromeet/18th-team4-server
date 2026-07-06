@@ -1,6 +1,6 @@
 package com.readum.presentation.controller.user.dto;
 
-import com.readum.domain.user.userbook.dto.UserBookCreateResult;
+import com.readum.domain.userBook.dto.UserBookCreateResult;
 
 import java.time.LocalDateTime;
 

@@ -1,4 +1,4 @@
-package com.readum.domain.user.userbook.dto;
+package com.readum.domain.userBook.dto;
 
 /**
  * 등록 도서 삭제 결과. 응답 바디로 직렬화하지 않고(삭제 응답은 204 No Content),

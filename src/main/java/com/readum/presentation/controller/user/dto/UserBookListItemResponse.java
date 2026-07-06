@@ -1,6 +1,6 @@
 package com.readum.presentation.controller.user.dto;
 
-import com.readum.domain.user.userbook.dto.UserBookSearchItemResult;
+import com.readum.domain.userBook.dto.UserBookSearchItemResult;
 
 public record UserBookListItemResponse(
         Long userBookId,

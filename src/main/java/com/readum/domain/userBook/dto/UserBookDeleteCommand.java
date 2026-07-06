@@ -1,4 +1,4 @@
-package com.readum.domain.user.userbook.dto;
+package com.readum.domain.userBook.dto;
 
 public record UserBookDeleteCommand(
         Long userId,

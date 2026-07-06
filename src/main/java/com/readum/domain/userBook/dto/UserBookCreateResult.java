@@ -1,4 +1,4 @@
-package com.readum.domain.user.userbook.dto;
+package com.readum.domain.userBook.dto;
 
 import com.readum.model.book.entity.Book;
 import com.readum.model.userBook.entity.UserBook;

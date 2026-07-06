@@ -1,7 +1,7 @@
-package com.readum.domain.user.userbook.service;
+package com.readum.domain.userBook.service;
 
-import com.readum.domain.user.userbook.dto.UserBookSearchItemResult;
-import com.readum.domain.user.userbook.dto.UserBookSearchResult;
+import com.readum.domain.userBook.dto.UserBookSearchItemResult;
+import com.readum.domain.userBook.dto.UserBookSearchResult;
 import com.readum.model.userBook.repository.UserBookRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

@@ -1,11 +1,11 @@
-package com.readum.domain.user.userbook.service;
+package com.readum.domain.userBook.service;
 
 import com.readum.domain.book.dto.BookResult;
 import com.readum.domain.book.out.BookLookupClient;
 import com.readum.domain.exception.ConflictException;
-import com.readum.domain.user.userbook.dto.UserBookCreateCommand;
-import com.readum.domain.user.userbook.dto.UserBookCreateResult;
-import com.readum.domain.user.userbook.exception.UserBookErrorCode;
+import com.readum.domain.userBook.dto.UserBookCreateCommand;
+import com.readum.domain.userBook.dto.UserBookCreateResult;
+import com.readum.domain.userBook.exception.UserBookErrorCode;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.userBook.entity.UserBook;

@@ -1,9 +1,9 @@
-package com.readum.domain.user.userbook.service;
+package com.readum.domain.userBook.service;
 
 import com.readum.domain.exception.NotFoundException;
-import com.readum.domain.user.userbook.dto.UserBookDeleteCommand;
-import com.readum.domain.user.userbook.dto.UserBookDeleteResult;
-import com.readum.domain.user.userbook.exception.UserBookErrorCode;
+import com.readum.domain.userBook.dto.UserBookDeleteCommand;
+import com.readum.domain.userBook.dto.UserBookDeleteResult;
+import com.readum.domain.userBook.exception.UserBookErrorCode;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
