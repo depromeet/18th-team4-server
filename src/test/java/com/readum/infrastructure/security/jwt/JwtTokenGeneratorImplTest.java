@@ -80,8 +80,14 @@ class JwtTokenGeneratorImplTest {
     @Test
     void 서명이_변조된_토큰을_파싱하면_INVALID_TOKEN_예외가_발생한다() {
         String token = tokenGenerator.generateAccessToken(1L, "USER", "jwt-id");
-        char last = token.charAt(token.length() - 1);
-        String tampered = token.substring(0, token.length() - 1) + (last == 'A' ? 'B' : 'A');
+        // 서명(마지막 세그먼트)의 첫 문자를 바꿔 디코딩된 서명 바이트가 반드시 달라지게 한다.
+        // 마지막 base64url 문자는 유효 비트가 4개뿐(뒤 2비트는 패딩)이라, 그 문자만 뒤집으면
+        // 디코딩 결과가 그대로일 때가 있어(서명 여전히 유효) 예외가 안 나 간헐 실패했다.
+        int signatureStart = token.lastIndexOf('.') + 1;
+        char signatureFirst = token.charAt(signatureStart);
+        String tampered = token.substring(0, signatureStart)
+                + (signatureFirst == 'A' ? 'B' : 'A')
+                + token.substring(signatureStart + 1);
 
         assertThatThrownBy(() -> tokenGenerator.parse(tampered))
                 .asInstanceOf(InstanceOfAssertFactories.type(UnauthorizedException.class))

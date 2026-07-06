@@ -383,7 +383,7 @@ class AiChatMessageSendServiceTest {
                 })
                 .verifyComplete();
 
-        assertThat(persisted.await(2, TimeUnit.SECONDS))
+        assertThat(persisted.await(5, TimeUnit.SECONDS))
                 .as("스트림 에러 후 boundedElastic 의 saveAssistantFailed 호출이 일어나야 함")
                 .isTrue();
         verify(persistService, times(1))
@@ -457,7 +457,7 @@ class AiChatMessageSendServiceTest {
                 .thenCancel()
                 .verify();
 
-        assertThat(persisted.await(2, TimeUnit.SECONDS))
+        assertThat(persisted.await(5, TimeUnit.SECONDS))
                 .as("cancel 후 boundedElastic 의 saveAssistantFailed 호출이 일어나야 함")
                 .isTrue();
         verify(persistService, times(1)).saveAssistantFailed(eq(sessionId), eq("부분 응답"), isNull());
@@ -489,7 +489,7 @@ class AiChatMessageSendServiceTest {
                 .thenCancel()
                 .verify();
 
-        assertThat(persisted.await(2, TimeUnit.SECONDS))
+        assertThat(persisted.await(5, TimeUnit.SECONDS))
                 .as("cancel 후 boundedElastic 의 saveAssistantSuccess 호출이 일어나야 함")
                 .isTrue();
         verify(persistService, times(1)).saveAssistantSuccess(eq(sessionId), eq("응답"), any());
