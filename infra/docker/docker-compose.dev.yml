@@ -43,3 +43,6 @@ services:
       - 64mb
       - --maxmemory-policy
       - noeviction
+    volumes:
+      # RDB 스냅샷을 호스트에 보존 — 컨테이너 재생성 시 토큰 예산 카운터 유실 방지.
+      - /opt/readum/redis-data:/data

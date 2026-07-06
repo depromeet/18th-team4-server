@@ -34,12 +34,14 @@ ai-chat:
   context-window:
     max-turns: 20
   message:
-    max-content-length: 4000
+    max-content-length: 1000
   rate-limit:
     count-period-seconds: 10
     max-message-count: 5
-    rejected-count-period-seconds: 3600
-    rejected-max-message-count: 20
+  token-budget:
+    window-hours: 4
+    tokens-per-window: 20000
+    estimated-output-tokens: 512
   title-generation:
     thread-cap: 32
     queue-cap: 64

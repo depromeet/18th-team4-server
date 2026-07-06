@@ -9,6 +9,7 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
@@ -25,6 +26,7 @@ import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
@@ -48,6 +50,8 @@ public class AiChatMessageSendService {
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
     private final InputModerationClient inputModerationClient;
+    private final ChatTokenBudget chatTokenBudget;
+    private final ChatCallTokenEstimator chatCallTokenEstimator;
 
     public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
         String normalizedContent = validateAndStripContent(command.content());
@@ -82,6 +86,18 @@ public class AiChatMessageSendService {
             }
         }
 
+        // 토큰 예산 선불 예약: moderation 통과 후 · USER 저장 전. 거절이면 아무것도 저장하지 않고 429.
+        // 사용자 예산은 사용자가 보낸 메시지 입력 + 받은 출력만 계상한다(시스템 프롬프트·재전송 이력·요약 미포함).
+        // (moderation 은 별도 모델·무과금이라 예산 검사 앞에 둬도 비용 문제가 없다)
+        int estimatedMessageInputTokens = chatCallTokenEstimator.estimateMessageInputTokens(normalizedContent);
+        int reservedTokens = estimatedMessageInputTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
+        ChatTokenBudget.Result reservationResult = chatTokenBudget.reserve(userId, reservedTokens);
+        if (reservationResult instanceof ChatTokenBudget.Result.Denied denied) {
+            throw tokenBudgetExceeded(denied.retryAfter());
+        }
+        ChatTokenBudget.Result.Granted reservation =
+                (reservationResult instanceof ChatTokenBudget.Result.Granted granted) ? granted : null;
+
         // 통과한 경우에만 USER 메시지를 COMPLETED 로 저장(턴 카운트 포함).
         aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
@@ -101,7 +117,48 @@ public class AiChatMessageSendService {
                 // 즉 success path 와 cancel path 가 동시에 영속화하는 케이스가 구조적으로 차단된다.
                 .doOnCancel(() -> persistOnClientCancel(sessionId, contentBuffer.toString(), completionRef.get()))
                 .concatWith(Mono.defer(() -> persistAssistantMessageAndEmitDone(sessionId, contentBuffer.toString(), completionRef.get())))
-                .onErrorResume(error -> persistFailedAssistantMessageAndEmitError(sessionId, contentBuffer.toString(), completionRef.get(), error));
+                .onErrorResume(error -> persistFailedAssistantMessageAndEmitError(sessionId, contentBuffer.toString(), completionRef.get(), error))
+                // 예산 보정 한 지점 — 정상 완료·클라이언트 취소·에러가 모두 여기로 모인다. 블로킹 없이 별도 스레드에서.
+                .doFinally(signalType -> Mono.fromRunnable(() ->
+                                settleTokenBudget(userId, reservation, completionRef.get(),
+                                        estimatedMessageInputTokens, contentBuffer.length(), signalType))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .subscribe());
+    }
+
+    /**
+     * 스트림 종료 시 예산 보정 — 사용자 예산은 메시지 입력 + 출력만 계상한다. 종료 형태로 나뉜다:
+     * - 정상 완료(실측 usage 수신): 메시지 입력 + 실측 출력(completion.outputTokens) 계상.
+     * - 클라이언트 취소(탭 닫힘·연결 끊김): 요청은 이미 OpenAI 로 가 서버가 생성분을 소비했으므로,
+     *   실측을 못 받았어도 그때까지 스트리밍된 문자 수로 출력을 추정해 계상한다.
+     * - 에러(OpenAI·네트워크 실패): 사용자 과실이 아니므로 예약을 전액 환불한다(입력·출력 모두 차감 취소).
+     * reservation 이 null 이면 Redis 장애로 우회(Bypassed)한 호출 — 보정할 예약이 없다.
+     * (onErrorResume 이 에러를 정상 신호로 바꾸므로, 취소만 SignalType.CANCEL 이고 에러는 completion 이 없는 ON_COMPLETE 로 온다.)
+     */
+    private void settleTokenBudget(Long userId, ChatTokenBudget.Result.Granted reservation,
+            AiChatChunk.Completion completion, int estimatedMessageInputTokens, int streamedCharCount,
+            SignalType signalType) {
+        if (reservation == null) {
+            return;
+        }
+        if (completion != null && completion.outputTokens() != null) {
+            // 정상 수신(완료, 또는 완료 후 취소) → 실측 출력
+            chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + completion.outputTokens());
+        } else if (signalType == SignalType.CANCEL) {
+            // 클라이언트 취소로 실측 미수신 → 스트리밍 문자 수로 출력 추정
+            int estimatedOutputTokens = chatCallTokenEstimator.estimateTokensFromChars(streamedCharCount);
+            chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + estimatedOutputTokens);
+        } else {
+            // 에러로 실측 미수신 → 사용자 과실이 아니므로 예약 전액 환불(actualTotal=0 → 예약분 그대로 차감)
+            chatTokenBudget.settle(userId, reservation, 0);
+        }
+    }
+
+    private TooManyRequestsException tokenBudgetExceeded(Duration retryAfter) {
+        AiChatProperties.TokenBudget budget = aiChatProperties.tokenBudget();
+        RateLimitInfo info = new RateLimitInfo(
+                retryAfter, null, (long) budget.tokensPerWindow(), null, 0L, null, retryAfter);
+        return new TooManyRequestsException(AiChatErrorCode.USER_TOKEN_BUDGET_EXCEEDED, info);
     }
 
     private Flux<MessageStreamEvent> bufferAndConvertChunk(
@@ -243,28 +300,17 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 사용자별 호출 폭주 차단. 정상/거부 카운터를 각자 독립 한도와 비교한다.
-     * - 정상: 최근 countPeriodSeconds 초 동안 COMPLETED USER 메시지가 maxMessageCount 회 이상이면 거절.
-     * - 거부: 최근 rejectedCountPeriodSeconds 초 동안 REJECTED USER 메시지가 rejectedMaxMessageCount 회 이상이면 거절.
-     * 두 한도는 독립이므로 moderation 의 false-positive 가 폭증해도 정상 채팅(정상 카운트 0) 은 막히지 않고,
-     * 어뷰즈(의도적 거부 입력 반복) 만 거부 카운터로 차단된다.
-     * 정밀 정책(사용자 tier 별 한도, 분산 카운터 등) 은 트래픽 데이터가 쌓인 후 도입 예정이며,
-     * 현재 구현은 OpenAI 비용 폭주(클라이언트 무한 retry, 키 유출) 방어선이다.
-     * 비용 방어선 목적이므로 retryAfter 는 카운트 기간을 그대로 돌려 보낸다 (보수적 추정).
+     * 사용자별 폭주 차단 — 상태 무관 단일 카운터.
+     * 10초 안에 USER 메시지 5건 이상은 상태와 무관하게 정상 사용이 아니라고 보고 거절한다.
+     * 비용 방어의 본체는 토큰 예산(reserveTokenBudget)이고, 이 가드는 초 단위 폭주만 막는다.
+     * retryAfter 는 카운트 기간을 그대로 돌려 보낸다 (보수적 추정).
      */
     private void verifyUserMessageRateLimit(Long userId) {
         AiChatProperties.RateLimit limit = aiChatProperties.rateLimit();
-
-        LocalDateTime normalSince = LocalDateTime.now().minusSeconds(limit.countPeriodSeconds());
-        long normalCount = aiChatMessageRepository.countRecentUserMessagesByOwner(userId, normalSince);
-        if (normalCount >= limit.maxMessageCount()) {
+        LocalDateTime since = LocalDateTime.now().minusSeconds(limit.countPeriodSeconds());
+        long recentCount = aiChatMessageRepository.countRecentUserMessagesByOwner(userId, since);
+        if (recentCount >= limit.maxMessageCount()) {
             throw rateLimitExceeded(limit.countPeriodSeconds(), limit.maxMessageCount());
-        }
-
-        LocalDateTime rejectedSince = LocalDateTime.now().minusSeconds(limit.rejectedCountPeriodSeconds());
-        long rejectedCount = aiChatMessageRepository.countRecentRejectedMessagesByOwner(userId, rejectedSince);
-        if (rejectedCount >= limit.rejectedMaxMessageCount()) {
-            throw rateLimitExceeded(limit.rejectedCountPeriodSeconds(), limit.rejectedMaxMessageCount());
         }
     }
 

@@ -81,16 +81,6 @@ class GuardrailPropertiesTest {
     }
 
     @Test
-    void RateLimit_의_한도가_0_이하면_defaults_로_보강된다() {
-        GuardrailProperties.RateLimit rateLimit = new GuardrailProperties.RateLimit(true, 0, 0);
-
-        assertThat(rateLimit.requestsPerMinute())
-                .isEqualTo(GuardrailProperties.RateLimit.defaults().requestsPerMinute());
-        assertThat(rateLimit.dailyRequests())
-                .isEqualTo(GuardrailProperties.RateLimit.defaults().dailyRequests());
-    }
-
-    @Test
     void Moderation_의_model_이_blank_이면_defaults_로_보강된다() {
         GuardrailProperties.Moderation moderation =
                 new GuardrailProperties.Moderation("", List.of("self-harm"), List.of("violence"),
@@ -122,12 +112,11 @@ class GuardrailPropertiesTest {
 
     @Test
     void 최상위_record_에서_sub_record_가_null_이면_각각의_defaults_가_적용된다() {
-        GuardrailProperties properties = new GuardrailProperties(null, null, null, null);
+        GuardrailProperties properties = new GuardrailProperties(null, null, null);
 
         assertThat(properties.input()).isNotNull();
         assertThat(properties.output()).isNotNull();
         assertThat(properties.moderation()).isNotNull();
-        assertThat(properties.rateLimit()).isNotNull();
         assertThat(properties.input().injectionPatterns()).isNotEmpty();
     }
 }
