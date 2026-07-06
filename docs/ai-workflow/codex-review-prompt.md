@@ -54,7 +54,7 @@ AI 가 작성한 코드의 가장 흔한 결함은 **사람이 한 번 읽고 �
 ## 패키지명 안티패턴
 
 - **광의 카테고리** : `util`, `common`, `core`, `helper` 안에 무관한 클래스를 모두 모아두는 경우 → 응집도 ↓
-- 도메인 의미가 드러나는 sub-package 권장 (readum 의 `domain/aiChat/service/policy/` 처럼). 단 도메인 패키지 안에 도메인 패키지를 중첩하지 않는다 (package-structure.md 의 중간 엔티티 배치 규칙)
+- 도메인 의미가 드러나는 sub-package 권장 (readum 의 `domain/aiChat/service/policy/` 처럼). 단 도메인 패키지 안에 도메인 패키지를 중첩하지 않는다 ([package-structure.md 의 중간 엔티티 배치 규칙](../conventions/package-structure.md) 참조)
 
 ## 검사 방식
 
