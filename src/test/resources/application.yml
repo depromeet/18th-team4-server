@@ -56,6 +56,12 @@ aladin:
   request-timeout: PT1S
   search-result-limit: 200
 
+openai-gate:
+  models:
+    gpt-4o-mini:
+      requests-per-minute: 9000
+      tokens-per-minute: 180000
+
 summary:
   rate-limit:
     requests-per-minute: 9000

@@ -103,6 +103,14 @@ management:
 slack:
   webhook-url: ${SLACK_WEBHOOK_URL}
 
+# OpenAI 전역 게이트 — 모델별 분당 예산 (계정 한도 RPM 10,000 / TPM 200,000 의 90%).
+# 모든 outbound 경로(채팅·제목·감상문)가 호출 전 검사·계상한다. 초과 시 정책은 호출 지점 소유 (채팅 429 / 제목 생략 / 감상문 재큐).
+openai-gate:
+  models:
+    gpt-4o-mini:
+      requests-per-minute: 9000
+      tokens-per-minute: 180000
+
 # 감상문 생성 OpenAI 호출 예산(계정 한도의 안전여유 적용). 외부 API 설정.
 # 계정 한도: RPM 10,000 / TPM 200,000(병목). 90% 안전여유 적용.
 summary:
