@@ -81,7 +81,7 @@
 | 관측 설정 | slow_query_log ON · `log_output=TABLE`(`mysql.slow_log`) · performance_schema ON — RDS 파라미터 그룹에서 이식 |
 | 백업 | `backup-mysql.sh` 일일 04:30 cron, `--single-transaction`(무중단), `/opt/readum/mysql-backup/` 로컬 7일 보관. 시점 복구 없음(최대 24시간 유실 감수) — 외부 보관(S3)은 운영 프로세스 분리 시점에 재검토 |
 
-스키마 정본은 JPA 엔티티(`@Table` 의 인덱스·unique 제약 포함)이고 앱은 `ddl-auto: validate` 로 대조만 한다.
+스키마 정본은 Flyway 마이그레이션(`src/main/resources/db/migration/`)이다. 앱 기동 시 Flyway 가 마이그레이션을 적용하고, Hibernate 가 `ddl-auto: validate` 로 엔티티와 대조한다. 엔티티를 바꾸면 반드시 같은 PR 에 마이그레이션 파일(V{n}__...)을 추가한다. 테스트(H2)는 Flyway 를 끄고 `create-drop` 을 유지한다.
 
 ## Redis
 
