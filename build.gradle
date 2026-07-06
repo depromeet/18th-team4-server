@@ -31,6 +31,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.retry:spring-retry:2.0.12'
 	implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+	implementation 'com.knuddels:jtokkit:1.1.0'   // o200k_base(gpt-4o) 토큰 계산
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
 	implementation 'com.github.ben-manes.caffeine:caffeine'
 	implementation 'com.bucket4j:bucket4j-core:8.10.1'
