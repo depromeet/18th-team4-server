@@ -1,6 +1,5 @@
-package com.readum.infrastructure.ai.openai.advisor;
+package com.readum.infrastructure.ai.openai.guardrail;
 
-import com.readum.infrastructure.ai.openai.GuardrailProperties;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

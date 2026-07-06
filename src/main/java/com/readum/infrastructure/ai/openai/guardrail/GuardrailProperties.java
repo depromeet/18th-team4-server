@@ -1,4 +1,4 @@
-package com.readum.infrastructure.ai.openai;
+package com.readum.infrastructure.ai.openai.guardrail;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;

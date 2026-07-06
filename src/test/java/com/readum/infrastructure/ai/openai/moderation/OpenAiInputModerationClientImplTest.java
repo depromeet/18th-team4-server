@@ -2,7 +2,7 @@ package com.readum.infrastructure.ai.openai.moderation;
 
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
-import com.readum.infrastructure.ai.openai.GuardrailProperties;
+import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.moderation.Categories;
 import org.springframework.ai.moderation.CategoryScores;

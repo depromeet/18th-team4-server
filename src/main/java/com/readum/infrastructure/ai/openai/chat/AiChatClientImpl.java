@@ -1,4 +1,4 @@
-package com.readum.infrastructure.ai.openai;
+package com.readum.infrastructure.ai.openai.chat;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatChunk;
@@ -11,6 +11,7 @@ import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
+import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
 import jakarta.annotation.PostConstruct;
@@ -80,8 +81,11 @@ public class AiChatClientImpl implements AiChatClient {
                 + aiChatProperties.tokenBudget().estimatedOutputTokens();
         OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
         if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
+            AiChatErrorCode code = rejected.reason() == OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN
+                    ? AiChatErrorCode.AI_QUOTA_EXHAUSTED
+                    : AiChatErrorCode.AI_RATE_LIMIT_BURST;
             throw new TooManyRequestsException(
-                    AiChatErrorCode.AI_RATE_LIMIT_BURST,
+                    code,
                     new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
         }
 
