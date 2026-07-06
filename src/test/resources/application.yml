@@ -5,6 +5,8 @@ spring:
       chat:
         options:
           model: gpt-4o-mini
+  flyway:
+    enabled: false   # 테스트는 H2 + ddl-auto create-drop (MySQL 전용 V1 SQL 은 H2 에 적용 불가)
   datasource:
     url: jdbc:h2:mem:readum;MODE=MySQL;DB_CLOSE_DELAY=-1
     username: sa
