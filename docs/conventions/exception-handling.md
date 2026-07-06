@@ -198,6 +198,10 @@ void REUSE_DETECTED_결과면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한�
 
 세분화된 분기는 ErrorCode 에 둔다 (`AI_RATE_LIMIT_BURST` vs `AI_QUOTA_EXHAUSTED`). 알람 인프라 도입 후 BURST 만 WARN 으로 내릴지 재논의.
 
+사용자별 한도 초과도 같은 429 로 매핑한다:
+- `USER_RATE_LIMIT_EXCEEDED` — 상태 무관 USER 메시지 10초/5건 폭주 가드. Retry-After = 카운트 기간.
+- `USER_TOKEN_BUDGET_EXCEEDED` — 사용자 토큰 예산(KST 4시간 창) 소진. Retry-After = 다음 창까지. `RateLimitInfo` 에 `limitTokens`·`remainingTokens(0)` 운반.
+
 ### 5xx (서버/외부 시스템 실패)
 
 기본 ERROR. 단 **자체 회복 (retry 성공) / 명시적 폴백 (사용자 영향 차단)** 한 경우 WARN.
