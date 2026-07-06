@@ -9,6 +9,7 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
@@ -48,6 +49,8 @@ public class AiChatMessageSendService {
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
     private final InputModerationClient inputModerationClient;
+    private final ChatTokenBudget chatTokenBudget;
+    private final ChatCallTokenEstimator chatCallTokenEstimator;
 
     public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
         String normalizedContent = validateAndStripContent(command.content());
@@ -82,6 +85,18 @@ public class AiChatMessageSendService {
             }
         }
 
+        // 토큰 예산 선불 예약: moderation 통과 후 · USER 저장 전. 거절이면 아무것도 저장하지 않고 429.
+        // 사용자 예산은 사용자가 보낸 메시지 입력 + 받은 출력만 계상한다(시스템 프롬프트·재전송 이력·요약 미포함).
+        // (moderation 은 별도 모델·무과금이라 예산 검사 앞에 둬도 비용 문제가 없다)
+        int estimatedMessageInputTokens = chatCallTokenEstimator.estimateMessageInputTokens(normalizedContent);
+        int reservedTokens = estimatedMessageInputTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
+        ChatTokenBudget.Result reservationResult = chatTokenBudget.reserve(userId, reservedTokens);
+        if (reservationResult instanceof ChatTokenBudget.Result.Denied denied) {
+            throw tokenBudgetExceeded(denied.retryAfter());
+        }
+        ChatTokenBudget.Result.Granted reservation =
+                (reservationResult instanceof ChatTokenBudget.Result.Granted granted) ? granted : null;
+
         // 통과한 경우에만 USER 메시지를 COMPLETED 로 저장(턴 카운트 포함).
         aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
@@ -101,7 +116,37 @@ public class AiChatMessageSendService {
                 // 즉 success path 와 cancel path 가 동시에 영속화하는 케이스가 구조적으로 차단된다.
                 .doOnCancel(() -> persistOnClientCancel(sessionId, contentBuffer.toString(), completionRef.get()))
                 .concatWith(Mono.defer(() -> persistAssistantMessageAndEmitDone(sessionId, contentBuffer.toString(), completionRef.get())))
-                .onErrorResume(error -> persistFailedAssistantMessageAndEmitError(sessionId, contentBuffer.toString(), completionRef.get(), error));
+                .onErrorResume(error -> persistFailedAssistantMessageAndEmitError(sessionId, contentBuffer.toString(), completionRef.get(), error))
+                // 예산 보정 한 지점 — 정상/에러/취소 모두 여기로 모인다. 블로킹 없이 별도 스레드에서.
+                .doFinally(signalType -> Mono.fromRunnable(() ->
+                                settleTokenBudget(userId, reservation, completionRef.get(),
+                                        estimatedMessageInputTokens, contentBuffer.length()))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .subscribe());
+    }
+
+    /**
+     * 스트림 종료 시 예산 보정 — 사용자 예산은 메시지 입력 + 출력만 계상한다.
+     * 출력은 실측 usage 가 있으면 실측 completion.outputTokens, 없으면(에러·취소로 미수신)
+     * 그때까지 스트리밍된 문자 수 기반 추정으로 대체한다. 입력은 예약 때의 메시지 추정 그대로.
+     * reservation 이 null 이면 Redis 장애로 우회(Bypassed)한 호출 — 보정할 예약이 없다.
+     */
+    private void settleTokenBudget(Long userId, ChatTokenBudget.Result.Granted reservation,
+            AiChatChunk.Completion completion, int estimatedMessageInputTokens, int streamedCharCount) {
+        if (reservation == null) {
+            return;
+        }
+        int outputTokens = (completion != null && completion.outputTokens() != null)
+                ? completion.outputTokens()
+                : chatCallTokenEstimator.estimateTokensFromChars(streamedCharCount);
+        chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + outputTokens);
+    }
+
+    private TooManyRequestsException tokenBudgetExceeded(Duration retryAfter) {
+        AiChatProperties.TokenBudget budget = aiChatProperties.tokenBudget();
+        RateLimitInfo info = new RateLimitInfo(
+                retryAfter, null, (long) budget.tokensPerWindow(), null, 0L, null, retryAfter);
+        return new TooManyRequestsException(AiChatErrorCode.USER_TOKEN_BUDGET_EXCEEDED, info);
     }
 
     private Flux<MessageStreamEvent> bufferAndConvertChunk(
