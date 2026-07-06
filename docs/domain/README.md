@@ -43,10 +43,11 @@ readum 의 기능이 어느 도메인에 있는지 찾는 색인. 상세는 각 
 문서: (미작성) · 시나리오: [scenarios/user.md](scenarios/user.md) · 패키지:
 `domain/user`, `model/user`
 
-## user/userbook — 내 책장
+## userBook — 내 책장
 
-사용자가 등록한 책. user 도메인 하위 패키지에 있다 (중간 엔티티 배치 규칙은
-Epic #117 이관 심사 대상).
+사용자가 등록한 책. aiChat·summary 가 `userBookId` 로 참조하는 독립 도메인이다
+(배치 근거: [package-structure.md](../conventions/package-structure.md) 의
+중간 엔티티 배치 규칙).
 
 | 기능 | API |
 |---|---|
@@ -55,7 +56,7 @@ Epic #117 이관 심사 대상).
 | 내 책장 도서 삭제 | `DELETE /api/v1/user-books/{userBookId}` |
 
 문서: (미작성) · 시나리오: [scenarios/userbook.md](scenarios/userbook.md) ·
-패키지: `domain/user/userbook`
+패키지: `domain/userBook`, `model/userBook`
 
 ## book — 도서 검색
 

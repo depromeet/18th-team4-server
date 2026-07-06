@@ -64,8 +64,19 @@ graph TD
 | `domain/aiChat/event` | `FirstAssistantResponseCompletedEvent` (record) | 도메인 이벤트 정의 |
 | `domain/aiChat/listener` | `AiChatTitleGenerationListener` | 트랜잭션 커밋 후(AFTER_COMMIT) 이벤트를 받아 후속 작업(제목 생성)을 비동기로 넘김 |
 | `domain/aiChat/service/policy` | `SummaryDraftPolicy` | 도메인 상태 기반 가능/불가 판정 규칙을 서비스에서 분리한 정책 객체 |
-| `domain/user/userbook` | `dto/` `exception/` `service/` | user 도메인 안의 중첩 기능 패키지 (내 책장) |
 
-나머지 도메인(auth, book, summary)은 표준 하위 조합만 사용한다. 토큰 생성·파싱 같은 인프라 의존 동작은 별도 헬퍼 패키지가 아니라 규칙대로 Port(`domain/auth/out/TokenGenerator`) ← Adapter(`infrastructure/security/jwt/JwtTokenGeneratorImpl`) 로 구현돼 있다.
+나머지 도메인(auth, book, summary, user, userBook)은 표준 하위 조합만 사용한다. 토큰 생성·파싱 같은 인프라 의존 동작은 별도 헬퍼 패키지가 아니라 규칙대로 Port(`domain/auth/out/TokenGenerator`) ← Adapter(`infrastructure/security/jwt/JwtTokenGeneratorImpl`) 로 구현돼 있다.
 
-> CHECK: 위 4개 하위 패키지는 실태 기록일 뿐, "언제 event/listener/policy/중첩 기능 패키지를 만들어도 되는가" 의 배치 규칙은 아직 확정되지 않았다. 중간 엔티티 패키지 위치(user/userbook)·서비스 네이밍·유틸 분리 기준·도메인 문서 co-change 규칙 심사는 Epic #117 의 후속 이슈 대상이다.
+> CHECK: 위 3개 하위 패키지는 실태 기록일 뿐, "언제 event/listener/policy 패키지를 만들어도 되는가" 의 배치 규칙은 아직 확정되지 않았다. 서비스 네이밍·유틸 분리 기준·도메인 문서 co-change 규칙 심사는 Epic #117 의 후속 이슈 대상이다.
+
+## 중간 엔티티 배치 규칙
+
+두 도메인을 잇는 중간 엔티티(예: User–Book 를 잇는 UserBook)는 다음 기준으로 배치한다.
+
+- 다음 중 하나라도 해당하면 **독립 도메인으로 승격**한다 (`domain/{feature}` 최상위 패키지):
+  1. 자기 API 리소스(전용 컨트롤러·경로)를 가진다
+  2. 다른 도메인이 그 엔티티의 id 를 참조한다
+- 둘 다 아니면 — 주인 도메인 흐름 안에서만 조작되는 내부 구성물이면 — **주인 도메인 패키지에 평평하게** 둔다.
+- 어느 쪽이든 **도메인 패키지 안에 도메인 패키지를 중첩하지 않는다**.
+
+적용 사례: UserBook 은 `/api/v1/user-books` 리소스를 갖고 `AiChatSession.userBookId` 로 다른 도메인에서 참조되므로 독립 도메인 `domain/userBook` 이다.
