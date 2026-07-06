@@ -4,7 +4,27 @@
 #
 # Redis 는 이번 단계에서는 "서버에 떠 있는 상태"까지만 만든다. 애플리케이션이 Redis 를
 # 사용하는 코드(rate limiter·circuit breaker 상태 공유 등)는 #88 에서 별도 진행.
+# MySQL 은 RDS 에서 이관한 것 (이관 배경·절차는 해당 PR 본문 참조).
 services:
+  mysql:
+    # RDS(MySQL 8.4)와 동일 버전으로 고정해 이관 전후 동작 차이를 없앤다.
+    image: mysql:8.4
+    container_name: readum-mysql
+    restart: unless-stopped
+    # 호스트 밖에서는 접근 불가 — 외부 접속(DataGrip 등)은 SSH 터널로.
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Seoul
+    volumes:
+      # 데이터는 EBS 상의 고정 경로에 — 컨테이너 재생성/업그레이드에도 유지된다.
+      - /opt/readum/mysql-data:/var/lib/mysql
+      - /opt/readum/mysql/my.cnf:/etc/mysql/conf.d/readum.cnf:ro
+
   redis:
     image: redis:7.4-alpine
     container_name: readum-redis

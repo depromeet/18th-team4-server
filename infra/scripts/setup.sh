@@ -26,8 +26,14 @@ cp "$INFRA_DIR"/systemd/readum-blue.service /etc/systemd/system/
 cp "$INFRA_DIR"/systemd/readum-green.service /etc/systemd/system/
 systemctl daemon-reload
 
-echo "==> 배포 스크립트 설치"
+echo "==> 배포·백업 스크립트 설치"
 install -m 0755 -o ubuntu -g ubuntu "$INFRA_DIR"/scripts/deploy.sh /opt/readum/bin/deploy.sh
+install -m 0755 -o ubuntu -g ubuntu "$INFRA_DIR"/scripts/backup-mysql.sh /opt/readum/bin/backup-mysql.sh
+
+echo "==> MySQL 설정 배치"
+mkdir -p /opt/readum/mysql /opt/readum/mysql-data /opt/readum/mysql-backup
+install -m 0644 -o ubuntu -g ubuntu "$INFRA_DIR"/mysql/my.cnf /opt/readum/mysql/my.cnf
+chown ubuntu:ubuntu /opt/readum/mysql /opt/readum/mysql-backup
 
 echo "==> sudoers 설치 (ubuntu 가 배포에 필요한 명령만 비밀번호 없이 실행)"
 visudo -cf "$INFRA_DIR"/sudoers/readum-deploy

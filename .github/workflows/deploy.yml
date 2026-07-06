@@ -1,0 +1,72 @@
+# 개발 서버 배포 파이프라인.
+# 빌드(테스트 포함)는 GitHub Actions 가 하고, 서버는 jar 실행만 한다 — 서버(t3 급)에서
+# Gradle 을 돌리면 메모리가 부족해 blue/green 의 "두 프로세스 동시 상주"가 성립하지 않는다.
+# 서버 쪽 동작(deploy.sh 의 전환 사이클)과 필요한 Secrets 목록은 docs/ops/deployment.md 참조.
+
+name: deploy
+
+on:
+  workflow_dispatch:
+  # 최초 전환(cutover) 검증이 끝나면 아래 주석을 풀어 dev 머지 자동 배포를 켠다.
+  # push:
+  #   branches: [dev]
+
+# 배포는 한 번에 하나만. 겹치면 뒤 실행이 대기한다 (진행 중인 배포를 끊지 않는다).
+concurrency:
+  group: deploy-dev-server
+  cancel-in-progress: false
+
+env:
+  # 서버 주소는 비밀이 아니라(DNS 에 공개) 워크플로우에 직접 둔다. 탄력적 IP 기준.
+  # DNS(api.readum.kr) A 레코드가 이 IP 로 정리된 뒤에는 도메인으로 바꿔도 된다.
+  DEPLOY_HOST: 3.37.163.153
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 빌드 (전체 테스트 포함 — 테스트 통과가 배포 자격)
+        run: ./gradlew build
+
+      - name: jar 에 커밋 식별자 부여
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
+          cp build/libs/readum-*-SNAPSHOT.jar "readum-${SHORT_SHA}.jar"
+
+      - name: SSH 접속 준비
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: 서버 .env 재작성 (원본 = ENV_FILE secret)
+        run: |
+          printf '%s\n' "${{ secrets.ENV_FILE }}" > env.deploy
+          scp -i ~/.ssh/deploy_key env.deploy "ubuntu@${DEPLOY_HOST}:/opt/readum/.env.tmp"
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
+            'chmod 600 /opt/readum/.env.tmp && mv /opt/readum/.env.tmp /opt/readum/.env'
+
+      - name: jar·배포 스크립트 업로드
+        run: |
+          scp -i ~/.ssh/deploy_key "readum-${SHORT_SHA}.jar" \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/releases/"
+          scp -i ~/.ssh/deploy_key infra/scripts/deploy.sh \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/bin/deploy.sh"
+
+      - name: blue/green 배포 실행
+        run: |
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
+            "/opt/readum/bin/deploy.sh deploy /opt/readum/releases/readum-${SHORT_SHA}.jar"

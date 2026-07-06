@@ -25,7 +25,7 @@ Internet ── nginx(:443, TLS 종료)
 | systemd 유닛 | `/etc/systemd/system/readum-{blue,green}.service` | `infra/systemd/` |
 | 배포 스크립트 | `/opt/readum/bin/deploy.sh` | `infra/scripts/deploy.sh` |
 | jar | `/opt/readum/{blue,green}/app.jar`, 보관은 `/opt/readum/releases/` (최근 5개) | CI 가 빌드해 업로드 |
-| 환경 변수 | `/opt/readum/.env` | 원본은 GitHub Actions Secrets — CI 가 배포 때마다 서버 `.env` 를 재작성한다(CI/CD 구성 작업에서 도입, 그 전까지는 서버 파일이 원본). 변경 절차 = Secrets 수정 → 재배포. **`SERVER_PORT` 를 넣지 말 것** (유닛의 포트 지정을 덮어씀) |
+| 환경 변수 | `/opt/readum/.env` | 원본은 GitHub Actions Secrets 의 `ENV_FILE` — CI 가 배포 때마다 서버 `.env` 를 재작성한다(아래 CI/CD 절). 변경 절차 = Secret 수정 → 재배포. **`SERVER_PORT` 를 넣지 말 것** (유닛의 포트 지정을 덮어씀) |
 | Redis 컨테이너 | `docker compose` (readum-redis) | `infra/docker/docker-compose.dev.yml` (개발 서버 전용 — 로컬 개발용 아님) |
 | sudo 권한 목록 | `/etc/sudoers.d/readum-deploy` | `infra/sudoers/readum-deploy` |
 
@@ -48,6 +48,24 @@ Internet ── nginx(:443, TLS 종료)
 ```
 
 롤백은 "반대 색을 재기동해 트래픽을 되돌리는 것"이다. 메모리 제약 때문에 구 프로세스를 상시 살려두지 않으므로, 롤백도 기동 → readiness → 전환의 같은 사이클을 탄다 (약 1분).
+
+## CI/CD (GitHub Actions)
+
+`.github/workflows/deploy.yml` 하나가 빌드와 배포를 수행한다.
+
+- **트리거**: 수동 실행(workflow_dispatch). dev 머지 자동 배포(push 트리거)는 최초 전환 검증이 끝난 뒤 워크플로우의 주석을 풀어 켠다.
+- **하는 일**: 전체 테스트 포함 빌드(테스트 통과 = 배포 자격) → jar 에 커밋 식별자 부여(`readum-<short sha>.jar`) → 서버 `.env` 재작성(원본 = `ENV_FILE` secret) → jar·deploy.sh 업로드 → `deploy.sh deploy` 실행.
+- **하지 않는 일**: nginx 설정·systemd 유닛 변경 반영 — root 권한이 필요해 CI 에는 주지 않는다. `infra/nginx/`·`infra/systemd/`·sudoers 가 바뀌면 setup.sh 재실행과 위 nginx 교체 절차를 수동으로 수행한다.
+- 동시 배포는 concurrency 설정으로 직렬화된다 (겹치면 뒤 실행이 대기).
+
+필요한 Repository Secrets (Settings → Secrets and variables → Actions):
+
+| 이름 | 내용 |
+|---|---|
+| `DEPLOY_SSH_KEY` | 배포 전용 SSH 개인키 — 공개키를 서버 ubuntu 계정 `~/.ssh/authorized_keys` 에 등록 |
+| `ENV_FILE` | `/opt/readum/.env` 전문. **이 Secret 이 환경변수의 원본** — 값을 바꾸려면 Secret 수정 후 재배포. Secrets 는 재열람이 안 되므로 팀 비밀 저장소에 사본 유지 |
+
+서버 주소는 비밀이 아니므로(DNS 에 공개) Secret 이 아니라 `deploy.yml` 의 `env.DEPLOY_HOST` 에 직접 둔다 — 탄력적 IP 기준이라 인스턴스 stop/start 에도 바뀌지 않으며, 바뀌는 일이 생기면 워크플로우 한 줄 수정으로 반영한다.
 
 ## 배포 수칙
 
@@ -95,7 +113,7 @@ Internet ── nginx(:443, TLS 종료)
    sudo nginx -t && sudo systemctl reload nginx
    ```
 9. 구 :8080 프로세스 종료 (`kill -TERM $(cat ~/18th-team4-server/app.pid)`) 후 기존 clone 디렉토리(`~/18th-team4-server`) 정리
-10. 검증(아래) 통과 후, CI 의 dev push 자동 배포 트리거 활성화
+10. 검증(아래) 통과 후, `.github/workflows/deploy.yml` 의 push 트리거 주석을 풀어 dev 머지 자동 배포 활성화
 
 ## 배포 검증 체크리스트
 
