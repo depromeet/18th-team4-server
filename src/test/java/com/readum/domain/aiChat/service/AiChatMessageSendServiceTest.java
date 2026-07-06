@@ -11,6 +11,7 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
+import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
@@ -81,7 +82,10 @@ class AiChatMessageSendServiceTest {
     @Mock
     private ChatTokenBudget chatTokenBudget;
 
-    private final ChatCallTokenEstimator chatCallTokenEstimator = new ChatCallTokenEstimator();
+    // 결정적 test double: settle 산술 배선만 검증한다(실제 jtokkit 정확도는 JtokkitTokenCounterTest 담당).
+    // 기존 단언값 유지를 위해 구 추정과 동일한 문자÷2.5 로 센다.
+    private final TokenCounter tokenCounter = text ->
+            (text == null || text.isEmpty()) ? 0 : (int) Math.ceil(text.length() / 2.5);
 
     private final AiChatProperties aiChatProperties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
@@ -104,7 +108,7 @@ class AiChatMessageSendServiceTest {
         service = new AiChatMessageSendService(
                 persistService, aiChatClient, aiChatProperties,
                 aiChatMessageRepository, userBookRepository, bookRepository, inputModerationClient,
-                chatTokenBudget, chatCallTokenEstimator
+                chatTokenBudget, tokenCounter
         );
     }
 
