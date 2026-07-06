@@ -1,0 +1,113 @@
+# 운영 장애 분석 워크플로우.
+# Slack ERROR 알림의 "분석 이슈 열기" 링크(또는 이슈에 수동으로 incident 라벨 부착)로
+# incident 라벨 이슈가 생기면, 이슈 본문의 배포 커밋을 checkout 해 Claude Code 가
+# 원인 후보를 분석하고 이슈 코멘트로 남긴 뒤 Slack 으로 완료/실패를 알린다.
+# 배포 파이프라인(deploy.yml)과 완전히 독립이다. 전체 흐름: docs/ops/incident-analysis.md
+
+name: incident-analysis
+
+on:
+  issues:
+    types: [labeled]
+
+# 같은 이슈에 라벨이 여러 번 붙어도 분석은 한 번에 하나만 돈다 (뒤 실행은 대기).
+concurrency:
+  group: incident-analysis-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    if: github.event.label.name == 'incident'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 배포 커밋이 기본 브랜치보다 뒤에 있을 수 있어 전체 이력을 받는다
+          fetch-depth: 0
+
+      - name: 배포 커밋 checkout (이슈 본문의 deploy-sha 마커)
+        id: deploy_sha
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          SHA=$(printf '%s' "$ISSUE_BODY" \
+            | grep -oE '<!-- deploy-sha: [0-9a-fA-F]{7,40} -->' | head -1 \
+            | grep -oE '[0-9a-fA-F]{7,40}' || true)
+          if [ -n "$SHA" ] && git rev-parse --verify --quiet "${SHA}^{commit}" > /dev/null; then
+            git checkout --quiet "$SHA"
+            echo "note=배포 커밋 ${SHA} 기준" >> "$GITHUB_OUTPUT"
+          else
+            echo "note=본문에서 배포 커밋을 찾지 못해 기본 브랜치 최신 커밋 기준" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Claude Code 분석
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*)"'
+          prompt: |
+            너는 운영 장애 분석 담당이다. GitHub 이슈 #${{ github.event.issue.number }} 는
+            운영 ERROR 로그에서 만들어진 장애 분석 요청이다.
+            현재 checkout 된 코드는 ${{ steps.deploy_sha.outputs.note }}이다.
+
+            절차:
+            1. `gh issue view ${{ github.event.issue.number }}` 로 이슈 본문(메시지·stacktrace·fingerprint·traceId)을 읽는다.
+            2. stacktrace 의 com.readum 프레임을 중심으로 관련 코드를 읽고 원인 후보를 찾는다.
+            3. 분석 결과를 파일로 작성해 `gh issue comment ${{ github.event.issue.number }} --body-file <파일>` 로 남긴다.
+
+            코멘트 형식 (한국어 본문, 코드 식별자는 영문 유지):
+            - 첫 줄: 한 줄 요약 — Slack 완료 알림에 이 줄이 그대로 실린다
+            - `## 원인 후보` — 가능성이 높은 순으로 최대 3개. 각각 근거 코드 경로(`파일:라인`)와 판단 근거를 적는다
+            - `## 재현 조건` — 어떤 상황에서 발생하는지 추정
+            - `## 수정 방향` — 후보별 수정 제안
+            - 분석이 기본 브랜치 기준이면(배포 커밋을 못 찾은 경우) 그 사실을 명시한다
+
+            주의: 코드를 수정하거나 PR 을 만들지 않는다. 분석과 이슈 코멘트만 한다.
+            확신이 없는 부분은 확신이 없다고 적는다.
+
+      - name: Slack 완료 알림
+        if: success()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL 미설정 — 알림을 생략한다"
+            exit 0
+          fi
+          # 마지막 코멘트(방금 남긴 분석)의 첫 줄을 요약으로 싣는다
+          SUMMARY=$(gh issue view "$ISSUE_NUMBER" --json comments \
+            --jq '.comments | last | .body' 2>/dev/null | head -n 1 | cut -c1-300 || true)
+          TEXT=":mag: *장애 분석 완료* — <${ISSUE_URL}|#${ISSUE_NUMBER} ${ISSUE_TITLE}>"
+          if [ -n "$SUMMARY" ]; then
+            TEXT="${TEXT}"$'\n'"${SUMMARY}"
+          fi
+          jq -n --arg text "$TEXT" '{text: $text}' \
+            | curl -sS -X POST -H 'Content-Type: application/json' -d @- "$SLACK_WEBHOOK_URL"
+
+      - name: Slack 실패 알림
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL 미설정 — 알림을 생략한다"
+            exit 0
+          fi
+          TEXT=":rotating_light: *장애 분석 실패* — <${ISSUE_URL}|#${ISSUE_NUMBER}> 분석이 실패했다. <${RUN_URL}|Actions 로그>"
+          jq -n --arg text "$TEXT" '{text: $text}' \
+            | curl -sS -X POST -H 'Content-Type: application/json' -d @- "$SLACK_WEBHOOK_URL"
