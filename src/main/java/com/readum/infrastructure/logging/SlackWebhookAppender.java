@@ -4,7 +4,6 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.AppenderBase;
 import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -24,16 +23,21 @@ import java.util.concurrent.ConcurrentMap;
  *
  * <p>Slack 으로 보내기 전 같은 오류(logger + level + 예외 클래스 + 메시지)는 일정 시간 동안
  * 중복 전송을 억제하고, 토큰/Authorization 등 민감 문자열은 마스킹한다.
+ *
+ * <p>메시지에는 오류 식별용 fingerprint({@link IncidentFingerprint})와, 사람이 분석을 승인할 때
+ * 누르는 GitHub 분석 이슈 프리필 링크({@link IncidentIssueLinkFactory})가 함께 실린다.
  */
-@Slf4j
 @Setter
 public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
 
     private String webhookUrl;
     private String appName = "readum";
     private String env = "unknown";
+    private String issueRepositoryUrl;
     private long duplicateSuppressMillis = 60_000;
     private int maxStackTraceChars = 1800;
+
+    private IncidentIssueLinkFactory issueLinkFactory;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2))
@@ -47,7 +51,10 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
             addWarn("Slack webhookUrl is empty. SlackWebhookAppender will not start.");
             return;
         }
-        log.info("Starting SlackWebhookAppender with webhookUrl: {}", webhookUrl);
+        if (issueRepositoryUrl != null && !issueRepositoryUrl.isBlank()) {
+            issueLinkFactory = new IncidentIssueLinkFactory(
+                    issueRepositoryUrl, env, IncidentIssueLinkFactory.readDeployCommitFromClasspath());
+        }
 
         super.start();
     }
@@ -103,6 +110,7 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
     private String buildSlackPayload(ILoggingEvent event) {
         String traceId = event.getMDCPropertyMap().getOrDefault("traceId", "-");
         String spanId = event.getMDCPropertyMap().getOrDefault("spanId", "-");
+        String fingerprint = IncidentFingerprint.of(event);
 
         String stackTrace = "";
         if (event.getThrowableProxy() != null) {
@@ -116,6 +124,7 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
                 :rotating_light: *%s ERROR 발생*
                 *env*: `%s`
                 *logger*: `%s`
+                *fingerprint*: `%s`
                 *traceId*: `%s`
                 *spanId*: `%s`
                 *time*: `%s`
@@ -126,28 +135,22 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
                 *stacktrace*
                 ```%s```
                 """.formatted(
-                escape(appName),
-                escape(env),
-                escape(event.getLoggerName()),
-                escape(traceId),
-                escape(spanId),
+                SensitiveDataMasker.mask(appName),
+                SensitiveDataMasker.mask(env),
+                SensitiveDataMasker.mask(event.getLoggerName()),
+                SensitiveDataMasker.mask(fingerprint),
+                SensitiveDataMasker.mask(traceId),
+                SensitiveDataMasker.mask(spanId),
                 Instant.ofEpochMilli(event.getTimeStamp()),
-                escape(event.getFormattedMessage()),
-                escape(stackTrace)
+                SensitiveDataMasker.mask(event.getFormattedMessage()),
+                SensitiveDataMasker.mask(stackTrace)
         );
 
-        return "{\"text\":\"" + escapeJson(text) + "\"}";
-    }
-
-    private String escape(String value) {
-        if (value == null) {
-            return "";
+        if (issueLinkFactory != null) {
+            text += "\n:mag: <" + issueLinkFactory.create(event, fingerprint) + "|분석 이슈 열기>";
         }
-        return value
-                .replace("Bearer ", "Bearer ***")
-                .replaceAll("(?i)(authorization:)[^\\n\\r]+", "$1 ***")
-                .replaceAll("(?i)(api[_-]?key=)[^\\s&]+", "$1***")
-                .replaceAll("(?i)(token=)[^\\s&]+", "$1***");
+
+        return "{\"text\":\"" + escapeJson(text) + "\"}";
     }
 
     private String escapeJson(String value) {
