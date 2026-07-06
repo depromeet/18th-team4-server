@@ -4,6 +4,7 @@ import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.event.FirstAssistantResponseCompletedEvent;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatMessage;
@@ -35,6 +36,7 @@ public class AiChatMessagePersistService {
     private final AiChatMessageRepository aiChatMessageRepository;
     private final AiChatHistorySearchService aiChatHistorySearchService;
     private final SummaryJobRepository summaryJobRepository;
+    private final TokenCounter tokenCounter;
     // 제목 생성을 직접 호출하지 않고 "첫 응답 완료" 이벤트만 발행한다. 실제 생성은 AFTER_COMMIT 리스너가 담당(결합 분리).
     private final ApplicationEventPublisher eventPublisher;
 
@@ -73,7 +75,8 @@ public class AiChatMessagePersistService {
     public void recordUserMessage(Long sessionId, Long userId, String normalizedContent) {
         AiChatSession session = aiChatSessionRepository.findByIdAndOwner(sessionId, userId)
                 .orElseThrow(() -> new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
-        aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, normalizedContent));
+        aiChatMessageRepository.save(AiChatMessage.createUserMessage(
+                sessionId, normalizedContent, tokenCounter.count(normalizedContent)));
         session.appendUserMessage();
     }
 
@@ -97,9 +100,11 @@ public class AiChatMessagePersistService {
         Integer inputTokens = meta == null ? null : meta.inputTokens();
         Integer outputTokens = meta == null ? null : meta.outputTokens();
         Integer totalTokens = meta == null ? null : meta.totalTokens();
+        // token_count = ASSISTANT 실측 출력. 비정상적으로 usage 가 없으면 응답 텍스트를 직접 센다.
+        Integer tokenCount = outputTokens != null ? outputTokens : tokenCounter.count(accumulated);
 
         AiChatMessage saved = aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(
-                sessionId, accumulated, inputTokens, outputTokens, totalTokens
+                sessionId, accumulated, inputTokens, outputTokens, totalTokens, tokenCount
         ));
         // 세션 누적치는 ASSISTANT 가 생성한 토큰만 합산한다.
         // totalTokens 는 입력 프롬프트(이전 대화 + 시스템 프롬프트) 까지 포함하므로 누적에 쓰면
@@ -128,9 +133,12 @@ public class AiChatMessagePersistService {
         Integer inputTokens = meta == null ? null : meta.inputTokens();
         Integer outputTokens = meta == null ? null : meta.outputTokens();
         Integer totalTokens = meta == null ? null : meta.totalTokens();
+        String partialContent = partial == null ? "" : partial;
+        // 부분 응답 크기: 실측 출력이 있으면 그 값, 없으면 부분 텍스트를 직접 센다.
+        Integer tokenCount = outputTokens != null ? outputTokens : tokenCounter.count(partialContent);
 
         aiChatMessageRepository.save(AiChatMessage.createAssistantFailed(
-                sessionId, partial == null ? "" : partial, inputTokens, outputTokens, totalTokens
+                sessionId, partialContent, inputTokens, outputTokens, totalTokens, tokenCount
         ));
         // 성공 경로와 동일하게 입력 토큰은 누적에서 제외하고 outputTokens 만 합산.
         if (outputTokens != null && outputTokens > 0) {

@@ -4,6 +4,7 @@ import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.event.FirstAssistantResponseCompletedEvent;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatMessage;
@@ -48,6 +49,9 @@ class AiChatMessagePersistServiceTest {
 
     @Mock
     private SummaryJobRepository summaryJobRepository;
+
+    @Mock
+    private TokenCounter tokenCounter;
 
     @Mock
     private ApplicationEventPublisher eventPublisher;

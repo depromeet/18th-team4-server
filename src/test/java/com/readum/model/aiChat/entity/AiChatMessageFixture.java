@@ -22,7 +22,7 @@ public final class AiChatMessageFixture {
     public static AiChatMessage persistedUserMessage(Long id, Long sessionId, String content) {
         return new AiChatMessage(
                 id, sessionId, AiChatMessage.Role.USER, content, null,
-                null, null, null, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                null, null, null, null, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
         );
     }
 
@@ -32,7 +32,7 @@ public final class AiChatMessageFixture {
     public static AiChatMessage persistedAssistantMessage(Long id, Long sessionId, String content) {
         return new AiChatMessage(
                 id, sessionId, AiChatMessage.Role.ASSISTANT, content, null,
-                null, null, null, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                null, null, null, null, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
         );
     }
 
@@ -50,7 +50,7 @@ public final class AiChatMessageFixture {
     ) {
         return new AiChatMessage(
                 id, sessionId, AiChatMessage.Role.ASSISTANT, content, quoteText,
-                inputTokens, outputTokens, totalTokens, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                inputTokens, outputTokens, totalTokens, outputTokens, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
         );
     }
 
@@ -63,7 +63,7 @@ public final class AiChatMessageFixture {
     ) {
         return new AiChatMessage(
                 null, sessionId, AiChatMessage.Role.USER, content, null,
-                inputTokens, null, totalTokens, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                inputTokens, null, totalTokens, inputTokens, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
         );
     }
 
@@ -76,7 +76,7 @@ public final class AiChatMessageFixture {
     ) {
         return new AiChatMessage(
                 null, sessionId, AiChatMessage.Role.ASSISTANT, content, null,
-                null, outputTokens, totalTokens, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
+                null, outputTokens, totalTokens, outputTokens, AiChatMessage.Status.COMPLETED, LocalDateTime.now()
         );
     }
 
@@ -87,7 +87,7 @@ public final class AiChatMessageFixture {
     public static AiChatMessage userMessageAt(Long sessionId, String content, LocalDateTime createdAt) {
         return new AiChatMessage(
                 null, sessionId, AiChatMessage.Role.USER, content, null,
-                10, null, 10, AiChatMessage.Status.COMPLETED, createdAt
+                10, null, 10, 10, AiChatMessage.Status.COMPLETED, createdAt
         );
     }
 
@@ -100,7 +100,7 @@ public final class AiChatMessageFixture {
     ) {
         return new AiChatMessage(
                 null, sessionId, AiChatMessage.Role.ASSISTANT, partialContent, null,
-                1, 0, 1, AiChatMessage.Status.FAILED, createdAt
+                1, 0, 1, 0, AiChatMessage.Status.FAILED, createdAt
         );
     }
 
@@ -111,7 +111,7 @@ public final class AiChatMessageFixture {
     public static AiChatMessage rejectedUserMessageAt(Long sessionId, String content, LocalDateTime createdAt) {
         return new AiChatMessage(
                 null, sessionId, AiChatMessage.Role.USER, content, null,
-                null, null, null, AiChatMessage.Status.REJECTED, createdAt
+                null, null, null, null, AiChatMessage.Status.REJECTED, createdAt
         );
     }
 
@@ -129,6 +129,7 @@ public final class AiChatMessageFixture {
                 source.getInputTokens(),
                 source.getOutputTokens(),
                 source.getTotalTokens(),
+                source.getTokenCount(),
                 source.getStatus(),
                 source.getCreatedAt()
         );

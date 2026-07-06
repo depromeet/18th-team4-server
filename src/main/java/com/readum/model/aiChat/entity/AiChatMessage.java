@@ -69,6 +69,11 @@ public class AiChatMessage {
     @Column(name = "total_tokens")
     private Integer totalTokens;
 
+    // 메시지별 토큰 크기(조립·요약 트리거용). USER=jtokkit 로컬 계산, ASSISTANT=API 실측 출력.
+    // 호출 단위 usage(input/output/total_tokens)와 축이 다른 균일 컬럼.
+    @Column(name = "token_count")
+    private Integer tokenCount;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private Status status;
@@ -76,7 +81,12 @@ public class AiChatMessage {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    /** 짧은 형태 — token_count 를 모르는 조립용(주로 테스트). 프로덕션은 tokenCount 명시 형태를 쓴다. */
     public static AiChatMessage createUserMessage(Long sessionId, String content) {
+        return createUserMessage(sessionId, content, null);
+    }
+
+    public static AiChatMessage createUserMessage(Long sessionId, String content, Integer tokenCount) {
         return new AiChatMessage(
                 null,
                 sessionId,
@@ -86,6 +96,7 @@ public class AiChatMessage {
                 null,
                 null,
                 null,
+                tokenCount,
                 Status.COMPLETED,
                 LocalDateTime.now()
         );
@@ -105,9 +116,17 @@ public class AiChatMessage {
                 null,
                 null,
                 null,
+                null,
                 Status.REJECTED,
                 LocalDateTime.now()
         );
+    }
+
+    /** 짧은 형태 — token_count 를 실측 출력(outputTokens)으로 둔다(주로 테스트). */
+    public static AiChatMessage createAssistantSuccess(
+            Long sessionId, String content, Integer inputTokens, Integer outputTokens, Integer totalTokens
+    ) {
+        return createAssistantSuccess(sessionId, content, inputTokens, outputTokens, totalTokens, outputTokens);
     }
 
     public static AiChatMessage createAssistantSuccess(
@@ -115,7 +134,8 @@ public class AiChatMessage {
             String content,
             Integer inputTokens,
             Integer outputTokens,
-            Integer totalTokens
+            Integer totalTokens,
+            Integer tokenCount
     ) {
         return new AiChatMessage(
                 null,
@@ -126,9 +146,17 @@ public class AiChatMessage {
                 inputTokens,
                 outputTokens,
                 totalTokens,
+                tokenCount,
                 Status.COMPLETED,
                 LocalDateTime.now()
         );
+    }
+
+    /** 짧은 형태 — token_count 를 실측 출력(outputTokens)으로 둔다(주로 테스트). */
+    public static AiChatMessage createAssistantFailed(
+            Long sessionId, String partialContent, Integer inputTokens, Integer outputTokens, Integer totalTokens
+    ) {
+        return createAssistantFailed(sessionId, partialContent, inputTokens, outputTokens, totalTokens, outputTokens);
     }
 
     public static AiChatMessage createAssistantFailed(
@@ -136,7 +164,8 @@ public class AiChatMessage {
             String partialContent,
             Integer inputTokens,
             Integer outputTokens,
-            Integer totalTokens
+            Integer totalTokens,
+            Integer tokenCount
     ) {
         return new AiChatMessage(
                 null,
@@ -147,6 +176,7 @@ public class AiChatMessage {
                 inputTokens,
                 outputTokens,
                 totalTokens,
+                tokenCount,
                 Status.FAILED,
                 LocalDateTime.now()
         );
