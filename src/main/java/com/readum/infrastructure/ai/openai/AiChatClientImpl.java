@@ -1,12 +1,18 @@
 package com.readum.infrastructure.ai.openai;
 
+import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
+import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.exception.BusinessException;
+import com.readum.domain.exception.RateLimitInfo;
+import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +47,11 @@ public class AiChatClientImpl implements AiChatClient {
 
     private final ChatClient chatClient;
     private final AiPromptAuditLogger auditLogger;
+    private final OpenAiRequestGate requestGate;
+    private final AiChatProperties aiChatProperties;
+
+    @Value("${spring.ai.openai.chat.options.model}")
+    private String chatModel;
 
     @Value("classpath:prompts/reading-assistant-system.st")
     private Resource systemPromptResource;
@@ -56,6 +67,24 @@ public class AiChatClientImpl implements AiChatClient {
 
     @Override
     public Flux<AiChatChunk> stream(AiChatStreamCommand command) {
+        String systemPrompt = buildSystemPrompt(command.bookContext());
+
+        // 전역 게이트: 조립 시점(동기) 검사 — 여기서 던지면 SSE 시작 전에 GlobalExceptionHandler 가 429 로 변환한다.
+        // Flux 체인 안으로 옮기면 mid-stream 에러가 되므로 반드시 이 위치를 유지할 것.
+        // 계상은 실제 전송량 전체(시스템 프롬프트 + 이력 + 예약 출력) — 사용자 예산과 달리 오버헤드 포함.
+        long payloadChars = systemPrompt.length();
+        for (HistoryMessage historyMessage : command.history()) {
+            payloadChars += historyMessage.content().length();
+        }
+        int estimatedTokens = OpenAiTokenEstimate.fromChars(payloadChars)
+                + aiChatProperties.tokenBudget().estimatedOutputTokens();
+        OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
+        if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
+            throw new TooManyRequestsException(
+                    AiChatErrorCode.AI_RATE_LIMIT_BURST,
+                    new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
+        }
+
         List<Message> messages = command.history().stream()
                 .map(this::toSpringMessage)
                 .toList();
@@ -72,7 +101,7 @@ public class AiChatClientImpl implements AiChatClient {
         AtomicReference<ChatResponse> usageResponseRef = new AtomicReference<>();
 
         return chatClient.prompt()
-                .system(buildSystemPrompt(command.bookContext()))
+                .system(systemPrompt)
                 .messages(messages)
                 .stream()
                 .chatResponse()

@@ -19,6 +19,6 @@
   2. 구현체가 교체될 여지가 있거나 외부 시스템(API, 메시징, 캐시 백엔드 등)을 추상화해야 한다 (단순 JPA Repository 접근은 `Service → Repository` 직접 호출로 충분)
 - 사례:
   - O `TokenBlacklistStore` — domain/auth 서비스가 호출 + 현재 in-memory (Caffeine) 구현이지만 Redis 등으로 교체 여지
-  - O `SummaryCallRateLimiter` — domain 의 `SummaryGenerationWorker` 가 호출 + in-memory 구현 교체 여지
+  - (제거됨 2026-07) `SummaryCallRateLimiter` — 전 경로 공용 전역 게이트(`OpenAiRequestGate`, infrastructure 내부 호출이라 Port 불필요)로 교체되며 Port 소멸
   - X `RefreshTokenStore` — JPA Repository 를 단순 래핑하는 수준이라 Port 없이 Service 가 `RefreshTokenRepository` 를 직접 사용 (기준 2 불충족)
   - O `ChatTokenBudget` — 사용자별 토큰 예산이 도메인 규칙이 되면서 Port 승격 조건("rate limit 정책 판단이 도메인 규칙이 되는 시점")이 발동된 사례. Redis 어댑터 구현 (2026-07-06, 구 `AiChatRateLimiter` 인터셉터는 제거됨)

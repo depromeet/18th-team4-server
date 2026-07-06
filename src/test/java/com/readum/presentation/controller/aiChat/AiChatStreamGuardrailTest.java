@@ -5,6 +5,7 @@ import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.aiChat.out.ChatTokenBudget;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
@@ -43,6 +44,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
@@ -93,6 +95,10 @@ class AiChatStreamGuardrailTest {
     @MockitoBean
     private ChatTokenBudget chatTokenBudget;
 
+    // 전역 게이트도 실제 Redis 없이 항상 허용시킨다 (이 슬라이스는 moderation 검증용).
+    @MockitoBean
+    private OpenAiRequestGate openAiRequestGate;
+
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
     private Long userId;
@@ -102,6 +108,8 @@ class AiChatStreamGuardrailTest {
     void setUp() {
         given(chatTokenBudget.reserve(anyLong(), anyInt()))
                 .willReturn(new ChatTokenBudget.Result.Granted(0L, 100));
+        given(openAiRequestGate.tryAcquire(anyString(), anyInt()))
+                .willReturn(new OpenAiRequestGate.Decision.Permitted());
 
         User user = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
         userId = user.getId();

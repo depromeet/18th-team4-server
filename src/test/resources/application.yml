@@ -56,12 +56,11 @@ aladin:
   request-timeout: PT1S
   search-result-limit: 200
 
-summary:
-  rate-limit:
-    requests-per-minute: 9000
-    tokens-per-minute: 180000
-    max-request-tokens: 120000
-    acquire-max-wait-seconds: 10
+openai-gate:
+  models:
+    gpt-4o-mini:
+      requests-per-minute: 9000
+      tokens-per-minute: 180000
 
 summary-job:
   pool-size: 3
@@ -70,4 +69,5 @@ summary-job:
   lease-seconds: 300
   max-attempts: 5
   base-backoff-seconds: 60
-  reserved-output-tokens: 1024
+  max-request-tokens: 120000
+  estimated-output-tokens: 1024

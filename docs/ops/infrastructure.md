@@ -65,7 +65,7 @@
 
 배포 수칙:
 
-- **05:50~06:10 배포 회피** — 6시 감상문 적재 스캔과 전환 구간(두 프로세스 동시 상주)이 겹치면 외부 API(OpenAI) 호출 예산이 잠깐 2배가 된다. 스크립트가 강제하지 않으므로 배포하는 사람이 확인한다. rate limiter 상태가 Redis 로 공유되면(#88) 불필요해진다.
+- ~~**05:50~06:10 배포 회피**~~ (2026-07 해소) — 6시 감상문 적재 스캔과 전환 구간(두 프로세스 동시 상주)이 겹치면 외부 API(OpenAI) 호출 예산이 잠깐 2배가 됐었다. 전역 게이트(Redis) 도입으로 호출 예산이 프로세스 간 공유되어 이 회피는 불필요해졌다.
 - 전환 구간엔 JVM 2개(각 `-Xmx256m`)가 동시에 뜬다. 배포 중 스왑 피크가 계속 커지면 인스턴스 증설을 검토한다.
 - nginx·systemd·sudoers 파일 변경은 CI 가 반영하지 않는다(root 권한 불필요 원칙) — `sudo ./infra/scripts/setup.sh <repo>/infra` 재실행 + 필요 시 nginx reload 로 수동 반영한다.
 
@@ -85,7 +85,7 @@
 
 ## Redis
 
-컨테이너 readum-redis (Redis 7.4), 127.0.0.1:6379 바인딩 + 비밀번호, `maxmemory 64mb`·`noeviction`. 현재는 상주만 하는 상태 — 앱 연동(rate limiter·circuit breaker 상태 공유)은 #88 에서 진행.
+컨테이너 readum-redis (Redis 7.4), 127.0.0.1:6379 바인딩 + 비밀번호, `maxmemory 64mb`·`noeviction`. 앱이 사용 중: 사용자 토큰 예산 + OpenAI 전역 게이트 (circuit breaker 상태 공유는 #88 잔여).
 
 ## 도메인 / HTTPS
 

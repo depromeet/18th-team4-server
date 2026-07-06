@@ -19,7 +19,7 @@ class SummarySchedulerConfigTest {
     void summaryExecutor_의_core_와_max_는_poolSize_와_일치한다() {
         int poolSize = 7;
         SummaryJobProperties properties = new SummaryJobProperties(
-                poolSize, 2000L, 60000L, 300L, 5, 60L, 1024);
+                poolSize, 2000L, 60000L, 300L, 5, 60L, 120000, 1024);
 
         ThreadPoolTaskExecutor executor =
                 (ThreadPoolTaskExecutor) new SummarySchedulerConfig().summaryExecutor(properties);
