@@ -28,6 +28,11 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}   # 앱은 호스트에서 systemd 로 돌고 Redis 는 루프백 바인딩
+      port: 6379
+      password: ${REDIS_PASSWORD}
 
 readum:
   guardrail:
