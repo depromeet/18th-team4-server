@@ -11,7 +11,9 @@ spring:
         options:
           model: omni-moderation-latest
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?sslMode=REQUIRED&characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+    # sslMode 미지정 = PREFERRED (서버가 지원하면 TLS). RDS 시절의 REQUIRED 는 컨테이너 이관으로 제거 —
+    # MySQL 이 127.0.0.1 에만 바인딩되어 루프백 구간 강제 TLS 는 실익이 없다.
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?characterEncoding=UTF-8&serverTimezone=Asia/Seoul
     username: ${MYSQL_USER}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
