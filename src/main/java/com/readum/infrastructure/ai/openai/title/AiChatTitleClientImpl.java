@@ -8,7 +8,7 @@ import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
+import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +40,7 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
     private final ChatClient titleGenerationChatClient;
     private final AiPromptAuditLogger auditLogger;
     private final OpenAiRequestGate requestGate;
+    private final TokenCounter tokenCounter;
 
     @Value("${spring.ai.openai.chat.options.model}")
     private String chatModel;
@@ -62,8 +63,8 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
 
         // 전역 게이트: 포화면 이번 회차 생략. 던진 예외는 AiChatTitleGenerationListener 의
         // error consumer 가 삼킨다 — 기존 제목 생성 실패 처리와 동일한 경로다 (저빈도·실패 허용).
-        int estimatedTokens = OpenAiTokenEstimate.fromChars(
-                (long) systemPrompt.length() + chatHistory.length()) + ESTIMATED_OUTPUT_TOKENS;
+        int estimatedTokens = tokenCounter.count(systemPrompt) + tokenCounter.count(chatHistory)
+                + ESTIMATED_OUTPUT_TOKENS;
         OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
         if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
             AiChatErrorCode code = rejected.reason() == OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN

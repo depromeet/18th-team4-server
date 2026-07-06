@@ -31,8 +31,8 @@ jwt:
   blacklist-max-size: 10000
 
 ai-chat:
-  context-window:
-    max-turns: 20
+  context:
+    raw-tail-hard-cap-tokens: 8000
   message:
     max-content-length: 1000
   rate-limit:

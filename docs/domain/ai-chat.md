@@ -84,7 +84,8 @@ aiChat 의 `SummaryEditService` 가 담당한다 (LLM 무관, 사용자 직접 �
 
 | 항목 | 값 |
 |---|---|
-| 컨텍스트 윈도우 | 20턴 = 메시지 40개 (`COMPLETED` 만) |
+| 컨텍스트 조립 | 토큰 예산 기반 원문 꼬리 — hard-cap 8,000 토큰(`COMPLETED` 만), newest-first 로 `token_count` 합산, 턴 경계 정렬(꼬리는 USER 시작), 마지막 턴 강제 포함. 초과분은 오래된 턴부터 제외. 요약 결합은 PR-3 |
+| 토큰 계산 | jtokkit(o200k_base) 로컬 계산. `ai_chat_message.token_count` = USER 로컬 계산 · ASSISTANT 실측 출력 |
 | 메시지 최대 길이 | 1,000자 |
 | 폭주 가드 (DB 카운트) | 10초/5건 — 상태 무관 USER 메시지 |
 | 토큰 예산 (Redis) | KST 4시간 창당 20,000 토큰, 예약 출력 512. 사용자 메시지 입력 + 받은 출력만 계상, 채팅 스트림만 |

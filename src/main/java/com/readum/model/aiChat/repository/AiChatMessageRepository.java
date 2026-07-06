@@ -53,10 +53,11 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
     );
 
     /**
-     * 컨텍스트 윈도우용 최근 메시지 조회.
+     * 컨텍스트 조립용 최근 메시지 조회.
      * status=COMPLETED 인 메시지만 최신순으로 가져온다 (FAILED 메시지 제외).
+     * 실질 상한은 호출자의 토큰 예산이며, Pageable 은 안전 상한 개수로만 쓴다.
      */
-    default List<AiChatMessage> findRecentForContextWindow(Long sessionId, Pageable pageable) {
+    default List<AiChatMessage> findRecentForContextAssembly(Long sessionId, Pageable pageable) {
         return findBySessionIdAndStatusOrderByCreatedAtDescIdDesc(
                 sessionId,
                 AiChatMessage.Status.COMPLETED,

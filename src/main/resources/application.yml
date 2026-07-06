@@ -47,8 +47,8 @@ user:
   session-cookie-secure: true
 
 ai-chat:
-  context-window:
-    max-turns: 20            # 1턴 = USER 메시지 1 + ASSISTANT 메시지 1
+  context:
+    raw-tail-hard-cap-tokens: 8000   # 원문 꼬리 토큰 절대 상한. 초과분은 오래된 턴부터 제외 (요약 결합은 PR-3)
   message:
     max-content-length: 1000
   rate-limit:

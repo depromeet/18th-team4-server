@@ -11,6 +11,7 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
+import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.RateLimitInfo;
@@ -51,7 +52,7 @@ public class AiChatMessageSendService {
     private final BookRepository bookRepository;
     private final InputModerationClient inputModerationClient;
     private final ChatTokenBudget chatTokenBudget;
-    private final ChatCallTokenEstimator chatCallTokenEstimator;
+    private final TokenCounter tokenCounter;
 
     public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
         String normalizedContent = validateAndStripContent(command.content());
@@ -89,7 +90,7 @@ public class AiChatMessageSendService {
         // 토큰 예산 선불 예약: moderation 통과 후 · USER 저장 전. 거절이면 아무것도 저장하지 않고 429.
         // 사용자 예산은 사용자가 보낸 메시지 입력 + 받은 출력만 계상한다(시스템 프롬프트·재전송 이력·요약 미포함).
         // (moderation 은 별도 모델·무과금이라 예산 검사 앞에 둬도 비용 문제가 없다)
-        int estimatedMessageInputTokens = chatCallTokenEstimator.estimateMessageInputTokens(normalizedContent);
+        int estimatedMessageInputTokens = tokenCounter.count(normalizedContent);
         int reservedTokens = estimatedMessageInputTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
         ChatTokenBudget.Result reservationResult = chatTokenBudget.reserve(userId, reservedTokens);
         if (reservationResult instanceof ChatTokenBudget.Result.Denied denied) {
@@ -121,7 +122,7 @@ public class AiChatMessageSendService {
                 // 예산 보정 한 지점 — 정상 완료·클라이언트 취소·에러가 모두 여기로 모인다. 블로킹 없이 별도 스레드에서.
                 .doFinally(signalType -> Mono.fromRunnable(() ->
                                 settleTokenBudget(userId, reservation, completionRef.get(),
-                                        estimatedMessageInputTokens, contentBuffer.length(), signalType))
+                                        estimatedMessageInputTokens, contentBuffer.toString(), signalType))
                         .subscribeOn(Schedulers.boundedElastic())
                         .subscribe());
     }
@@ -136,7 +137,7 @@ public class AiChatMessageSendService {
      * (onErrorResume 이 에러를 정상 신호로 바꾸므로, 취소만 SignalType.CANCEL 이고 에러는 completion 이 없는 ON_COMPLETE 로 온다.)
      */
     private void settleTokenBudget(Long userId, ChatTokenBudget.Result.Granted reservation,
-            AiChatChunk.Completion completion, int estimatedMessageInputTokens, int streamedCharCount,
+            AiChatChunk.Completion completion, int estimatedMessageInputTokens, String streamedText,
             SignalType signalType) {
         if (reservation == null) {
             return;
@@ -145,8 +146,8 @@ public class AiChatMessageSendService {
             // 정상 수신(완료, 또는 완료 후 취소) → 실측 출력
             chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + completion.outputTokens());
         } else if (signalType == SignalType.CANCEL) {
-            // 클라이언트 취소로 실측 미수신 → 스트리밍 문자 수로 출력 추정
-            int estimatedOutputTokens = chatCallTokenEstimator.estimateTokensFromChars(streamedCharCount);
+            // 클라이언트 취소로 실측 미수신 → 그때까지 스트리밍된 텍스트를 jtokkit 으로 세어 출력 추정
+            int estimatedOutputTokens = tokenCounter.count(streamedText);
             chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + estimatedOutputTokens);
         } else {
             // 에러로 실측 미수신 → 사용자 과실이 아니므로 예약 전액 환불(actualTotal=0 → 예약분 그대로 차감)

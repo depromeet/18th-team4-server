@@ -1,26 +1,26 @@
 package com.readum.domain.summary.service;
 
+import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 /**
- * 요약 호출의 예상 토큰(입력 추정 + 출력 추정)을 계산한다 — 세션 과대(fail-fast) 판정에 사용.
- * 입력은 대화 글자수 근사로 추정한다(한국어 혼용을 고려해 보수적으로 작은 글자/토큰 계수 사용).
- * 정밀 tokenizer(jtokkit 등) 도입은 확장점.
+ * 요약 호출의 예상 토큰(입력 계산 + 출력 추정)을 계산한다 — 세션 과대(fail-fast) 판정에 사용.
+ * 입력은 jtokkit(o200k_base) 로 각 메시지 내용의 토큰을 합산한다.
  */
 @Component
+@RequiredArgsConstructor
 public class SummaryTokenEstimator {
 
-    // 한국어는 글자당 토큰이 더 든다 → 보수적으로(토큰을 더 크게) 잡기 위해 작은 값을 쓴다.
-    private static final double CHARS_PER_TOKEN = 2.5;
+    private final TokenCounter tokenCounter;
 
     public int estimate(List<AiChatMessage> messages, int estimatedOutputTokens) {
-        int chars = messages.stream()
-                .mapToInt(message -> message.getContent() == null ? 0 : message.getContent().length())
+        int inputTokens = messages.stream()
+                .mapToInt(message -> tokenCounter.count(message.getContent()))
                 .sum();
-        int inputTokens = (int) Math.ceil(chars / CHARS_PER_TOKEN);
         return inputTokens + estimatedOutputTokens;
     }
 }
