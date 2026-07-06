@@ -15,15 +15,13 @@ import java.util.List;
 public record GuardrailProperties(
         @Valid @NotNull Input input,
         @Valid @NotNull Output output,
-        @Valid @NotNull Moderation moderation,
-        @Valid @NotNull RateLimit rateLimit
+        @Valid @NotNull Moderation moderation
 ) {
 
     public GuardrailProperties {
         if (input == null) input = Input.defaults();
         if (output == null) output = Output.defaults();
         if (moderation == null) moderation = Moderation.defaults();
-        if (rateLimit == null) rateLimit = RateLimit.defaults();
     }
 
     public record Input(
@@ -156,24 +154,6 @@ public record GuardrailProperties(
          */
         public enum FailurePolicy {
             OPEN, CLOSED
-        }
-    }
-
-    public record RateLimit(
-            boolean enabled,
-            @Min(1) int requestsPerMinute,
-            @Min(1) int dailyRequests
-    ) {
-        private static final int DEFAULT_REQUESTS_PER_MINUTE = 20;
-        private static final int DEFAULT_DAILY_REQUESTS = 200;
-
-        public RateLimit {
-            if (requestsPerMinute <= 0) requestsPerMinute = DEFAULT_REQUESTS_PER_MINUTE;
-            if (dailyRequests <= 0) dailyRequests = DEFAULT_DAILY_REQUESTS;
-        }
-
-        public static RateLimit defaults() {
-            return new RateLimit(true, DEFAULT_REQUESTS_PER_MINUTE, DEFAULT_DAILY_REQUESTS);
         }
     }
 }

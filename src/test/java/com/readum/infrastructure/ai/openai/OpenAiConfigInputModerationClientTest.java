@@ -22,7 +22,7 @@ class OpenAiConfigInputModerationClientTest {
     private GuardrailProperties props() {
         GuardrailProperties.Moderation moderation = new GuardrailProperties.Moderation(
                 "omni-moderation-latest", null, null, null);
-        return new GuardrailProperties(null, null, moderation, null);
+        return new GuardrailProperties(null, null, moderation);
     }
 
     @SuppressWarnings("unchecked")

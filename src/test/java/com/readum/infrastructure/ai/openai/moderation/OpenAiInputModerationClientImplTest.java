@@ -34,7 +34,7 @@ class OpenAiInputModerationClientImplTest {
     ) {
         GuardrailProperties.Moderation moderation = new GuardrailProperties.Moderation(
                 "omni-moderation-latest", ALWAYS_BLOCK, RELAXED, policy);
-        GuardrailProperties props = new GuardrailProperties(null, null, moderation, null);
+        GuardrailProperties props = new GuardrailProperties(null, null, moderation);
         return new OpenAiInputModerationClientImpl(model, props);
     }
 
@@ -147,7 +147,7 @@ class OpenAiInputModerationClientImplTest {
                 List.of("violence", "harassment"),
                 GuardrailProperties.Moderation.FailurePolicy.CLOSED);
         OpenAiInputModerationClientImpl impl =
-                new OpenAiInputModerationClientImpl(model, new GuardrailProperties(null, null, moderation, null));
+                new OpenAiInputModerationClientImpl(model, new GuardrailProperties(null, null, moderation));
 
         assertThatThrownBy(impl::validateAndLogConfig)
                 .isInstanceOf(IllegalStateException.class)
@@ -163,7 +163,7 @@ class OpenAiInputModerationClientImplTest {
                 RELAXED,
                 GuardrailProperties.Moderation.FailurePolicy.CLOSED);
         OpenAiInputModerationClientImpl impl =
-                new OpenAiInputModerationClientImpl(model, new GuardrailProperties(null, null, moderation, null));
+                new OpenAiInputModerationClientImpl(model, new GuardrailProperties(null, null, moderation));
 
         assertThatThrownBy(impl::validateAndLogConfig)
                 .isInstanceOf(IllegalStateException.class)
@@ -175,7 +175,7 @@ class OpenAiInputModerationClientImplTest {
         ModerationModel model = mock(ModerationModel.class);
         GuardrailProperties.Moderation moderation = GuardrailProperties.Moderation.defaults();
         OpenAiInputModerationClientImpl impl =
-                new OpenAiInputModerationClientImpl(model, new GuardrailProperties(null, null, moderation, null));
+                new OpenAiInputModerationClientImpl(model, new GuardrailProperties(null, null, moderation));
 
         impl.validateAndLogConfig();   // 예외 없이 통과해야 한다
     }

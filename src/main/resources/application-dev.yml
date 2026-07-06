@@ -61,10 +61,6 @@ readum:
         - hate-threatening
       # 외부 Moderation API 장애 시 차단 우선(503). OPEN 은 개발 환경에서만 명시 전환.
       failure-policy: CLOSED
-    rate-limit:
-      enabled: true
-      requests-per-minute: 20
-      daily-requests: 200
 
 logging:
   level:

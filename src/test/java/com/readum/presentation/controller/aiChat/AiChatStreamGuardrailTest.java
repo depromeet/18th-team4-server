@@ -4,6 +4,7 @@ import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
@@ -40,6 +41,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
@@ -86,6 +89,10 @@ class AiChatStreamGuardrailTest {
     @MockitoBean
     private AiChatClient aiChatClient;
 
+    // 실제 Redis 없이 통과하도록 예산 Port 를 mock (moderation E2E 슬라이스라 예산은 항상 허용).
+    @MockitoBean
+    private ChatTokenBudget chatTokenBudget;
+
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
     private Long userId;
@@ -93,6 +100,9 @@ class AiChatStreamGuardrailTest {
 
     @BeforeEach
     void setUp() {
+        given(chatTokenBudget.reserve(anyLong(), anyInt()))
+                .willReturn(new ChatTokenBudget.Result.Granted(0L, 100));
+
         User user = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
         userId = user.getId();
 
