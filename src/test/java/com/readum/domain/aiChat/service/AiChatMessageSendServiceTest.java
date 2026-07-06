@@ -77,8 +77,9 @@ class AiChatMessageSendServiceTest {
 
     private final AiChatProperties aiChatProperties = new AiChatProperties(
             new AiChatProperties.ContextWindow(20),
-            new AiChatProperties.MessageRule(4000),
-            new AiChatProperties.RateLimit(10, 5, 3600, 20),
+            new AiChatProperties.MessageRule(1000),
+            new AiChatProperties.RateLimit(10, 5),
+            new AiChatProperties.TokenBudget(4, 20000, 512),
             new AiChatProperties.TitleGeneration(4, 2000)
     );
 
@@ -125,8 +126,8 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 본문이_4001자면_BadRequest_MESSAGE_CONTENT_TOO_LONG() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "가".repeat(4001));
+    void 본문이_1001자면_BadRequest_MESSAGE_CONTENT_TOO_LONG() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "가".repeat(1001));
 
         assertThatThrownBy(() -> service.execute(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -166,42 +167,6 @@ class AiChatMessageSendServiceTest {
 
         verify(persistService, never()).loadHistory(anyLong(), anyLong());
         verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
-    }
-
-    @Test
-    void 거부_카운트가_거부_한도에_도달하면_정상_카운트가_0이어도_차단된다() {
-        // 정상/거부 카운터 독립(AC-14): 정상 메시지가 0 건이어도 거부 한도(20) 도달이면 차단.
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
-                .willReturn(0L);
-        given(aiChatMessageRepository.countRecentRejectedMessagesByOwner(eq(1L), any(LocalDateTime.class)))
-                .willReturn(20L);
-
-        assertThatThrownBy(() -> service.execute(command))
-                .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
-                .extracting(TooManyRequestsException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED);
-
-        verify(persistService, never()).loadHistory(anyLong(), anyLong());
-        verify(aiChatClient, never()).stream(any(AiChatStreamCommand.class));
-    }
-
-    @Test
-    void 거부_카운트가_높아도_거부_한도_미만이면_정상_채팅은_차단되지_않는다() {
-        // 정상/거부 카운터 독립(AC-14): false-positive 로 거부가 19건 쌓여도(한도 20 미만) 정상 채팅은 통과.
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
-                .willReturn(4L);
-        given(aiChatMessageRepository.countRecentRejectedMessagesByOwner(eq(1L), any(LocalDateTime.class)))
-                .willReturn(19L);
-        givenLoadHistory(7L, List.of(), 100L);
-        given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
-                new AiChatChunk.Completion(1, 1, 2, null)
-        ));
-        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
-                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, 7L, "", null, 1, 1, 2));
-
-        assertThatCode(() -> service.execute(command).blockLast()).doesNotThrowAnyException();
     }
 
     @Test

@@ -243,28 +243,17 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 사용자별 호출 폭주 차단. 정상/거부 카운터를 각자 독립 한도와 비교한다.
-     * - 정상: 최근 countPeriodSeconds 초 동안 COMPLETED USER 메시지가 maxMessageCount 회 이상이면 거절.
-     * - 거부: 최근 rejectedCountPeriodSeconds 초 동안 REJECTED USER 메시지가 rejectedMaxMessageCount 회 이상이면 거절.
-     * 두 한도는 독립이므로 moderation 의 false-positive 가 폭증해도 정상 채팅(정상 카운트 0) 은 막히지 않고,
-     * 어뷰즈(의도적 거부 입력 반복) 만 거부 카운터로 차단된다.
-     * 정밀 정책(사용자 tier 별 한도, 분산 카운터 등) 은 트래픽 데이터가 쌓인 후 도입 예정이며,
-     * 현재 구현은 OpenAI 비용 폭주(클라이언트 무한 retry, 키 유출) 방어선이다.
-     * 비용 방어선 목적이므로 retryAfter 는 카운트 기간을 그대로 돌려 보낸다 (보수적 추정).
+     * 사용자별 폭주 차단 — 상태 무관 단일 카운터.
+     * 10초 안에 USER 메시지 5건 이상은 상태와 무관하게 정상 사용이 아니라고 보고 거절한다.
+     * 비용 방어의 본체는 토큰 예산(reserveTokenBudget)이고, 이 가드는 초 단위 폭주만 막는다.
+     * retryAfter 는 카운트 기간을 그대로 돌려 보낸다 (보수적 추정).
      */
     private void verifyUserMessageRateLimit(Long userId) {
         AiChatProperties.RateLimit limit = aiChatProperties.rateLimit();
-
-        LocalDateTime normalSince = LocalDateTime.now().minusSeconds(limit.countPeriodSeconds());
-        long normalCount = aiChatMessageRepository.countRecentUserMessagesByOwner(userId, normalSince);
-        if (normalCount >= limit.maxMessageCount()) {
+        LocalDateTime since = LocalDateTime.now().minusSeconds(limit.countPeriodSeconds());
+        long recentCount = aiChatMessageRepository.countRecentUserMessagesByOwner(userId, since);
+        if (recentCount >= limit.maxMessageCount()) {
             throw rateLimitExceeded(limit.countPeriodSeconds(), limit.maxMessageCount());
-        }
-
-        LocalDateTime rejectedSince = LocalDateTime.now().minusSeconds(limit.rejectedCountPeriodSeconds());
-        long rejectedCount = aiChatMessageRepository.countRecentRejectedMessagesByOwner(userId, rejectedSince);
-        if (rejectedCount >= limit.rejectedMaxMessageCount()) {
-            throw rateLimitExceeded(limit.rejectedCountPeriodSeconds(), limit.rejectedMaxMessageCount());
         }
     }
 

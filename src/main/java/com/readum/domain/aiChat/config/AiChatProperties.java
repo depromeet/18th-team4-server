@@ -13,6 +13,7 @@ public record AiChatProperties(
         @Valid ContextWindow contextWindow,
         @Valid MessageRule message,
         @Valid RateLimit rateLimit,
+        @Valid TokenBudget tokenBudget,
         @Valid TitleGeneration titleGeneration
 ) {
 
@@ -30,20 +31,26 @@ public record AiChatProperties(
     }
 
     /**
-     * 사용자별 호출 한도. 정밀 정책은 추후 도입 예정이고, 현재는 OpenAI 비용 폭주
-     * (클라이언트 무한 retry, 키 유출) 방어 용도다.
-     * 정상/거부 카운터를 분리한다 — moderation false-positive 가 폭증해도 정상 메시지 카운트는 0 이라
-     * 정상 채팅이 막히지 않고, 어뷰즈(의도적 거부 입력 반복)만 거부 카운터로 차단된다.
-     * 정책:
-     * - 정상: 최근 countPeriodSeconds 초 안에 COMPLETED USER 메시지가 maxMessageCount 회 이상이면 429.
-     * - 거부: 최근 rejectedCountPeriodSeconds 초 안에 REJECTED USER 메시지가 rejectedMaxMessageCount 회 이상이면 429.
-     *   거부 한도는 운영 데이터가 없으므로 정상보다 충분히 큰 시간창·횟수의 보수적 시작값으로 둔다.
+     * 사용자별 폭주 가드 — 상태 무관 USER 메시지 수. 10초에 5건 이상은 정상 사용이 아닌 것으로 본다.
+     * 비용 방어의 본체는 TokenBudget(토큰 예산)이고, 이 가드는 초 단위 폭주(무한 retry, 키 유출)만 막는다.
      */
     public record RateLimit(
             @Positive int countPeriodSeconds,
-            @Positive int maxMessageCount,
-            @Positive int rejectedCountPeriodSeconds,
-            @Positive int rejectedMaxMessageCount
+            @Positive int maxMessageCount
+    ) {
+    }
+
+    /**
+     * 사용자별 토큰 예산 — KST 자정 앵커 windowHours 창마다 tokensPerWindow 씩.
+     * 사용자가 보낸 메시지 입력 + 받은 응답 출력만 계상한다(시스템 프롬프트·재전송 이력·요약 등
+     * 서비스 오버헤드는 미계상 — 공정성 한도). 선불 예약(메시지 추정 + estimatedOutputTokens) 후
+     * 출력을 실측으로 보정한다. 저장은 Redis (ChatTokenBudget Port).
+     * estimatedOutputTokens 는 회계용 출력 추정값이다 — 프롬프트 길이 지시·수신 제한이 아니다.
+     */
+    public record TokenBudget(
+            @Positive int windowHours,
+            @Positive int tokensPerWindow,
+            @Positive int estimatedOutputTokens
     ) {
     }
 

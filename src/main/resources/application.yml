@@ -50,12 +50,14 @@ ai-chat:
   context-window:
     max-turns: 20            # 1턴 = USER 메시지 1 + ASSISTANT 메시지 1
   message:
-    max-content-length: 4000
+    max-content-length: 1000
   rate-limit:
-    count-period-seconds: 10            # 정상 메시지 카운트 기간 (초).
-    max-message-count: 5                # 기간 안에 허용되는 COMPLETED USER 메시지 수. 초과 시 HTTP 429.
-    rejected-count-period-seconds: 3600 # 거부 메시지 카운트 기간 (초). 어뷰즈 탐지용으로 넓게.
-    rejected-max-message-count: 20      # 기간 안에 허용되는 REJECTED USER 메시지 수. 초과 시 HTTP 429.
+    count-period-seconds: 10 # 상태 무관 USER 메시지 카운트 기간 (초).
+    max-message-count: 5     # 기간 안에 허용되는 USER 메시지 수. 초과 시 HTTP 429.
+  token-budget:
+    window-hours: 4              # KST 자정 앵커 창 크기 (00·04·08·12·16·20시 시작)
+    tokens-per-window: 20000     # 창당 토큰 예산 (사용자 메시지 입력 + 받은 출력만 계상, 채팅 스트림만)
+    estimated-output-tokens: 512 # 예약 시 더하는 출력 추정값 (실측 도착 시 보정)
   title-generation:                     # 제목 생성 전용 스케줄러(영속화 풀과 격벽 분리).
     thread-cap: 32                       # 동시 제목 생성 상한. 스레드는 lazy 생성 + 60초 유휴 회수라 평소엔 0 에 수렴.
                                          # 저빈도 백그라운드라 32 면 충분. 전용 ChatClient 의 10초 responseTimeout 이 매달린 호출을 끊어 blast-radius 를 시간으로 제한.

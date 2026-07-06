@@ -1,6 +1,10 @@
 package com.readum.model.aiChat.repository;
 
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.model.aiChat.entity.AiChatMessageFixture;
+import com.readum.model.aiChat.entity.AiChatSession;
+import com.readum.model.userBook.entity.UserBook;
+import com.readum.model.userBook.repository.UserBookRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,6 +13,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,11 +25,29 @@ class AiChatMessageRepositoryTest {
     @Autowired
     private AiChatMessageRepository aiChatMessageRepository;
 
+    @Autowired
+    private AiChatSessionRepository aiChatSessionRepository;
+
+    @Autowired
+    private UserBookRepository userBookRepository;
+
     private static long sessionIdSeq = 9_000_000L;
+    private static long userIdSeq = 9_200_000L;
+    private static long bookIdSeq = 9_200_000L;
 
     private static synchronized Long nextSessionId() {
         sessionIdSeq += 1;
         return sessionIdSeq;
+    }
+
+    private static synchronized Long nextUserId() {
+        userIdSeq += 1;
+        return userIdSeq;
+    }
+
+    private static synchronized Long nextBookId() {
+        bookIdSeq += 1;
+        return bookIdSeq;
     }
 
     @Test
@@ -147,17 +170,28 @@ class AiChatMessageRepositoryTest {
     }
 
     @Test
-    @DisplayName("countRecentRejectedMessagesByOwner 는 REJECTED USER 메시지만 센다")
-    void 거부_메시지_카운트는_REJECTED_만() {
-        // owner 매핑(UserBook→Session) 이 없는 임의 sessionId 라서 0 이 나오는 게 정상.
-        // 여기서는 쿼리가 status 로 필터링하는지(컴파일/실행 회귀) 만 가볍게 확인한다.
-        Long sessionId = nextSessionId();
-        aiChatMessageRepository.save(AiChatMessage.createUserMessageRejected(sessionId, "차단된 질문"));
-        aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "정상 질문"));
+    @DisplayName("countRecentUserMessagesByOwner 는 상태와 무관하게 USER 메시지를 전부 센다 (REJECTED 도배도 같은 가드에 잡힘)")
+    void countRecentUserMessagesByOwner_상태_무관_카운트() {
+        // given: 소유자의 세션에 최근 10초 내 USER 메시지 5건(COMPLETED 2 + REJECTED 3)
+        //        + 카운트에서 제외돼야 할 ASSISTANT 1건.
+        //        (USER 는 프로덕션에서 COMPLETED/REJECTED 만 존재 — FAILED 는 ASSISTANT 부분 응답 전용)
+        Long userId = nextUserId();
+        UserBook userBook = userBookRepository.save(UserBook.create(userId, nextBookId()));
+        Long sessionId = aiChatSessionRepository.save(AiChatSession.create(userBook.getId())).getId();
 
-        long rejected = aiChatMessageRepository
-                .countRecentRejectedMessagesByOwner(999_999L, java.time.LocalDateTime.now().minusHours(1));
+        LocalDateTime now = LocalDateTime.now();
+        aiChatMessageRepository.save(AiChatMessageFixture.userMessageAt(sessionId, "정상1", now.minusSeconds(1)));
+        aiChatMessageRepository.save(AiChatMessageFixture.userMessageAt(sessionId, "정상2", now.minusSeconds(2)));
+        aiChatMessageRepository.save(AiChatMessageFixture.rejectedUserMessageAt(sessionId, "거부1", now.minusSeconds(1)));
+        aiChatMessageRepository.save(AiChatMessageFixture.rejectedUserMessageAt(sessionId, "거부2", now.minusSeconds(2)));
+        aiChatMessageRepository.save(AiChatMessageFixture.rejectedUserMessageAt(sessionId, "거부3", now.minusSeconds(3)));
+        // ASSISTANT 는 role 필터로 제외돼야 한다.
+        aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(sessionId, "응답", 1, 1, 2));
 
-        assertThat(rejected).isZero();
+        // when
+        long count = aiChatMessageRepository.countRecentUserMessagesByOwner(userId, now.minusSeconds(10));
+
+        // then: 상태 무관 USER 5건 (구 구현은 COMPLETED 2건만 셌다)
+        assertThat(count).isEqualTo(5);
     }
 }
