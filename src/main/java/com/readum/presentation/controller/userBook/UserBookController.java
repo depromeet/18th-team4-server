@@ -1,4 +1,4 @@
-package com.readum.presentation.controller.user;
+package com.readum.presentation.controller.userBook;
 
 import com.readum.domain.userBook.dto.UserBookCreateResult;
 import com.readum.domain.userBook.dto.UserBookDeleteCommand;
@@ -8,9 +8,9 @@ import com.readum.domain.userBook.service.UserBookDeleteService;
 import com.readum.domain.userBook.service.UserBookSearchService;
 import com.readum.presentation.common.GlobalApiResponse;
 import com.readum.presentation.common.security.AuthenticatedUserId;
-import com.readum.presentation.controller.user.dto.UserBookCreateRequest;
-import com.readum.presentation.controller.user.dto.UserBookListResponse;
-import com.readum.presentation.controller.user.dto.UserBookResponse;
+import com.readum.presentation.controller.userBook.dto.UserBookCreateRequest;
+import com.readum.presentation.controller.userBook.dto.UserBookListResponse;
+import com.readum.presentation.controller.userBook.dto.UserBookResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;

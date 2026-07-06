@@ -1,4 +1,4 @@
-package com.readum.presentation.controller.user.dto;
+package com.readum.presentation.controller.userBook.dto;
 
 import com.readum.domain.userBook.dto.UserBookSearchItemResult;
 

@@ -1,4 +1,4 @@
-package com.readum.presentation.controller.user;
+package com.readum.presentation.controller.userBook;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.readum.domain.exception.ConflictException;
@@ -13,7 +13,7 @@ import com.readum.domain.userBook.service.UserBookDeleteService;
 import com.readum.domain.userBook.service.UserBookSearchService;
 import com.readum.presentation.common.GlobalExceptionHandler;
 import com.readum.presentation.common.security.AuthenticatedUserIdArgumentResolver;
-import com.readum.presentation.controller.user.dto.UserBookCreateRequest;
+import com.readum.presentation.controller.userBook.dto.UserBookCreateRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
