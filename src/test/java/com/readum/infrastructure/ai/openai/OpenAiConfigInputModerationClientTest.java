@@ -1,5 +1,6 @@
 package com.readum.infrastructure.ai.openai;
 
+import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.moderation.ModerationModel;

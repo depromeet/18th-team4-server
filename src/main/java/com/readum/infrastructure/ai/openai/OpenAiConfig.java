@@ -1,8 +1,9 @@
 package com.readum.infrastructure.ai.openai;
 
 import com.readum.domain.aiChat.out.InputModerationClient;
-import com.readum.infrastructure.ai.openai.advisor.ModerationOutputAdvisor;
-import com.readum.infrastructure.ai.openai.advisor.PromptInjectionPatternAdvisor;
+import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
+import com.readum.infrastructure.ai.openai.guardrail.ModerationOutputAdvisor;
+import com.readum.infrastructure.ai.openai.guardrail.PromptInjectionPatternAdvisor;
 import com.readum.infrastructure.ai.openai.moderation.OpenAiInputModerationClientImpl;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiGateProperties;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;

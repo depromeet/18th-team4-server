@@ -1,4 +1,4 @@
-package com.readum.infrastructure.ai.openai;
+package com.readum.infrastructure.ai.openai.chat;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatChunk;
@@ -11,6 +11,7 @@ import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
+import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
 import jakarta.annotation.PostConstruct;

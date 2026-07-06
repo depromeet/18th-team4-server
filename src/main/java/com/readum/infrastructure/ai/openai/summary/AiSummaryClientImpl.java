@@ -1,4 +1,4 @@
-package com.readum.infrastructure.ai.openai;
+package com.readum.infrastructure.ai.openai.summary;
 
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
@@ -8,6 +8,7 @@ import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
+import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
 import com.readum.model.aiChat.entity.AiChatMessage;

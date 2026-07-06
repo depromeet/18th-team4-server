@@ -1,4 +1,4 @@
-package com.readum.infrastructure.ai.openai;
+package com.readum.infrastructure.ai.openai.summary;
 
 import com.readum.model.aiChat.entity.AiChatMessage;
 import org.junit.jupiter.api.BeforeEach;
