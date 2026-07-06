@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -122,7 +123,10 @@ class SummaryJobBulkEnqueueTest {
 
     @Test
     void 적재된_작업은_즉시_처리_가능한_PENDING_상태로_시작한다() {
-        LocalDateTime now = LocalDateTime.now();
+        // next_attempt_at 을 :now 로 그대로 저장하므로, DATETIME(6) 저장 시 나노초가 마이크로초로
+        // 반올림되면 저장값이 캡처한 now 보다 커져 아래 isBeforeOrEqualTo(now) 가 깨진다.
+        // 저장·비교 정밀도를 마이크로초로 맞춰 반올림 자체를 없앤다.
+        LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
         Long sessionId = activeSessionWithRecentMessage(MIN_TOKENS, now.minusHours(1));
 
         summaryJobRepository.enqueuePendingForEligibleSessions(MIN_TOKENS, now.minusHours(24), now);
