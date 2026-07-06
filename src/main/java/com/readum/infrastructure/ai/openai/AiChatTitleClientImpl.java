@@ -1,8 +1,13 @@
 package com.readum.infrastructure.ai.openai;
 
+import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatTitleClient;
+import com.readum.domain.exception.RateLimitInfo;
+import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -27,9 +32,16 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
     private static final String PROMPT_TEMPLATE_ID = "title-generator-system";
     private static final String PROMPT_TEMPLATE_VERSION = "v1";
 
+    /** 제목은 한 줄 출력 — 게이트 계상용 출력 추정값. */
+    private static final int ESTIMATED_OUTPUT_TOKENS = 64;
+
     // 제목 생성 전용 ChatClient(10초 responseTimeout, advisor 미적용). 빈 이름으로 주입해 채팅용 chatClient 와 구분한다.
     private final ChatClient titleGenerationChatClient;
     private final AiPromptAuditLogger auditLogger;
+    private final OpenAiRequestGate requestGate;
+
+    @Value("${spring.ai.openai.chat.options.model}")
+    private String chatModel;
 
     @Value("classpath:prompts/title-generator-system.st")
     private Resource systemPromptResource;
@@ -46,6 +58,18 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
     @Override
     public String generate(List<AiChatMessage> messages) {
         String chatHistory = formatChatHistory(messages);
+
+        // 전역 게이트: 포화면 이번 회차 생략. 던진 예외는 AiChatTitleGenerationListener 의
+        // error consumer 가 삼킨다 — 기존 제목 생성 실패 처리와 동일한 경로다 (저빈도·실패 허용).
+        int estimatedTokens = OpenAiTokenEstimate.fromChars(
+                (long) systemPrompt.length() + chatHistory.length()) + ESTIMATED_OUTPUT_TOKENS;
+        OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
+        if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
+            throw new TooManyRequestsException(
+                    AiChatErrorCode.AI_RATE_LIMIT_BURST,
+                    new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
+        }
+
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(messages),
                 PROMPT_TEMPLATE_ID,
