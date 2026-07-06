@@ -9,7 +9,7 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
-import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.userBook.repository.UserBookRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 

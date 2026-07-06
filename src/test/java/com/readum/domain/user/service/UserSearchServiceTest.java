@@ -2,7 +2,7 @@ package com.readum.domain.user.service;
 
 import com.readum.domain.user.dto.UserProfileResult;
 import com.readum.domain.user.dto.UserSessionInfoResult;
-import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.userBook.repository.UserBookRepository;
 import com.readum.model.user.entity.User;
 import com.readum.model.user.entity.UserFixture;
 import com.readum.model.user.repository.UserRepository;
