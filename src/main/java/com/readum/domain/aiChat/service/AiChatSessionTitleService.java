@@ -5,10 +5,9 @@ import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatTitleClient;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 채팅 세션의 제목을 생성·갱신하는 Command 서비스.
@@ -18,27 +17,18 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class AiChatSessionTitleService {
 
     private final AiChatSessionRepository aiChatSessionRepository;
     private final AiChatTitleClient aiChatTitleClient;
-    private final TransactionTemplate transactionTemplate;
-
-    public AiChatSessionTitleService(
-            AiChatSessionRepository aiChatSessionRepository,
-            AiChatTitleClient aiChatTitleClient,
-            PlatformTransactionManager transactionManager
-    ) {
-        this.aiChatSessionRepository = aiChatSessionRepository;
-        this.aiChatTitleClient = aiChatTitleClient;
-        this.transactionTemplate = new TransactionTemplate(transactionManager);
-    }
+    private final AiChatSessionTitleWriter aiChatSessionTitleWriter;
 
     /**
      * LLM 호출 동안 DB 커넥션을 잡지 않도록 트랜잭션을 두 단계로 쪼갠다.
      * 1) existsById 로 세션 존재만 짧게 검증 (SimpleJpaRepository 의 자동 readOnly tx)
      * 2) 트랜잭션 밖에서 LLM 호출
-     * 3) findById + updateTitle 만 짧은 트랜잭션으로 묶어 dirty-check flush 를 보장
+     * 3) AiChatSessionTitleWriter 가 findById + updateTitle 만 짧은 트랜잭션으로 수행
      */
     public void execute(GenerateSessionTitleCommand command) {
         if (!aiChatSessionRepository.existsById(command.sessionId())) {
@@ -51,8 +41,6 @@ public class AiChatSessionTitleService {
             return;
         }
 
-        transactionTemplate.executeWithoutResult(status ->
-                aiChatSessionRepository.findById(command.sessionId())
-                        .ifPresent(session -> session.updateTitle(generated)));
+        aiChatSessionTitleWriter.updateTitle(command.sessionId(), generated);
     }
 }

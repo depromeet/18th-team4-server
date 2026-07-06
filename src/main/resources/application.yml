@@ -20,9 +20,17 @@ spring:
     scheduling:
       pool:
         size: 3
+  # graceful shutdown 시 진행 중 HTTP 요청을 기다려 주는 시간 (#108).
+  # AI 채팅 SSE 스트림이 가장 긴 요청이라 기본값 30초 대신 60초.
+  # 배포 시 nginx 가 새 요청을 먼저 새 프로세스로 돌린 뒤 종료하므로, 이 대기는 배포 소요 시간만 늘릴 뿐 사용자 영향이 없다.
+  lifecycle:
+    timeout-per-shutdown-phase: 60s
 
 server:
   forward-headers-strategy: framework
+  # SIGTERM 을 받으면 새 요청은 즉시 거부하고 진행 중 요청만 위 대기 시간 안에서 마무리한다 (#108).
+  # Spring Boot 3.4+ 기본값이지만, 배포 절차(구 프로세스 종료 단계)가 이 동작에 의존하므로 명시해 둔다.
+  shutdown: graceful
 
 auth:
   access-token-ttl: PT30M

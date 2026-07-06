@@ -1,0 +1,25 @@
+# readum 개발 서버(EC2)에 상주하는 컨테이너 — 로컬 개발 환경용이 아니다.
+# 원본은 repo 의 infra/docker/ 이고, 서버에서 다음으로 기동한다:
+#   docker compose --env-file /opt/readum/.env -f docker-compose.dev.yml up -d
+#
+# Redis 는 이번 단계에서는 "서버에 떠 있는 상태"까지만 만든다. 애플리케이션이 Redis 를
+# 사용하는 코드(rate limiter·circuit breaker 상태 공유 등)는 #88 에서 별도 진행.
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: readum-redis
+    restart: unless-stopped
+    # 호스트 밖에서는 접근 불가 — 루프백에만 바인딩.
+    ports:
+      - "127.0.0.1:6379:6379"
+    # maxmemory 64mb: t3 급 서버 메모리 예산에 맞춘 상한.
+    # noeviction: 한도 초과 시 쓰기를 에러로 거부한다. rate limiter 상태를 조용히 버리는 것(eviction)보다
+    # 시끄럽게 실패하는 쪽이 안전하다.
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - noeviction

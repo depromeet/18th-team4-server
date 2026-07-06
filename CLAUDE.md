@@ -37,7 +37,7 @@ AI 작업자를 위한 최상단 라우터 문서. 상세 규칙은 링크된 �
 6. **인증 신원**: `SessionCookieAuthenticationFilter` 가 해석해 컨트롤러에 `@AuthenticatedUserId Long userId` 로만 전달. 서비스에서 쿠키/세션을 직접 읽는 패턴 금지 (ArchUnit 으로 강제) → [security-architecture](docs/architecture/security-architecture.md)
 7. **테스트**: 서비스 레이어 단위 테스트 필수, 조회 기능은 DAO 통합 테스트 필수. 테스트 이름은 행위를 주장하는 한글 문장 → [testing](docs/conventions/testing.md)
 8. **API/Swagger**: 경로 `/api/v1/{resource}`, 컨트롤러에 `@Tag`, 메서드에 `@Operation` + `@ApiResponses` 필수. 응답 wrapper 는 `GlobalApiResponse` → [api-and-swagger](docs/conventions/api-and-swagger.md)
-9. **트랜잭션**: 단일 Repository 호출만 하는 조회 서비스에 `@Transactional(readOnly = true)` 를 붙이지 않는다 (붙이는 예외 기준은 문서) → [transaction](docs/conventions/transaction.md)
+9. **트랜잭션**: 단일 Repository 호출만 하는 조회 서비스에 `@Transactional(readOnly = true)` 를 붙이지 않는다. 외부 HTTP 호출(알라딘·LLM 등)은 `@Transactional` 밖에서 하고, 원자적 DB 쓰기만 협력자 빈(`{동작대상}Writer`/`Reader`, package-private)의 선언적 `@Transactional` 에 위임한다. `TransactionTemplate` 금지 (부착·분리·미분리 기준은 문서) → [transaction](docs/conventions/transaction.md)
 10. **설정값**: 시크릿·환경별 값은 환경변수와 `application-{profile}.yml`, 환경 무관 비즈니스 룰은 `application.yml` 직접값 → [configuration](docs/conventions/configuration.md)
 
 이 밖의 규칙(JPQL 작성, 네이밍 표, 로그 레벨 등)은 [docs/conventions/README.md](docs/conventions/README.md) 색인에서 찾는다.

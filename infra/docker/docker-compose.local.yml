@@ -1,0 +1,36 @@
+# 로컬 개발 환경용 컨테이너 (MySQL + Redis) — 개발 서버용은 docker-compose.dev.yml.
+# repo 루트에서 기동:
+#   docker compose -f infra/docker/docker-compose.local.yml up -d
+#
+# 접속값 기본치는 .env.example 과 맞춰져 있어 별도 설정 없이 앱(dev 프로파일, MYSQL_HOST=localhost)이 붙는다.
+# 값을 바꾸려면 환경변수로 덮어쓴다 (예: MYSQL_PASSWORD=... docker compose ...).
+services:
+  mysql:
+    # 개발 서버(RDS → 이관 후 컨테이너)와 동일한 8.4 로 고정해 로컬-서버 동작 차이를 줄인다.
+    image: mysql:8.4
+    container_name: readum-local-mysql
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-readum}
+      MYSQL_USER: ${MYSQL_USER:-readum}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-your_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      TZ: Asia/Seoul
+    volumes:
+      - readum-local-mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: readum-local-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:-local-redis-password}
+
+volumes:
+  readum-local-mysql-data:
