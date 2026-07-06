@@ -80,8 +80,11 @@ public class AiChatClientImpl implements AiChatClient {
                 + aiChatProperties.tokenBudget().estimatedOutputTokens();
         OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
         if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
+            AiChatErrorCode code = rejected.reason() == OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN
+                    ? AiChatErrorCode.AI_QUOTA_EXHAUSTED
+                    : AiChatErrorCode.AI_RATE_LIMIT_BURST;
             throw new TooManyRequestsException(
-                    AiChatErrorCode.AI_RATE_LIMIT_BURST,
+                    code,
                     new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
         }
 
