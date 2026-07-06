@@ -95,7 +95,7 @@ class AiChatMessageRepositoryTest {
     }
 
     @Test
-    @DisplayName("findRecentForContextWindow 는 status=COMPLETED 인 USER/ASSISTANT 만 최신순으로 N개")
+    @DisplayName("findRecentForContextAssembly 는 status=COMPLETED 인 USER/ASSISTANT 만 최신순으로 N개")
     void 컨텍스트_윈도우_쿼리() {
         Long sessionId = nextSessionId();
         // 5개 USER + 5개 ASSISTANT 정상 + 1개 ASSISTANT FAILED 인터리빙
@@ -107,7 +107,7 @@ class AiChatMessageRepositoryTest {
         aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(sessionId, "a3", 1, 1, 2));
 
         List<AiChatMessage> recent = aiChatMessageRepository
-                .findRecentForContextWindow(sessionId, PageRequest.of(0, 40));
+                .findRecentForContextAssembly(sessionId, PageRequest.of(0, 40));
 
         // FAILED 1개 제외 → 5개
         assertThat(recent).hasSize(5);
@@ -118,7 +118,7 @@ class AiChatMessageRepositoryTest {
     }
 
     @Test
-    @DisplayName("findRecentForContextWindow 는 Pageable 의 size 만큼만 반환")
+    @DisplayName("findRecentForContextAssembly 는 Pageable 의 size 만큼만 반환")
     void 컨텍스트_윈도우_사이즈_제한() {
         Long sessionId = nextSessionId();
         for (int i = 1; i <= 50; i++) {
@@ -126,14 +126,14 @@ class AiChatMessageRepositoryTest {
         }
 
         List<AiChatMessage> recent = aiChatMessageRepository
-                .findRecentForContextWindow(sessionId, PageRequest.of(0, 40));
+                .findRecentForContextAssembly(sessionId, PageRequest.of(0, 40));
 
         assertThat(recent).hasSize(40);
         assertThat(recent.get(0).getContent()).isEqualTo("메시지 50");
     }
 
     @Test
-    @DisplayName("AC-5: REJECTED USER 메시지는 findRecentForContextWindow 에서 제외된다")
+    @DisplayName("AC-5: REJECTED USER 메시지는 findRecentForContextAssembly 에서 제외된다")
     void 컨텍스트_윈도우_REJECTED_제외() {
         Long sessionId = nextSessionId();
         aiChatMessageRepository.save(AiChatMessage.createUserMessage(sessionId, "정상 질문"));
@@ -141,7 +141,7 @@ class AiChatMessageRepositoryTest {
         aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(sessionId, "정상 응답", 1, 1, 2));
 
         List<AiChatMessage> recent = aiChatMessageRepository
-                .findRecentForContextWindow(sessionId, PageRequest.of(0, 40));
+                .findRecentForContextAssembly(sessionId, PageRequest.of(0, 40));
 
         assertThat(recent).hasSize(2);
         assertThat(recent).extracting(AiChatMessage::getContent)

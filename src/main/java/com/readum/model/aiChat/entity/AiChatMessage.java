@@ -35,7 +35,7 @@ public class AiChatMessage {
     /**
      * COMPLETED : USER 메시지(즉시 저장) 또는 정상 종료된 ASSISTANT 메시지.
      * FAILED    : 스트림 비정상 종료 시 부분 응답을 보존하기 위한 ASSISTANT 메시지 상태.
-     *             컨텍스트 윈도우(findRecentForContextWindow) 에서 자동 제외된다.
+     *             컨텍스트 윈도우(findRecentForContextAssembly) 에서 자동 제외된다.
      * REJECTED  : 입력 가드레일에 차단된 USER 메시지. 감사 추적을 위해 저장은 하되,
      *             컨텍스트 윈도우·감상문 초안·세션 제목 생성 어떤 LLM 프롬프트에도 포함되지 않는다.
      */

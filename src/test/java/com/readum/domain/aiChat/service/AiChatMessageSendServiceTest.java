@@ -88,7 +88,7 @@ class AiChatMessageSendServiceTest {
             (text == null || text.isEmpty()) ? 0 : (int) Math.ceil(text.length() / 2.5);
 
     private final AiChatProperties aiChatProperties = new AiChatProperties(
-            new AiChatProperties.ContextWindow(20),
+            new AiChatProperties.Context(8000),
             new AiChatProperties.MessageRule(1000),
             new AiChatProperties.RateLimit(10, 5),
             new AiChatProperties.TokenBudget(4, 20000, 512),
