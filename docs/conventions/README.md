@@ -11,7 +11,7 @@
 | [dto.md](dto.md) | DTO 규칙과 Entity → Result 변환 책임 |
 | [entity.md](entity.md) | 엔티티 작성 규칙과 테스트 Fixture 규칙 |
 | [jpql.md](jpql.md) | JPQL/쿼리 작성(derived query 우선, alias, 쉼표 위치) |
-| [transaction.md](transaction.md) | `@Transactional(readOnly = true)` 부착 기준 |
+| [transaction.md](transaction.md) | `@Transactional(readOnly = true)` 부착 기준, 외부 I/O 트랜잭션 밖 분리·협력자 빈 기준 (`TransactionTemplate` 금지) |
 | [api-and-swagger.md](api-and-swagger.md) | API 경로/응답 형식과 Swagger 문서화 |
 | [naming.md](naming.md) | 클래스/DTO/Port 등 이름 규칙 |
 | [vocabulary.md](vocabulary.md) | 어휘·용어 작성 규칙 — 글 전반(문서·PR·주석·커밋·로그) 공통 (원본 문서) |
