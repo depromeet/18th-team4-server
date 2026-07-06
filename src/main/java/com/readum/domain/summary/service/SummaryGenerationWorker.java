@@ -9,7 +9,6 @@ import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.domain.summary.exception.SummaryErrorCode;
 import com.readum.domain.summary.out.SummaryCallBreaker;
-import com.readum.domain.summary.out.SummaryCallRateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -22,13 +21,13 @@ import java.util.UUID;
 
 /**
  * 동기 감상문 생성 워커. 트랜잭션 없이, 각 트랜잭션 단계(SummaryJobLifecycleService)를 순서대로 호출하고
- * 그 사이(트랜잭션 밖)에서 외부 AI(OpenAI)를 부른다. 호출 전 페이서로 RPM/TPM 예산을 맞추고,
+ * 그 사이(트랜잭션 밖)에서 외부 AI(OpenAI)를 부른다. 분당 예산은 전역 게이트(OpenAiRequestGate)가
+ * AiSummaryClientImpl 안에서 검사하므로, 포화 시 burst 429 로 던져져 아래 브레이커+무벌점 반납 경로를 탄다.
  * 계정 전역 문제(quota)면 브레이커로 전 워커를 잠시 멈춘다.
  *
  * 실패 분류:
- * - 세션 과대(추정 토큰 > 양동이 용량) → 호출 전 즉시 FAILED (fail-fast)
- * - 예산 미확보(페이서 false) → 무벌점 반납(시도 횟수 미증가)
- * - burst 429 → 브레이커 잠깐 차단 + 무벌점 반납(우리 과속이지 작업 잘못 아님)
+ * - 세션 과대(추정 토큰 > maxRequestTokens) → 호출 전 즉시 FAILED (fail-fast)
+ * - burst 429(게이트 포화) → 브레이커 잠깐 차단 + 무벌점 반납(우리 과속이지 작업 잘못 아님)
  * - quota 429 → 브레이커 300초 차단 + 재시도(상한 도달 시 FAILED)
  * - 5xx → 재시도 / 4xx → 즉시 FAILED
  */
@@ -44,7 +43,6 @@ public class SummaryGenerationWorker {
 
     private final SummaryJobLifecycleService lifecycleService;
     private final AiSummaryClient aiSummaryClient;
-    private final SummaryCallRateLimiter rateLimiter;
     private final SummaryCallBreaker breaker;
     private final SummaryTokenEstimator tokenEstimator;
     private final SummaryJobProperties properties;
@@ -78,21 +76,15 @@ public class SummaryGenerationWorker {
             return;
         }
 
-        int estimatedTokens = tokenEstimator.estimate(context.messages(), properties.reservedOutputTokens());
-        if (estimatedTokens > rateLimiter.maxRequestTokens()) {
-            // 양동이보다 큰 요청은 영원히 예산을 못 얻는다(모델 한도에도 가까움) → 즉시 실패로 드러낸다.
+        int estimatedTokens = tokenEstimator.estimate(context.messages(), properties.estimatedOutputTokens());
+        if (estimatedTokens > properties.maxRequestTokens()) {
+            // 상한보다 큰 요청은 게이트에서도 계속 막힌다(모델 한도에도 가까움) → 즉시 실패로 드러낸다.
             // 최종 실패 로그는 recordFailure(retryable=false) 의 ERROR 한 곳으로 일원화한다(중복 방지).
             lifecycleService.recordFailure(jobId, owner, false,
                     SummaryErrorCode.SESSION_TOO_LARGE.name(),
                     "세션이 너무 커 감상문을 생성할 수 없습니다 (추정 토큰 " + estimatedTokens
-                            + " > 상한 " + rateLimiter.maxRequestTokens() + ")",
+                            + " > 상한 " + properties.maxRequestTokens() + ")",
                     null);
-            return;
-        }
-
-        if (!acquireBudget(estimatedTokens)) {
-            // 예산 미확보(포화) — 실패가 아니라 backpressure. 시도 횟수 미증가로 반납.
-            lifecycleService.releaseWithoutPenalty(jobId, owner);
             return;
         }
 
@@ -121,15 +113,6 @@ public class SummaryGenerationWorker {
             return;
         }
         lifecycleService.recordSuccess(jobId, owner, context.userBookId(), result);
-    }
-
-    private boolean acquireBudget(int estimatedTokens) {
-        try {
-            return rateLimiter.tryAcquire(estimatedTokens);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
     }
 
     private void handleRateLimited(Long jobId, String owner, TooManyRequestsException e) {

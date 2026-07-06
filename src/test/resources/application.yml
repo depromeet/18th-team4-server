@@ -62,13 +62,6 @@ openai-gate:
       requests-per-minute: 9000
       tokens-per-minute: 180000
 
-summary:
-  rate-limit:
-    requests-per-minute: 9000
-    tokens-per-minute: 180000
-    max-request-tokens: 120000
-    acquire-max-wait-seconds: 10
-
 summary-job:
   pool-size: 3
   dispatch-interval-ms: 2000
@@ -76,4 +69,5 @@ summary-job:
   lease-seconds: 300
   max-attempts: 5
   base-backoff-seconds: 60
-  reserved-output-tokens: 1024
+  max-request-tokens: 120000
+  estimated-output-tokens: 1024

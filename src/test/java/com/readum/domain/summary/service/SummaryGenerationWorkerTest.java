@@ -8,7 +8,6 @@ import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.domain.summary.out.SummaryCallBreaker;
-import com.readum.domain.summary.out.SummaryCallRateLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,7 +24,6 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -39,7 +37,6 @@ class SummaryGenerationWorkerTest {
 
     @Mock SummaryJobLifecycleService lifecycleService;
     @Mock AiSummaryClient aiSummaryClient;
-    @Mock SummaryCallRateLimiter rateLimiter;
     @Mock SummaryCallBreaker breaker;
     @Mock SummaryTokenEstimator tokenEstimator;
     @Mock SummaryJobProperties properties;
@@ -54,9 +51,9 @@ class SummaryGenerationWorkerTest {
         when(breaker.isBlocked()).thenReturn(false);
         when(lifecycleService.claimOne(anyString())).thenReturn(1L);
         when(lifecycleService.prepareGeneration(eq(1L), anyString())).thenReturn(CONTEXT);
-        when(properties.reservedOutputTokens()).thenReturn(1024);
+        when(properties.estimatedOutputTokens()).thenReturn(1024);
         when(tokenEstimator.estimate(any(), eq(1024))).thenReturn(3000);
-        when(rateLimiter.maxRequestTokens()).thenReturn(120_000);
+        when(properties.maxRequestTokens()).thenReturn(120_000);
     }
 
     @Test
@@ -71,7 +68,6 @@ class SummaryGenerationWorkerTest {
 
     @Test
     void 정상이면_생성하고_성공_기록한다() throws Exception {
-        when(rateLimiter.tryAcquire(3000)).thenReturn(true);
         SummaryDraftResult result = new SummaryDraftResult("제목", "본문");
         when(aiSummaryClient.generate(any())).thenReturn(result);
 
@@ -86,24 +82,12 @@ class SummaryGenerationWorkerTest {
 
         worker.processOne();
 
-        verify(rateLimiter, never()).tryAcquire(anyInt());
         verify(aiSummaryClient, never()).generate(any());
         verify(lifecycleService).recordFailure(eq(1L), anyString(), eq(false), anyString(), anyString(), any());
     }
 
     @Test
-    void 예산_미확보면_무벌점_반납하고_호출하지_않는다() throws Exception {
-        when(rateLimiter.tryAcquire(3000)).thenReturn(false);
-
-        worker.processOne();
-
-        verify(lifecycleService).releaseWithoutPenalty(eq(1L), anyString());
-        verify(aiSummaryClient, never()).generate(any());
-    }
-
-    @Test
     void burst_429면_차단하고_무벌점_반납한다() throws Exception {
-        when(rateLimiter.tryAcquire(3000)).thenReturn(true);
         when(aiSummaryClient.generate(any()))
                 .thenThrow(new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST, RateLimitInfo.empty()));
 
@@ -116,7 +100,6 @@ class SummaryGenerationWorkerTest {
 
     @Test
     void quota_429면_차단하고_재시도_가능_실패로_기록한다() throws Exception {
-        when(rateLimiter.tryAcquire(3000)).thenReturn(true);
         when(aiSummaryClient.generate(any()))
                 .thenThrow(new TooManyRequestsException(AiChatErrorCode.AI_QUOTA_EXHAUSTED, RateLimitInfo.empty()));
 
@@ -129,7 +112,6 @@ class SummaryGenerationWorkerTest {
 
     @Test
     void 비일시_4xx면_재시도_불가_실패로_기록한다() throws Exception {
-        when(rateLimiter.tryAcquire(3000)).thenReturn(true);
         when(aiSummaryClient.generate(any())).thenThrow(new NonTransientAiException("400 bad"));
 
         worker.processOne();
@@ -140,7 +122,6 @@ class SummaryGenerationWorkerTest {
 
     @Test
     void 일시_5xx면_재시도_가능_실패로_기록한다() throws Exception {
-        when(rateLimiter.tryAcquire(3000)).thenReturn(true);
         when(aiSummaryClient.generate(any())).thenThrow(new TransientAiException("503 down"));
 
         worker.processOne();

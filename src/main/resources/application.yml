@@ -111,15 +111,6 @@ openai-gate:
       requests-per-minute: 9000
       tokens-per-minute: 180000
 
-# 감상문 생성 OpenAI 호출 예산(계정 한도의 안전여유 적용). 외부 API 설정.
-# 계정 한도: RPM 10,000 / TPM 200,000(병목). 90% 안전여유 적용.
-summary:
-  rate-limit:
-    requests-per-minute: 9000
-    tokens-per-minute: 180000
-    max-request-tokens: 120000        # 양동이 용량. 모델 가용 한도 수준. 초과 요청은 워커가 fail-fast.
-    acquire-max-wait-seconds: 10      # lease(300s)보다 충분히 짧게
-
 summary-job:
   pool-size: 12
   dispatch-interval-ms: 2000
@@ -127,4 +118,5 @@ summary-job:
   lease-seconds: 300        # 5분 lease
   max-attempts: 5
   base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
-  reserved-output-tokens: 1024  # 토큰 추정 시 호출당 예약 출력 토큰
+  max-request-tokens: 120000       # 단일 요청 추정 토큰 상한. 초과 세션은 호출 없이 fail-fast.
+  estimated-output-tokens: 1024    # 토큰 추정 시 호출당 출력 추정값
