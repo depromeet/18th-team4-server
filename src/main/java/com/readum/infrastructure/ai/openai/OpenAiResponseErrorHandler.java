@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -41,6 +42,9 @@ public class OpenAiResponseErrorHandler implements ResponseErrorHandler {
     private static final Pattern GO_DURATION_TOKEN = Pattern.compile("(\\d+(?:\\.\\d+)?)(ms|s|m|h)");
 
     private final ObjectMapper objectMapper;
+    private final OpenAiRequestGate requestGate;
+    private final String chatModel;
+    private final int quotaCooldownSeconds;
 
     @Override
     public boolean hasError(ClientHttpResponse response) throws IOException {
@@ -74,6 +78,12 @@ public class OpenAiResponseErrorHandler implements ResponseErrorHandler {
 
         if (isQuotaExhausted) {
             log.error("OpenAI quota 소진 (insufficient_quota) - body={}", body);
+            // 계정 전역 문제 — 감지되는 이 단일 지점에서 게이트 쿨다운을 연다.
+            // 세 경로(채팅·제목·감상문)가 다음 tryAcquire 에서 이 쿨다운을 존중한다.
+            Duration cooldown = (rateLimitInfo != null && rateLimitInfo.retryAfter() != null)
+                    ? rateLimitInfo.retryAfter()
+                    : Duration.ofSeconds(quotaCooldownSeconds);
+            requestGate.enterQuotaCooldown(chatModel, cooldown);
             return new TooManyRequestsException(AiChatErrorCode.AI_QUOTA_EXHAUSTED, rateLimitInfo);
         }
         log.warn("OpenAI Rate limit burst - body={}", body);
