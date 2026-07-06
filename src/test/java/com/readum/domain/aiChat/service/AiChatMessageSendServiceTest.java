@@ -258,10 +258,10 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 스트림_에러로_실측이_없으면_추정_출력으로_보정한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문"); // 2자 → 입력 추정 1
+    void 스트림_에러면_예약을_전액_환불한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
         givenLoadHistory(7L, List.of(), 100L);
-        // "부분응답"(4자) 을 흘린 뒤 에러 — completion 미수신
+        // "부분응답" 을 흘린 뒤 에러 — completion 미수신
         given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(
                 Flux.concat(Flux.just(new AiChatChunk.Token("부분응답")),
                         Flux.error(new RuntimeException("boom")))
@@ -269,7 +269,24 @@ class AiChatMessageSendServiceTest {
 
         service.execute(command).blockLast(); // onErrorResume 이 error 이벤트로 변환
 
-        // 출력 실측 없음 → 스트리밍 문자수(4) 추정 ceil(4/2.5)=2. 계상 = 입력 1 + 출력 2 = 3
+        // 에러는 사용자 과실이 아니므로 예약 전액 환불 → actualTotal=0 (예약분 그대로 차감)
+        verify(chatTokenBudget, timeout(1000)).settle(eq(USER_ID), any(), eq(0));
+    }
+
+    @Test
+    void 클라이언트_취소로_실측이_없으면_스트리밍_문자수로_추정_보정한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문"); // 2자 → 입력 추정 1
+        givenLoadHistory(7L, List.of(), 100L);
+        Sinks.Many<AiChatChunk> sink = Sinks.many().unicast().onBackpressureBuffer();
+        given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(sink.asFlux());
+
+        StepVerifier.create(service.execute(command))
+                .then(() -> sink.tryEmitNext(new AiChatChunk.Token("부분응답"))) // 4자
+                .assertNext(event -> assertThat(event).isInstanceOf(MessageStreamEvent.Token.class))
+                .thenCancel()
+                .verify();
+
+        // 취소 → 요청은 이미 소비됨. completion 없음 → 스트리밍 4자 추정 ceil(4/2.5)=2. 계상 = 입력 1 + 출력 2 = 3
         verify(chatTokenBudget, timeout(1000)).settle(eq(USER_ID), any(), eq(3));
     }
 

@@ -26,6 +26,7 @@ import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
@@ -117,29 +118,40 @@ public class AiChatMessageSendService {
                 .doOnCancel(() -> persistOnClientCancel(sessionId, contentBuffer.toString(), completionRef.get()))
                 .concatWith(Mono.defer(() -> persistAssistantMessageAndEmitDone(sessionId, contentBuffer.toString(), completionRef.get())))
                 .onErrorResume(error -> persistFailedAssistantMessageAndEmitError(sessionId, contentBuffer.toString(), completionRef.get(), error))
-                // 예산 보정 한 지점 — 정상/에러/취소 모두 여기로 모인다. 블로킹 없이 별도 스레드에서.
+                // 예산 보정 한 지점 — 정상 완료·클라이언트 취소·에러가 모두 여기로 모인다. 블로킹 없이 별도 스레드에서.
                 .doFinally(signalType -> Mono.fromRunnable(() ->
                                 settleTokenBudget(userId, reservation, completionRef.get(),
-                                        estimatedMessageInputTokens, contentBuffer.length()))
+                                        estimatedMessageInputTokens, contentBuffer.length(), signalType))
                         .subscribeOn(Schedulers.boundedElastic())
                         .subscribe());
     }
 
     /**
-     * 스트림 종료 시 예산 보정 — 사용자 예산은 메시지 입력 + 출력만 계상한다.
-     * 출력은 실측 usage 가 있으면 실측 completion.outputTokens, 없으면(에러·취소로 미수신)
-     * 그때까지 스트리밍된 문자 수 기반 추정으로 대체한다. 입력은 예약 때의 메시지 추정 그대로.
+     * 스트림 종료 시 예산 보정 — 사용자 예산은 메시지 입력 + 출력만 계상한다. 종료 형태로 나뉜다:
+     * - 정상 완료(실측 usage 수신): 메시지 입력 + 실측 출력(completion.outputTokens) 계상.
+     * - 클라이언트 취소(탭 닫힘·연결 끊김): 요청은 이미 OpenAI 로 가 서버가 생성분을 소비했으므로,
+     *   실측을 못 받았어도 그때까지 스트리밍된 문자 수로 출력을 추정해 계상한다.
+     * - 에러(OpenAI·네트워크 실패): 사용자 과실이 아니므로 예약을 전액 환불한다(입력·출력 모두 차감 취소).
      * reservation 이 null 이면 Redis 장애로 우회(Bypassed)한 호출 — 보정할 예약이 없다.
+     * (onErrorResume 이 에러를 정상 신호로 바꾸므로, 취소만 SignalType.CANCEL 이고 에러는 completion 이 없는 ON_COMPLETE 로 온다.)
      */
     private void settleTokenBudget(Long userId, ChatTokenBudget.Result.Granted reservation,
-            AiChatChunk.Completion completion, int estimatedMessageInputTokens, int streamedCharCount) {
+            AiChatChunk.Completion completion, int estimatedMessageInputTokens, int streamedCharCount,
+            SignalType signalType) {
         if (reservation == null) {
             return;
         }
-        int outputTokens = (completion != null && completion.outputTokens() != null)
-                ? completion.outputTokens()
-                : chatCallTokenEstimator.estimateTokensFromChars(streamedCharCount);
-        chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + outputTokens);
+        if (completion != null && completion.outputTokens() != null) {
+            // 정상 수신(완료, 또는 완료 후 취소) → 실측 출력
+            chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + completion.outputTokens());
+        } else if (signalType == SignalType.CANCEL) {
+            // 클라이언트 취소로 실측 미수신 → 스트리밍 문자 수로 출력 추정
+            int estimatedOutputTokens = chatCallTokenEstimator.estimateTokensFromChars(streamedCharCount);
+            chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + estimatedOutputTokens);
+        } else {
+            // 에러로 실측 미수신 → 사용자 과실이 아니므로 예약 전액 환불(actualTotal=0 → 예약분 그대로 차감)
+            chatTokenBudget.settle(userId, reservation, 0);
+        }
     }
 
     private TooManyRequestsException tokenBudgetExceeded(Duration retryAfter) {
