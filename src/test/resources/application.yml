@@ -61,6 +61,7 @@ openai-gate:
     gpt-4o-mini:
       requests-per-minute: 9000
       tokens-per-minute: 180000
+  quota-cooldown-seconds: 300
 
 summary-job:
   pool-size: 3
