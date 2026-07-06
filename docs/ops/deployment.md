@@ -62,9 +62,10 @@ Internet ── nginx(:443, TLS 종료)
 
 | 이름 | 내용 |
 |---|---|
-| `DEPLOY_HOST` | 서버 주소 (탄력적 IP 또는 도메인) |
 | `DEPLOY_SSH_KEY` | 배포 전용 SSH 개인키 — 공개키를 서버 ubuntu 계정 `~/.ssh/authorized_keys` 에 등록 |
 | `ENV_FILE` | `/opt/readum/.env` 전문. **이 Secret 이 환경변수의 원본** — 값을 바꾸려면 Secret 수정 후 재배포. Secrets 는 재열람이 안 되므로 팀 비밀 저장소에 사본 유지 |
+
+서버 주소는 비밀이 아니므로(DNS 에 공개) Secret 이 아니라 `deploy.yml` 의 `env.DEPLOY_HOST` 에 직접 둔다 — 탄력적 IP 기준이라 인스턴스 stop/start 에도 바뀌지 않으며, 바뀌는 일이 생기면 워크플로우 한 줄 수정으로 반영한다.
 
 ## 배포 수칙
 

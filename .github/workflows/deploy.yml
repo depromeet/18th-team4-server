@@ -16,6 +16,11 @@ concurrency:
   group: deploy-dev-server
   cancel-in-progress: false
 
+env:
+  # 서버 주소는 비밀이 아니라(DNS 에 공개) 워크플로우에 직접 둔다. 탄력적 IP 기준.
+  # DNS(api.readum.kr) A 레코드가 이 IP 로 정리된 뒤에는 도메인으로 바꿔도 된다.
+  DEPLOY_HOST: 3.37.163.153
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -45,23 +50,23 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: 서버 .env 재작성 (원본 = ENV_FILE secret)
         run: |
           printf '%s\n' "${{ secrets.ENV_FILE }}" > env.deploy
-          scp -i ~/.ssh/deploy_key env.deploy "ubuntu@${{ secrets.DEPLOY_HOST }}:/opt/readum/.env.tmp"
-          ssh -i ~/.ssh/deploy_key "ubuntu@${{ secrets.DEPLOY_HOST }}" \
+          scp -i ~/.ssh/deploy_key env.deploy "ubuntu@${DEPLOY_HOST}:/opt/readum/.env.tmp"
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
             'chmod 600 /opt/readum/.env.tmp && mv /opt/readum/.env.tmp /opt/readum/.env'
 
       - name: jar·배포 스크립트 업로드
         run: |
           scp -i ~/.ssh/deploy_key "readum-${SHORT_SHA}.jar" \
-            "ubuntu@${{ secrets.DEPLOY_HOST }}:/opt/readum/releases/"
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/releases/"
           scp -i ~/.ssh/deploy_key infra/scripts/deploy.sh \
-            "ubuntu@${{ secrets.DEPLOY_HOST }}:/opt/readum/bin/deploy.sh"
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/bin/deploy.sh"
 
       - name: blue/green 배포 실행
         run: |
-          ssh -i ~/.ssh/deploy_key "ubuntu@${{ secrets.DEPLOY_HOST }}" \
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
             "/opt/readum/bin/deploy.sh deploy /opt/readum/releases/readum-${SHORT_SHA}.jar"
