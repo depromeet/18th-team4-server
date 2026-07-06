@@ -8,27 +8,26 @@ import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.domain.summary.exception.SummaryErrorCode;
-import com.readum.domain.summary.out.SummaryCallBreaker;
+import com.readum.domain.summary.out.AiQuotaCooldown;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
  * 동기 감상문 생성 워커. 트랜잭션 없이, 각 트랜잭션 단계(SummaryJobLifecycleService)를 순서대로 호출하고
- * 그 사이(트랜잭션 밖)에서 외부 AI(OpenAI)를 부른다. 분당 예산은 전역 게이트(OpenAiRequestGate)가
- * AiSummaryClientImpl 안에서 검사하므로, 포화 시 burst 429 로 던져져 아래 브레이커+무벌점 반납 경로를 탄다.
- * 계정 전역 문제(quota)면 브레이커로 전 워커를 잠시 멈춘다.
+ * 그 사이(트랜잭션 밖)에서 외부 AI(OpenAI)를 부른다. 분당 예산·quota 쿨다운은 모두 전역 게이트가
+ * AiSummaryClientImpl 안에서 검사한다 — 포화 시 burst 429, quota 소진 시 쿨다운(Redis)으로 던져진다.
+ * 워커는 쿨다운 중엔 job 을 선점하지 않아(헛선점·attempt 소진 방지), 계정 전역 백오프가 전 경로 공통이다.
  *
  * 실패 분류:
  * - 세션 과대(추정 토큰 > maxRequestTokens) → 호출 전 즉시 FAILED (fail-fast)
- * - burst 429(게이트 포화) → 브레이커 잠깐 차단 + 무벌점 반납(우리 과속이지 작업 잘못 아님)
- * - quota 429 → 브레이커 300초 차단 + 재시도(상한 도달 시 FAILED)
+ * - burst 429(게이트 분당 예산 포화) → 무벌점 반납(우리 과속이지 작업 잘못 아님)
+ * - quota 429(게이트 쿨다운) → 재시도 가능 실패로 기록(상한 도달 시 FAILED). 쿨다운은 게이트가 관리
  * - 5xx → 재시도 / 4xx → 즉시 FAILED
  */
 @Slf4j
@@ -36,14 +35,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SummaryGenerationWorker {
 
-    /** quota 소진은 금방 안 풀리니 전 워커를 5분 멈춰 헛호출을 줄인다. */
-    private static final Duration QUOTA_BLOCK = Duration.ofSeconds(300);
-    /** burst 429 에 Retry-After 가 없을 때 적용할 기본 차단 시간. */
-    private static final Duration BURST_BLOCK_DEFAULT = Duration.ofSeconds(5);
-
     private final SummaryJobLifecycleService lifecycleService;
     private final AiSummaryClient aiSummaryClient;
-    private final SummaryCallBreaker breaker;
+    private final AiQuotaCooldown quotaCooldown;
     private final SummaryTokenEstimator tokenEstimator;
     private final SummaryJobProperties properties;
 
@@ -56,8 +50,8 @@ public class SummaryGenerationWorker {
 
     /** SYNC 작업 하나를 시도. 처리했으면 true, 없거나 차단 중이면 false. */
     public boolean processOne() {
-        if (breaker.isBlocked()) {
-            // 계정 전역 차단 중 — 이번 사이클은 아무것도 하지 않는다. 다음 dispatch 때 재확인.
+        if (quotaCooldown.isCoolingDown()) {
+            // 계정 quota 쿨다운 중 — job 을 선점하지 않는다(헛선점·attempt 소진 방지). 다음 dispatch 때 재확인.
             return false;
         }
         String owner = UUID.randomUUID().toString();
@@ -117,23 +111,13 @@ public class SummaryGenerationWorker {
 
     private void handleRateLimited(Long jobId, String owner, TooManyRequestsException e) {
         if (e.getErrorCode() == AiChatErrorCode.AI_QUOTA_EXHAUSTED) {
-            // quota 소진 — 계정 전역 문제. 전 워커 차단 후 재시도(상한 도달 시 FAILED).
-            breaker.blockFor(QUOTA_BLOCK);
+            // 계정 quota 소진 — 쿨다운은 게이트가 이미 열었다(전 경로 공통). 재시도 가능 실패로 기록.
             lifecycleService.recordFailure(jobId, owner, true,
                     e.getErrorCode().name(), e.getMessage(), retryAtFrom(e.getRateLimitInfo()));
             return;
         }
-        // burst — 우리 과속. 전 워커 잠깐 정지 + 무벌점 반납(가짜 실패 방지).
-        breaker.blockFor(burstBlock(e.getRateLimitInfo()));
+        // burst — 게이트 분당 예산 포화(backpressure). 무벌점 반납(가짜 실패 방지).
         lifecycleService.releaseWithoutPenalty(jobId, owner);
-    }
-
-    /** burst 차단 시간: Retry-After 가 있으면 그만큼, 없으면 기본값. */
-    private Duration burstBlock(RateLimitInfo info) {
-        if (info != null && info.retryAfter() != null) {
-            return info.retryAfter();
-        }
-        return BURST_BLOCK_DEFAULT;
     }
 
     /** quota 재시도 시점: Retry-After 가 실려 있으면 그 시각(없으면 서비스의 지수 백오프). */
