@@ -10,7 +10,7 @@ import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
+import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -44,6 +44,7 @@ public class AiSummaryClientImpl implements AiSummaryClient {
     private final OpenAiRequestGate requestGate;
     // domain 의 config record 를 infrastructure 가 읽는 것은 허용 방향(infrastructure → domain).
     private final SummaryJobProperties summaryJobProperties;
+    private final TokenCounter tokenCounter;
 
     @Value("${spring.ai.openai.chat.options.model}")
     private String chatModel;
@@ -53,13 +54,15 @@ public class AiSummaryClientImpl implements AiSummaryClient {
             AiPromptAuditLogger auditLogger,
             SummaryPromptAssembler promptAssembler,
             OpenAiRequestGate requestGate,
-            SummaryJobProperties summaryJobProperties
+            SummaryJobProperties summaryJobProperties,
+            TokenCounter tokenCounter
     ) {
         this.chatClient = chatClient;
         this.auditLogger = auditLogger;
         this.promptAssembler = promptAssembler;
         this.requestGate = requestGate;
         this.summaryJobProperties = summaryJobProperties;
+        this.tokenCounter = tokenCounter;
         this.summaryResponseFormat = ResponseFormat.builder()
                 .type(ResponseFormat.Type.JSON_SCHEMA)
                 .jsonSchema(ResponseFormat.JsonSchema.builder()
@@ -77,8 +80,7 @@ public class AiSummaryClientImpl implements AiSummaryClient {
 
         // 전역 게이트: 포화면 burst 429 로 던진다 — 워커의 handleRateLimited 가
         // "브레이커 잠깐 차단(Retry-After 만큼) + 무벌점 반납" 으로 처리한다 (기존 경로 재사용).
-        int estimatedTokens = OpenAiTokenEstimate.fromChars(
-                (long) promptAssembler.systemPrompt().length() + chatHistory.length())
+        int estimatedTokens = tokenCounter.count(promptAssembler.systemPrompt()) + tokenCounter.count(chatHistory)
                 + summaryJobProperties.estimatedOutputTokens();
         OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
         if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {

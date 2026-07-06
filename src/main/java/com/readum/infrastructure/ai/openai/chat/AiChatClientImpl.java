@@ -13,7 +13,7 @@ import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
+import com.readum.domain.aiChat.out.TokenCounter;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +50,7 @@ public class AiChatClientImpl implements AiChatClient {
     private final AiPromptAuditLogger auditLogger;
     private final OpenAiRequestGate requestGate;
     private final AiChatProperties aiChatProperties;
+    private final TokenCounter tokenCounter;
 
     @Value("${spring.ai.openai.chat.options.model}")
     private String chatModel;
@@ -73,11 +74,11 @@ public class AiChatClientImpl implements AiChatClient {
         // 전역 게이트: 조립 시점(동기) 검사 — 여기서 던지면 SSE 시작 전에 GlobalExceptionHandler 가 429 로 변환한다.
         // Flux 체인 안으로 옮기면 mid-stream 에러가 되므로 반드시 이 위치를 유지할 것.
         // 계상은 실제 전송량 전체(시스템 프롬프트 + 이력 + 예약 출력) — 사용자 예산과 달리 오버헤드 포함.
-        long payloadChars = systemPrompt.length();
+        int payloadTokens = tokenCounter.count(systemPrompt);
         for (HistoryMessage historyMessage : command.history()) {
-            payloadChars += historyMessage.content().length();
+            payloadTokens += tokenCounter.count(historyMessage.content());
         }
-        int estimatedTokens = OpenAiTokenEstimate.fromChars(payloadChars)
+        int estimatedTokens = payloadTokens
                 + aiChatProperties.tokenBudget().estimatedOutputTokens();
         OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
         if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
