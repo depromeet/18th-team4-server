@@ -1,9 +1,12 @@
 package com.readum.infrastructure.ai.openai;
 
 import com.readum.domain.aiChat.out.InputModerationClient;
-import com.readum.infrastructure.ai.openai.advisor.ModerationOutputAdvisor;
-import com.readum.infrastructure.ai.openai.advisor.PromptInjectionPatternAdvisor;
+import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
+import com.readum.infrastructure.ai.openai.guardrail.ModerationOutputAdvisor;
+import com.readum.infrastructure.ai.openai.guardrail.PromptInjectionPatternAdvisor;
 import com.readum.infrastructure.ai.openai.moderation.OpenAiInputModerationClientImpl;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiGateProperties;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SafeGuardAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
@@ -99,7 +102,13 @@ public class OpenAiConfig {
     //
     // 이 핸들러를 통해 OpenAI 응답의 status / 헤더 / body 를 typed 하게 보고 도메인 예외로 분류한다.
     @Bean
-    public ResponseErrorHandler openAiResponseErrorHandler(ObjectMapper objectMapper) {
-        return new OpenAiResponseErrorHandler(objectMapper);
+    public ResponseErrorHandler openAiResponseErrorHandler(
+            ObjectMapper objectMapper,
+            OpenAiRequestGate requestGate,
+            OpenAiGateProperties gateProperties,
+            @Value("${spring.ai.openai.chat.options.model}") String chatModel
+    ) {
+        return new OpenAiResponseErrorHandler(objectMapper, requestGate, chatModel,
+                gateProperties.quotaCooldownSeconds());
     }
 }

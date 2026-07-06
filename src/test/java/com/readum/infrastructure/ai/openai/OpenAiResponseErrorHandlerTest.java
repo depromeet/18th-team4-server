@@ -3,6 +3,7 @@ package com.readum.infrastructure.ai.openai;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,17 +23,26 @@ import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 class OpenAiResponseErrorHandlerTest {
 
     private static final URI ANY_URI = URI.create("https://api.openai.com/v1/chat/completions");
+    private static final String CHAT_MODEL = "gpt-4o-mini";
 
     private OpenAiResponseErrorHandler handler;
+    private OpenAiRequestGate requestGate;
 
     @BeforeEach
     void setUp() {
         ObjectMapper objectMapper = JsonMapper.builder().build();
-        handler = new OpenAiResponseErrorHandler(objectMapper);
+        requestGate = mock(OpenAiRequestGate.class);
+        handler = new OpenAiResponseErrorHandler(objectMapper, requestGate, CHAT_MODEL, 300);
     }
 
     @Test
@@ -53,6 +63,9 @@ class OpenAiResponseErrorHandlerTest {
                 .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
                 .extracting(TooManyRequestsException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.AI_QUOTA_EXHAUSTED);
+
+        // quota 소진 감지 시 게이트 쿨다운을 연다 (세 경로 공통 백오프의 단일 진입점).
+        verify(requestGate).enterQuotaCooldown(eq(CHAT_MODEL), any(Duration.class));
     }
 
     @Test
@@ -81,6 +94,9 @@ class OpenAiResponseErrorHandlerTest {
                     assertThat(info.limitTokens()).isNull();
                     assertThat(info.remainingTokens()).isNull();
                 });
+
+        // burst(분당 한도)는 계정 전역 문제가 아니므로 쿨다운을 열지 않는다.
+        verify(requestGate, never()).enterQuotaCooldown(anyString(), any());
     }
 
     @Test

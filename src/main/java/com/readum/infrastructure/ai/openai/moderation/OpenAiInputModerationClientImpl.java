@@ -3,7 +3,7 @@ package com.readum.infrastructure.ai.openai.moderation;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.InputModerationClient;
-import com.readum.infrastructure.ai.openai.GuardrailProperties;
+import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.moderation.Categories;

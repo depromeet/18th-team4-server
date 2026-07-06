@@ -1,4 +1,4 @@
-package com.readum.infrastructure.ai.openai;
+package com.readum.infrastructure.ai.openai.summary;
 
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
@@ -8,6 +8,7 @@ import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
+import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiTokenEstimate;
 import com.readum.model.aiChat.entity.AiChatMessage;
@@ -81,8 +82,11 @@ public class AiSummaryClientImpl implements AiSummaryClient {
                 + summaryJobProperties.estimatedOutputTokens();
         OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
         if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
+            AiChatErrorCode code = rejected.reason() == OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN
+                    ? AiChatErrorCode.AI_QUOTA_EXHAUSTED
+                    : AiChatErrorCode.AI_RATE_LIMIT_BURST;
             throw new TooManyRequestsException(
-                    AiChatErrorCode.AI_RATE_LIMIT_BURST,
+                    code,
                     new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
         }
 

@@ -110,6 +110,7 @@ openai-gate:
     gpt-4o-mini:
       requests-per-minute: 9000
       tokens-per-minute: 180000
+  quota-cooldown-seconds: 300   # 계정 quota 소진 감지 시 전 경로를 막을 기본 시간 (Retry-After 없을 때)
 
 summary-job:
   pool-size: 12

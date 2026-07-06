@@ -1,4 +1,4 @@
-package com.readum.infrastructure.ai.openai;
+package com.readum.infrastructure.ai.openai.guardrail;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;

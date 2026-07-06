@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -19,6 +20,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,7 +40,7 @@ class OpenAiRequestGateTest {
     void setUp() {
         lenient().when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
         gate = new OpenAiRequestGate(stringRedisTemplate,
-                new OpenAiGateProperties(Map.of(MODEL, new OpenAiGateProperties.ModelLimit(9000, 180000L))));
+                new OpenAiGateProperties(Map.of(MODEL, new OpenAiGateProperties.ModelLimit(9000, 180000L)), 300));
     }
 
     @Test
@@ -93,5 +95,44 @@ class OpenAiRequestGateTest {
     @Test
     void 한도_미설정_모델은_허용한다() {
         assertThat(gate.tryAcquire("unknown-model", 100)).isInstanceOf(OpenAiRequestGate.Decision.Permitted.class);
+    }
+
+    @Test
+    void 예산_초과_거절의_사유는_RATE_BUDGET() {
+        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(10L);
+        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(180001L);
+
+        OpenAiRequestGate.Decision decision = gate.tryAcquire(MODEL, 5000);
+
+        assertThat(decision).isInstanceOf(OpenAiRequestGate.Decision.Rejected.class);
+        assertThat(((OpenAiRequestGate.Decision.Rejected) decision).reason())
+                .isEqualTo(OpenAiRequestGate.RejectReason.RATE_BUDGET);
+    }
+
+    @Test
+    void quota_쿨다운_중이면_카운터를_세지_않고_QUOTA_COOLDOWN_으로_거절한다() {
+        given(stringRedisTemplate.getExpire(contains(":quota-cooldown"), eq(TimeUnit.SECONDS))).willReturn(120L);
+
+        OpenAiRequestGate.Decision decision = gate.tryAcquire(MODEL, 5000);
+
+        assertThat(decision).isInstanceOf(OpenAiRequestGate.Decision.Rejected.class);
+        OpenAiRequestGate.Decision.Rejected rejected = (OpenAiRequestGate.Decision.Rejected) decision;
+        assertThat(rejected.reason()).isEqualTo(OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN);
+        assertThat(rejected.retryAfter()).isEqualTo(Duration.ofSeconds(120));
+        verify(valueOperations, never()).increment(contains(":rpm:"), anyLong());
+    }
+
+    @Test
+    void enterQuotaCooldown_은_TTL_로_키를_심는다() {
+        gate.enterQuotaCooldown(MODEL, Duration.ofSeconds(300));
+
+        verify(valueOperations).set(contains(":quota-cooldown"), eq("1"), eq(Duration.ofSeconds(300)));
+    }
+
+    @Test
+    void isInQuotaCooldown_은_키_존재를_반영한다() {
+        given(stringRedisTemplate.hasKey(contains(":quota-cooldown"))).willReturn(true);
+
+        assertThat(gate.isInQuotaCooldown(MODEL)).isTrue();
     }
 }

@@ -16,7 +16,8 @@ import java.util.Map;
 @Validated
 @ConfigurationProperties(prefix = "openai-gate")
 public record OpenAiGateProperties(
-        @NotEmpty Map<String, @Valid ModelLimit> models
+        @NotEmpty Map<String, @Valid ModelLimit> models,
+        @Positive int quotaCooldownSeconds
 ) {
 
     public record ModelLimit(
