@@ -1,7 +1,7 @@
 # 개발 서버 배포 파이프라인.
 # 빌드(테스트 포함)는 GitHub Actions 가 하고, 서버는 jar 실행만 한다 — 서버(t3 급)에서
 # Gradle 을 돌리면 메모리가 부족해 blue/green 의 "두 프로세스 동시 상주"가 성립하지 않는다.
-# 서버 쪽 동작(deploy.sh 의 전환 사이클)과 필요한 Secrets 목록은 docs/ops/deployment.md 참조.
+# 서버 쪽 동작(deploy.sh 의 전환 사이클)과 필요한 Secrets 목록은 docs/ops/infrastructure.md 참조.
 
 name: deploy
 

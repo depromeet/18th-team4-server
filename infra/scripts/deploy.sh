@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # readum blue/green 배포 스크립트. 원본은 repo 의 infra/scripts/deploy.sh 이고,
-# 서버의 /opt/readum/bin/deploy.sh 로 동기화해 사용한다 (전체 구조는 docs/ops/deployment.md).
+# 서버의 /opt/readum/bin/deploy.sh 로 동기화해 사용한다 (전체 구조는 docs/ops/infrastructure.md).
 #
 # 사용법:
 #   deploy.sh deploy <jar 경로>   # 비활성 색에 jar 를 올리고 기동 → readiness 통과 → 트래픽 전환 → 구 프로세스 종료
