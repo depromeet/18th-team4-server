@@ -1,7 +1,7 @@
 package com.readum.domain.user.userbook.dto;
 
 import com.readum.model.book.entity.Book;
-import com.readum.model.user.entity.UserBook;
+import com.readum.model.userBook.entity.UserBook;
 
 import java.time.LocalDateTime;
 

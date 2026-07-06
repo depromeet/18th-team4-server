@@ -1,7 +1,7 @@
 package com.readum.domain.user.userbook.service;
 
-import com.readum.model.user.entity.UserBook;
-import com.readum.model.user.repository.UserBookRepository;
+import com.readum.model.userBook.entity.UserBook;
+import com.readum.model.userBook.repository.UserBookRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;

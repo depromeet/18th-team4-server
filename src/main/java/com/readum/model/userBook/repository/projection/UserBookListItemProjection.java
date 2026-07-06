@@ -1,4 +1,4 @@
-package com.readum.model.user.repository.projection;
+package com.readum.model.userBook.repository.projection;
 
 public record UserBookListItemProjection(
         Long userBookId,

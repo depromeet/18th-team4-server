@@ -1,4 +1,4 @@
-package com.readum.model.user.entity;
+package com.readum.model.userBook.entity;
 
 import com.readum.support.TestOnly;
 

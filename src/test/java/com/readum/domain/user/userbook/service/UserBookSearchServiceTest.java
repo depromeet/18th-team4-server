@@ -1,8 +1,8 @@
 package com.readum.domain.user.userbook.service;
 
 import com.readum.domain.user.userbook.dto.UserBookSearchResult;
-import com.readum.model.user.repository.UserBookRepository;
-import com.readum.model.user.repository.projection.UserBookListItemProjection;
+import com.readum.model.userBook.repository.UserBookRepository;
+import com.readum.model.userBook.repository.projection.UserBookListItemProjection;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;

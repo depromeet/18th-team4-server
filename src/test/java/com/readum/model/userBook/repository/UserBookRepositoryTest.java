@@ -1,12 +1,12 @@
-package com.readum.model.user.repository;
+package com.readum.model.userBook.repository;
 
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.book.entity.Book;
 import com.readum.model.book.repository.BookRepository;
-import com.readum.model.user.entity.UserBook;
-import com.readum.model.user.entity.UserBookFixture;
-import com.readum.model.user.repository.projection.UserBookListItemProjection;
+import com.readum.model.userBook.entity.UserBook;
+import com.readum.model.userBook.entity.UserBookFixture;
+import com.readum.model.userBook.repository.projection.UserBookListItemProjection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

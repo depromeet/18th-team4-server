@@ -1,6 +1,6 @@
 package com.readum.domain.user.userbook.dto;
 
-import com.readum.model.user.repository.projection.UserBookListItemProjection;
+import com.readum.model.userBook.repository.projection.UserBookListItemProjection;
 
 public record UserBookSearchItemResult(
         Long userBookId,

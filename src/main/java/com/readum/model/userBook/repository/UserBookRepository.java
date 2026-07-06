@@ -1,7 +1,7 @@
-package com.readum.model.user.repository;
+package com.readum.model.userBook.repository;
 
-import com.readum.model.user.entity.UserBook;
-import com.readum.model.user.repository.projection.UserBookListItemProjection;
+import com.readum.model.userBook.entity.UserBook;
+import com.readum.model.userBook.repository.projection.UserBookListItemProjection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -21,7 +21,7 @@ public interface UserBookRepository extends JpaRepository<UserBook, Long> {
     List<UserBook> findByUserId(Long userId);
 
     @Query("""
-            select new com.readum.model.user.repository.projection.UserBookListItemProjection(
+            select new com.readum.model.userBook.repository.projection.UserBookListItemProjection(
                        userBook.id
                      , book.id
                      , book.title

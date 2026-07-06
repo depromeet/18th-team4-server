@@ -1,4 +1,4 @@
-package com.readum.model.user.repository;
+package com.readum.model.userBook.repository;
 
 import com.readum.domain.book.dto.BookResult;
 import com.readum.domain.book.out.BookLookupClient;
@@ -8,6 +8,7 @@ import com.readum.domain.user.userbook.dto.UserBookCreateResult;
 import com.readum.domain.user.userbook.service.UserBookCreateService;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.user.entity.User;
+import com.readum.model.user.repository.UserRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
