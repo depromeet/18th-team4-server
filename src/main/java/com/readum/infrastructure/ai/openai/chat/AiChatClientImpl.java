@@ -139,7 +139,7 @@ public class AiChatClientImpl implements AiChatClient {
 
     /**
      * 시스템 프롬프트를 조립한다: [base + 책 정보] + [누적 요약]. 프롬프트 캐시를 고려한 배치(고정 → 저변동):
-     * base·책 정보는 세션 내 고정, 누적 요약은 요약 갱신 때만 변동한다. 매 턴 변동하는 원문 꼬리는 messages 로 따로 실린다.
+     * base·책 정보는 세션 내 고정, 누적 요약은 요약 갱신 때만 변동한다. 매 턴 변동하는 최근 원문 대화는 messages 로 따로 실린다.
      */
     private String buildSystemPrompt(AiChatStreamCommand.BookContext ctx, String contextSummary) {
         StringBuilder sb = new StringBuilder(baseSystemPrompt);

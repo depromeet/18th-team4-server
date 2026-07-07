@@ -37,7 +37,7 @@ import static org.mockito.BDDMockito.given;
  * LLM(AiContextSummaryClient)만 스텁한다 — OpenAI 호출은 위험 지점이 아니라 외부 의존이며, 실 키·과금 없이 파이프라인을 돌리기 위함.
  *
  * <p>H2 한계: SKIP LOCKED 의 "동시 skip" 은 H2 에서 성립하지 않을 수 있어(직렬화될 수 있음),
- * 이 테스트가 검증하는 것은 MySQL 성능이 아니라 <b>정합성 불변식</b>(세션당 요약 1개·경계 단조·중복 처리 없음)이다.
+ * 이 테스트가 검증하는 것은 MySQL 성능이 아니라 <b>정합성 불변식</b>(세션당 요약 1개·요약 반영 지점 단조·중복 처리 없음)이다.
  * MySQL 전용 SKIP LOCKED 동작은 프로덕션에서 검증된 summary_job 큐 패턴을 그대로 복제했다.
  */
 @SpringBootTest
@@ -74,7 +74,7 @@ class ContextSummaryConcurrencyLoadTest {
     }
 
     @Test
-    void 동시_세션_5개를_임계값_초과시키고_동시_워커로_요약하면_세션당_정확히_한_번씩_경계_정합하게_생성된다() throws Exception {
+    void 동시_세션_5개를_임계값_초과시키고_동시_워커로_요약하면_세션당_정확히_한_번씩_요약_반영_지점_정합하게_생성된다() throws Exception {
         List<Long> sessionIds = new ArrayList<>();
         for (int i = 0; i < SESSION_COUNT; i++) {
             sessionIds.add(SESSION_ID_BASE + i);
@@ -88,7 +88,7 @@ class ContextSummaryConcurrencyLoadTest {
         // 2) 동시 트리거 적재 — 세션당 3스레드가 동시에 enqueue 를 때려 멱등성(활성 job 1개)을 검증한다.
         runConcurrently(SESSION_COUNT * 3, index -> {
             Long sessionId = sessionIds.get(index % SESSION_COUNT);
-            enqueueService.enqueueIfTailExceedsThreshold(sessionId);
+            enqueueService.enqueueIfRecentMessagesExceedThreshold(sessionId);
         });
         long enqueuedJobs = jobRepository.findAll().stream()
                 .filter(job -> sessionIds.contains(job.getSessionId()))
@@ -114,23 +114,23 @@ class ContextSummaryConcurrencyLoadTest {
 
         // 5) 세션별 불변식 검증.
         for (Long sessionId : sessionIds) {
-            List<AiChatMessage> messages = messageRepository.findCompletedAfterIdAsc(sessionId, 0L);
+            List<AiChatMessage> messages = messageRepository.findCompletedMessagesAfter(sessionId, 0L);
             AiChatContextSummary summary = summaryRepository.findBySessionId(sessionId).orElseThrow();
 
             assertThat(summary.getVersion()).as("첫 라운드 → version 1").isEqualTo(1);
-            assertThat(summary.getSummarizedUntilMessageId()).as("경계는 진전(>0)").isPositive();
+            assertThat(summary.getSummarizedUpToMessageId()).as("요약 반영 지점은 진전(>0)").isPositive();
 
-            AiChatMessage boundaryMessage = messages.stream()
-                    .filter(m -> m.getId().equals(summary.getSummarizedUntilMessageId()))
+            AiChatMessage lastSummarizedMessage = messages.stream()
+                    .filter(m -> m.getId().equals(summary.getSummarizedUpToMessageId()))
                     .findFirst().orElseThrow();
-            assertThat(boundaryMessage.getRole())
-                    .as("경계는 항상 완결된 턴의 끝(ASSISTANT)")
+            assertThat(lastSummarizedMessage.getRole())
+                    .as("요약 반영 지점은 항상 완결된 턴의 끝(ASSISTANT)")
                     .isEqualTo(AiChatMessage.Role.ASSISTANT);
 
-            // 조립기: 요약 + 경계 이후 원문만 꼬리로.
+            // 조립기: 요약 + 요약 반영 지점 이후 원문만 최근 원문 대화로.
             AssembledContext assembled = historySearchService.assembleContext(sessionId);
             assertThat(assembled.summary()).isEqualTo("[누적 요약] 세션 대화를 압축한 결과");
-            assertThat(assembled.rawTail()).isNotEmpty();
+            assertThat(assembled.recentMessages()).isNotEmpty();
         }
 
         // 세션당 활성 job 이 1개였으니 요약 LLM 호출도 세션 수만큼(중복 처리 없음).
@@ -140,24 +140,24 @@ class ContextSummaryConcurrencyLoadTest {
     }
 
     @Test
-    void 요약된_세션에_대화를_더_쌓고_다시_요약하면_경계가_단조_증가하고_version_이_오른다() throws Exception {
+    void 요약된_세션에_대화를_더_쌓고_다시_요약하면_요약_반영_지점이_단조_증가하고_version_이_오른다() throws Exception {
         Long sessionId = SESSION_ID_BASE + 100;
 
         seedConversation(sessionId, 3);
-        enqueueService.enqueueIfTailExceedsThreshold(sessionId);
+        enqueueService.enqueueIfRecentMessagesExceedThreshold(sessionId);
         drainUntilNoJobs();
         AiChatContextSummary firstRound = summaryRepository.findBySessionId(sessionId).orElseThrow();
 
-        // 대화를 더 쌓아 경계 이후 꼬리를 다시 임계값 이상으로.
+        // 대화를 더 쌓아 요약 반영 지점 이후 최근 원문 대화를 다시 임계값 이상으로.
         seedConversation(sessionId, 3);
-        enqueueService.enqueueIfTailExceedsThreshold(sessionId);
+        enqueueService.enqueueIfRecentMessagesExceedThreshold(sessionId);
         drainUntilNoJobs();
         AiChatContextSummary secondRound = summaryRepository.findBySessionId(sessionId).orElseThrow();
 
         assertThat(secondRound.getVersion()).isEqualTo(firstRound.getVersion() + 1);
-        assertThat(secondRound.getSummarizedUntilMessageId())
-                .as("경계는 단조 증가")
-                .isGreaterThan(firstRound.getSummarizedUntilMessageId());
+        assertThat(secondRound.getSummarizedUpToMessageId())
+                .as("요약 반영 지점은 단조 증가")
+                .isGreaterThan(firstRound.getSummarizedUpToMessageId());
     }
 
     /** 세션에 U/A 한 쌍을 turnCount 번 커밋한다. 각 메시지 token_count = TOKENS_PER_MESSAGE. */

@@ -16,10 +16,10 @@ public final class AiChatContextSummaryFixture {
 
     /** 저장되어 id·version 이 부여된 요약. */
     public static AiChatContextSummary persisted(
-            Long id, Long sessionId, String content, Long summarizedUntilMessageId, int version, int tokenCount
+            Long id, Long sessionId, String content, Long summarizedUpToMessageId, int version, int tokenCount
     ) {
         LocalDateTime now = LocalDateTime.now();
         return new AiChatContextSummary(
-                id, sessionId, content, summarizedUntilMessageId, version, tokenCount, now, now);
+                id, sessionId, content, summarizedUpToMessageId, version, tokenCount, now, now);
     }
 }

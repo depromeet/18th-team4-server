@@ -26,7 +26,7 @@ public class ContextSummarizeTriggerListener {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onContextSummarizeTrigger(ContextSummarizeTriggerEvent event) {
-        Mono.fromRunnable(() -> enqueueContextSummaryJobService.enqueueIfTailExceedsThreshold(event.sessionId()))
+        Mono.fromRunnable(() -> enqueueContextSummaryJobService.enqueueIfRecentMessagesExceedThreshold(event.sessionId()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(
                         null,

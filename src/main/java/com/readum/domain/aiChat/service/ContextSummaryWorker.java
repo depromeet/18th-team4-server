@@ -86,7 +86,7 @@ public class ContextSummaryWorker {
 
         ContextSummaryResult result;
         try {
-            result = aiContextSummaryClient.generate(context.previousSummaryContent(), context.deltaToSummarize());
+            result = aiContextSummaryClient.generate(context.previousSummaryContent(), context.messagesToSummarize());
         } catch (TooManyRequestsException e) {
             handleRateLimited(jobId, owner, e);
             return;
@@ -110,7 +110,7 @@ public class ContextSummaryWorker {
 
     private int estimateTokens(ContextSummaryGenerationContext context) {
         int total = tokenCounter.count(context.previousSummaryContent());
-        for (AiChatMessage message : context.deltaToSummarize()) {
+        for (AiChatMessage message : context.messagesToSummarize()) {
             total += tokenCounter.count(message.getContent());
         }
         return total + aiChatProperties.context().summaryEstimatedOutputTokens();

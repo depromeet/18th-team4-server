@@ -61,7 +61,7 @@ public class AiChatMessagePersistService {
             throw new BadRequestException(AiChatErrorCode.SESSION_LOCKED);
         }
         AssembledContext assembled = aiChatHistorySearchService.assembleContext(sessionId);
-        return new MessageLoadResult(assembled.summary(), assembled.rawTail(), session.getUserBookId());
+        return new MessageLoadResult(assembled.summary(), assembled.recentMessages(), session.getUserBookId());
     }
 
     /**
@@ -108,7 +108,7 @@ public class AiChatMessagePersistService {
         AiChatMessage saved = aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(
                 sessionId, accumulated, inputTokens, outputTokens, totalTokens, tokenCount
         ));
-        // ASSISTANT 응답이 COMPLETED 로 쌓였으니, 커밋 후 컨텍스트 요약이 필요한지(꼬리 토큰 합 > 임계값) 판정하도록 트리거한다.
+        // ASSISTANT 응답이 COMPLETED 로 쌓였으니, 커밋 후 컨텍스트 요약이 필요한지(최근 원문 대화 토큰 합 > 임계값) 판정하도록 트리거한다.
         // 실제 임계값 검사·job 적재는 AFTER_COMMIT 리스너가 담당한다(사용자 응답 경로와 분리, LLM 요약은 워커가 비동기 처리).
         eventPublisher.publishEvent(new ContextSummarizeTriggerEvent(sessionId));
         // 세션 누적치는 ASSISTANT 가 생성한 토큰만 합산한다.

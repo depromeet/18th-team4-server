@@ -55,9 +55,9 @@ public class ContextSummaryJobLifecycleService {
     }
 
     /**
-     * 생성 준비. 소유권 확인 → 현재 요약(version V, 경계 B) + 경계 이후 원문 로드 → 요약 범위를 처리 시점에 계산한다.
-     * 범위: 경계 B 부터, 최신 메시지 중 recent-raw-token-budget 을 남긴 지점(가장 가까운 턴 경계로 내림)까지.
-     * 남길 원문이 예산 이하라 요약할 게 없으면(경계 진전 없음) null 을 반환하고 작업을 성공 처리한다.
+     * 생성 준비. 소유권 확인 → 현재 요약(version V, 요약 반영 지점 B) + 요약 반영 지점 이후 원문 로드 → 요약 범위를 처리 시점에 계산한다.
+     * 범위: 요약 반영 지점 B 부터, 최신 메시지 중 recent-raw-token-budget 을 남긴 지점(가장 가까운 턴 경계로 내림)까지.
+     * 남길 원문이 예산 이하라 요약할 게 없으면(요약 반영 지점 진전 없음) null 을 반환하고 작업을 성공 처리한다.
      */
     @Transactional
     public ContextSummaryGenerationContext prepareGeneration(Long jobId, String owner) {
@@ -67,56 +67,56 @@ public class ContextSummaryJobLifecycleService {
         }
         Long sessionId = job.getSessionId();
         AiChatContextSummary summary = summaryRepository.findBySessionId(sessionId).orElse(null);
-        long boundary = summary != null ? summary.getSummarizedUntilMessageId() : 0L;
+        long summarizedUpToMessageId = summary != null ? summary.getSummarizedUpToMessageId() : 0L;
 
-        List<AiChatMessage> delta = messageRepository.findCompletedAfterIdAsc(sessionId, boundary);
-        int splitIndex = computeSummarizeSplit(delta);
-        if (splitIndex <= 0) {
-            // 남길 원문이 recent-raw-token-budget 이하 — 아직 요약할 구간이 없다. 경계를 진전시키지 않고 성공 종료.
+        List<AiChatMessage> delta = messageRepository.findCompletedMessagesAfter(sessionId, summarizedUpToMessageId);
+        int recentMessagesStartIndex = findRecentMessagesStartIndex(delta);
+        if (recentMessagesStartIndex <= 0) {
+            // 남길 원문이 recent-raw-token-budget 이하 — 아직 요약할 구간이 없다. 요약 반영 지점을 진전시키지 않고 성공 종료.
             job.markSucceeded();
             return null;
         }
-        List<AiChatMessage> toSummarize = List.copyOf(delta.subList(0, splitIndex));
-        long newBoundary = toSummarize.get(toSummarize.size() - 1).getId();
+        List<AiChatMessage> toSummarize = List.copyOf(delta.subList(0, recentMessagesStartIndex));
+        long lastSummarizedMessageId = toSummarize.get(toSummarize.size() - 1).getId();
         return new ContextSummaryGenerationContext(
                 sessionId,
                 summary != null ? summary.getContent() : null,
                 summary != null ? summary.getVersion() : null,
                 toSummarize,
-                newBoundary);
+                lastSummarizedMessageId);
     }
 
     /**
-     * 요약 범위의 split 인덱스를 계산한다: delta[0..split) 를 요약에 병합하고 delta[split..] 는 원문 꼬리로 남긴다.
-     * 최신 메시지 중 recent-raw-token-budget 만큼은 항상 원문으로 남기고(품질 장치), 요약 경계는 항상 완결된 턴의 끝(ASSISTANT)에 둔다.
+     * 요약 범위의 recentMessagesStartIndex 인덱스를 계산한다: delta[0..recentMessagesStartIndex) 를 요약에 병합하고 delta[recentMessagesStartIndex..] 는 최근 원문 대화로 남긴다.
+     * 최신 메시지 중 recent-raw-token-budget 만큼은 항상 원문으로 남기고(품질 장치), 요약 반영 지점은 항상 완결된 턴의 끝(ASSISTANT)에 둔다.
      * 요약할 구간이 없으면 0(호출자가 skip).
      */
-    private int computeSummarizeSplit(List<AiChatMessage> delta) {
+    private int findRecentMessagesStartIndex(List<AiChatMessage> delta) {
         int recentRawBudget = aiChatProperties.context().recentRawTokenBudget();
         int n = delta.size();
-        int split = n;
-        long tailTokens = 0;
+        int recentMessagesStartIndex = n;
+        long recentTokenSum = 0;
         for (int i = n - 1; i >= 0; i--) {
-            tailTokens += messageTokens(delta.get(i));
-            split = i;
-            if (tailTokens >= recentRawBudget) {
+            recentTokenSum += messageTokens(delta.get(i));
+            recentMessagesStartIndex = i;
+            if (recentTokenSum >= recentRawBudget) {
                 break;
             }
         }
-        // 전체 델타가 예산 이하면 남길 게 없어 요약 구간이 곧 전부가 되면 안 된다 → 요약하지 않는다(경계 진전 없음).
-        if (tailTokens < recentRawBudget) {
+        // 전체 델타가 예산 이하면 남길 게 없어 요약 구간이 곧 전부가 되면 안 된다 → 요약하지 않는다(요약 반영 지점 진전 없음).
+        if (recentTokenSum < recentRawBudget) {
             return 0;
         }
-        // 턴 경계 정렬: 요약 구간의 끝은 ASSISTANT 여야 원문 꼬리가 USER 로 시작한다.
-        // delta[split-1] 이 USER 면 그 USER 를 원문 꼬리로 밀어 요약 구간이 ASSISTANT 로 끝나게 한다.
-        while (split > 0 && delta.get(split - 1).getRole() == AiChatMessage.Role.USER) {
-            split -= 1;
+        // 턴 경계 정렬: 요약 구간의 끝은 ASSISTANT 여야 최근 원문 대화가 USER 로 시작한다.
+        // delta[recentMessagesStartIndex-1] 이 USER 면 그 USER 를 최근 원문 대화로 밀어 요약 구간이 ASSISTANT 로 끝나게 한다.
+        while (recentMessagesStartIndex > 0 && delta.get(recentMessagesStartIndex - 1).getRole() == AiChatMessage.Role.USER) {
+            recentMessagesStartIndex -= 1;
         }
-        return split;
+        return recentMessagesStartIndex;
     }
 
     /**
-     * 성공 기록 — 낙관적 갱신. 준비 때 본 version 과 현재 version 이 일치하고 경계가 단조 증가할 때만 반영한다.
+     * 성공 기록 — 낙관적 갱신. 준비 때 본 version 과 현재 version 이 일치하고 요약 반영 지점이 단조 증가할 때만 반영한다.
      * 늦게 돌아온 옛 워커의 계산(그 사이 다른 워커가 요약을 갱신)은 폐기하고 작업만 성공 종료한다.
      */
     @Transactional
@@ -138,21 +138,21 @@ public class ContextSummaryJobLifecycleService {
                 return;
             }
             summaryRepository.save(AiChatContextSummary.create(
-                    context.sessionId(), result.content(), context.newBoundaryMessageId(), tokenCount));
+                    context.sessionId(), result.content(), context.lastSummarizedMessageId(), tokenCount));
             job.markSucceeded();
             return;
         }
         boolean versionMatches = context.previousVersion() != null
                 && existing.getVersion() == context.previousVersion();
-        boolean advancesBoundary = context.newBoundaryMessageId() > existing.getSummarizedUntilMessageId();
-        if (!versionMatches || !advancesBoundary) {
-            // 낙관적 충돌 또는 경계 역행 — 이 계산은 이미 낡았다. 재시도해도 같은 낡은 입력이라 폐기하고 성공 종료.
+        boolean advancesSummarizedUpTo = context.lastSummarizedMessageId() > existing.getSummarizedUpToMessageId();
+        if (!versionMatches || !advancesSummarizedUpTo) {
+            // 낙관적 충돌 또는 요약 반영 지점 역행 — 이 계산은 이미 낡았다. 재시도해도 같은 낡은 입력이라 폐기하고 성공 종료.
             log.info("컨텍스트 요약 갱신 폐기(낙관적 충돌) sessionId={} preparedVersion={} currentVersion={}",
                     context.sessionId(), context.previousVersion(), existing.getVersion());
             job.markSucceeded();
             return;
         }
-        existing.applyUpdate(result.content(), context.newBoundaryMessageId(), tokenCount);
+        existing.applyUpdate(result.content(), context.lastSummarizedMessageId(), tokenCount);
         job.markSucceeded();
     }
 

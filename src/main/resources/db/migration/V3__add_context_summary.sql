@@ -1,12 +1,12 @@
 -- PR-3: 채팅 컨텍스트 누적 요약 + 요약 작업 큐.
 -- 요약은 원문(ai_chat_message)에서 언제든 재생성 가능한 파생 데이터다. 원문은 삭제하지 않는다.
 
--- 세션당 1행. 갱신되는 누적 요약. summarized_until_message_id 경계로 요약 구간과 원문 꼬리를 정확히 나눈다.
+-- 세션당 1행. 갱신되는 누적 요약. summarized_up_to_message_id 요약 반영 지점으로 요약 구간과 최근 원문 대화를 정확히 나눈다.
 CREATE TABLE ai_chat_context_summary (
     id                          BIGINT      NOT NULL AUTO_INCREMENT,
     session_id                  BIGINT      NOT NULL,
     content                     TEXT        NOT NULL,
-    summarized_until_message_id BIGINT      NOT NULL,
+    summarized_up_to_message_id BIGINT      NOT NULL,
     version                     INT         NOT NULL,
     token_count                 INT         NOT NULL,
     created_at                  DATETIME(6) NOT NULL,

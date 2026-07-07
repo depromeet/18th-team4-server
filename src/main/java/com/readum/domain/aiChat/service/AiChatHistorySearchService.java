@@ -17,10 +17,10 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 채팅 호출에 실을 컨텍스트를 조립한다: [누적 요약] + [요약 경계 이후 원문 꼬리]. 현재 진행 중인 USER 메시지는 호출자가 append.
- * 요약 경계(summarized_until_message_id) 이후 메시지만 원문으로 싣고, 그 앞은 요약이 대체한다 — 중복도 구멍도 없다.
- * 꼬리는 newest-first 로 token_count 를 합산해 하드캡(안전핀)까지, 항상 USER 로 시작(턴 경계 정렬),
- * 마지막 턴은 예산을 넘어도 포함(빈 꼬리 방지). 요약이 밀리면 하드캡 안에서 오래된 턴부터 잘리는 우아한 열화.
+ * 채팅 호출에 실을 컨텍스트를 조립한다: [누적 요약] + [요약 반영 지점 이후 최근 원문 대화]. 현재 진행 중인 USER 메시지는 호출자가 append.
+ * 요약 반영 지점(summarized_up_to_message_id) 이후 메시지만 원문으로 싣고, 그 앞은 요약이 대체한다 — 중복도 구멍도 없다.
+ * 최근 원문 대화는 newest-first 로 token_count 를 합산해 하드캡(안전핀)까지, 항상 USER 로 시작(턴 경계 정렬),
+ * 마지막 턴은 예산을 넘어도 포함(빈 최근 원문 대화 방지). 요약이 밀리면 하드캡 안에서 오래된 턴부터 잘리는 우아한 열화.
  */
 @Service
 @RequiredArgsConstructor
@@ -36,29 +36,29 @@ public class AiChatHistorySearchService {
 
     public AssembledContext assembleContext(Long sessionId) {
         AiChatContextSummary summary = aiChatContextSummaryRepository.findBySessionId(sessionId).orElse(null);
-        long boundary = summary != null ? summary.getSummarizedUntilMessageId() : 0L;
+        long summarizedUpToMessageId = summary != null ? summary.getSummarizedUpToMessageId() : 0L;
         String summaryContent = summary != null ? summary.getContent() : null;
 
         List<AiChatMessage> recentDesc = aiChatMessageRepository.findRecentForContextAssembly(
                 sessionId, PageRequest.of(0, SAFETY_FETCH_LIMIT));
 
-        // 요약 경계 이후(id > boundary)의 원문만 꼬리 후보로 남긴다. 경계 이전은 요약이 커버한다.
-        List<AiChatMessage> afterBoundaryDesc = new ArrayList<>();
+        // 요약 반영 지점 이후(id > summarizedUpToMessageId)의 원문만 최근 원문 대화 후보로 남긴다. 요약 반영 지점 이전은 요약이 커버한다.
+        List<AiChatMessage> afterSummarizedUpToDesc = new ArrayList<>();
         for (AiChatMessage message : recentDesc) {
-            if (message.getId() != null && message.getId() > boundary) {
-                afterBoundaryDesc.add(message);
+            if (message.getId() != null && message.getId() > summarizedUpToMessageId) {
+                afterSummarizedUpToDesc.add(message);
             }
         }
-        if (afterBoundaryDesc.isEmpty()) {
+        if (afterSummarizedUpToDesc.isEmpty()) {
             return new AssembledContext(summaryContent, List.of());
         }
 
-        int hardCap = aiChatProperties.context().rawTailHardCapTokens();
+        int hardCap = aiChatProperties.context().recentRawHardCapTokens();
 
         // newest-first 로 누적하다 하드캡 초과 직전에서 멈춘다. 단, 최소 1개는 담는다(마지막 턴 강제 포함).
         List<AiChatMessage> selectedDesc = new ArrayList<>();
         int running = 0;
-        for (AiChatMessage message : afterBoundaryDesc) {
+        for (AiChatMessage message : afterSummarizedUpToDesc) {
             int tokens = messageTokens(message);
             if (!selectedDesc.isEmpty() && running + tokens > hardCap) {
                 break;
@@ -67,7 +67,7 @@ public class AiChatHistorySearchService {
             running += tokens;
         }
 
-        // 턴 경계 정렬: 꼬리는 USER 로 시작해야 한다. 가장 오래된(선택 리스트의 끝) 쪽이 ASSISTANT 면 제거.
+        // 턴 경계 정렬: 최근 원문 대화는 USER 로 시작해야 한다. 가장 오래된(선택 리스트의 끝) 쪽이 ASSISTANT 면 제거.
         while (selectedDesc.size() > 1
                 && selectedDesc.get(selectedDesc.size() - 1).getRole() == AiChatMessage.Role.ASSISTANT) {
             selectedDesc.remove(selectedDesc.size() - 1);
@@ -75,8 +75,8 @@ public class AiChatHistorySearchService {
 
         List<AiChatMessage> ascending = new ArrayList<>(selectedDesc);
         Collections.reverse(ascending);
-        List<HistoryMessage> rawTail = ascending.stream().map(HistoryMessage::from).toList();
-        return new AssembledContext(summaryContent, rawTail);
+        List<HistoryMessage> recentMessages = ascending.stream().map(HistoryMessage::from).toList();
+        return new AssembledContext(summaryContent, recentMessages);
     }
 
     private int messageTokens(AiChatMessage message) {

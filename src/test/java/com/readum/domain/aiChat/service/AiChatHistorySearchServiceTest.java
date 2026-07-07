@@ -77,14 +77,14 @@ class AiChatHistorySearchServiceTest {
         AssembledContext context = serviceWithHardCap(100).assembleContext(SESSION_ID);
 
         assertThat(context.summary()).isNull();
-        assertThat(context.rawTail()).hasSize(4);
-        assertThat(context.rawTail().get(0).content()).isEqualTo("d");
-        assertThat(context.rawTail().get(0).role()).isEqualTo(HistoryMessage.Role.USER);
-        assertThat(context.rawTail().get(3).content()).isEqualTo("aaaa");
+        assertThat(context.recentMessages()).hasSize(4);
+        assertThat(context.recentMessages().get(0).content()).isEqualTo("d");
+        assertThat(context.recentMessages().get(0).role()).isEqualTo(HistoryMessage.Role.USER);
+        assertThat(context.recentMessages().get(3).content()).isEqualTo("aaaa");
     }
 
     @Test
-    void 예산을_넘으면_오래된_턴을_드랍하고_꼬리는_USER로_시작한다() {
+    void 예산을_넘으면_오래된_턴을_드랍하고_최근_원문_대화는_USER로_시작한다() {
         // 각 3토큰, hard-cap 10 → newest 3개(합 9)만 담기고 4번째(12)는 제외.
         // 담긴 3개(newest-first)의 가장 오래된 쪽이 ASSISTANT 면 턴 경계 정렬로 제거된다.
         givenNoSummary();
@@ -97,7 +97,7 @@ class AiChatHistorySearchServiceTest {
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "fff")
         ));
 
-        List<HistoryMessage> history = serviceWithHardCap(10).assembleContext(SESSION_ID).rawTail();
+        List<HistoryMessage> history = serviceWithHardCap(10).assembleContext(SESSION_ID).recentMessages();
 
         // 담김 [id6 ASST, id5 USER, id4 ASST] → 오래된 id4 ASST 제거 → [id5 USER, id6 ASST]
         assertThat(history).hasSize(2);
@@ -108,32 +108,32 @@ class AiChatHistorySearchServiceTest {
 
     @Test
     void 마지막_턴은_예산을_넘어도_최소_한_개는_포함한다() {
-        // 단일 메시지가 hard-cap(1) 보다 커도 빈 꼬리를 만들지 않는다.
+        // 단일 메시지가 hard-cap(1) 보다 커도 빈 최근 원문 대화를 만들지 않는다.
         givenNoSummary();
         givenRecentDesc(List.of(
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "xxxxxxxxxx")
         ));
 
-        List<HistoryMessage> history = serviceWithHardCap(1).assembleContext(SESSION_ID).rawTail();
+        List<HistoryMessage> history = serviceWithHardCap(1).assembleContext(SESSION_ID).recentMessages();
 
         assertThat(history).hasSize(1);
         assertThat(history.get(0).content()).isEqualTo("xxxxxxxxxx");
     }
 
     @Test
-    void 빈_세션이면_요약도_null_이고_빈_꼬리가_반환된다() {
+    void 빈_세션이면_요약도_null_이고_빈_최근_원문_대화가_반환된다() {
         givenNoSummary();
         givenRecentDesc(List.of());
 
         AssembledContext context = serviceWithHardCap(8000).assembleContext(SESSION_ID);
 
         assertThat(context.summary()).isNull();
-        assertThat(context.rawTail()).isEmpty();
+        assertThat(context.recentMessages()).isEmpty();
     }
 
     @Test
-    void 요약이_있으면_요약을_반환하고_경계_이후_원문만_꼬리로_싣는다() {
-        // 경계(summarized_until_message_id)=3 → id 3 이하는 요약이 커버, id 4·5 만 원문 꼬리.
+    void 요약이_있으면_요약을_반환하고_요약_반영_지점_이후_원문만_최근_원문_대화로_싣는다() {
+        // 요약 반영 지점(summarized_up_to_message_id)=3 → id 3 이하는 요약이 커버, id 4·5 만 최근 원문 대화.
         givenSummary(AiChatContextSummaryFixture.persisted(100L, SESSION_ID, "누적 요약 본문", 3L, 2, 120));
         givenRecentDesc(List.of(
                 AiChatMessageFixture.persistedAssistantMessage(5L, SESSION_ID, "new-assistant"),
@@ -146,15 +146,15 @@ class AiChatHistorySearchServiceTest {
         AssembledContext context = serviceWithHardCap(8000).assembleContext(SESSION_ID);
 
         assertThat(context.summary()).isEqualTo("누적 요약 본문");
-        assertThat(context.rawTail()).hasSize(2);
-        assertThat(context.rawTail().get(0).content()).isEqualTo("new-user");
-        assertThat(context.rawTail().get(0).role()).isEqualTo(HistoryMessage.Role.USER);
-        assertThat(context.rawTail().get(1).content()).isEqualTo("new-assistant");
+        assertThat(context.recentMessages()).hasSize(2);
+        assertThat(context.recentMessages().get(0).content()).isEqualTo("new-user");
+        assertThat(context.recentMessages().get(0).role()).isEqualTo(HistoryMessage.Role.USER);
+        assertThat(context.recentMessages().get(1).content()).isEqualTo("new-assistant");
     }
 
     @Test
-    void 경계_이후_원문이_없으면_요약만_반환하고_꼬리는_비어_있다() {
-        // 경계=5 로 모든 메시지가 요약에 커버됨 → 원문 꼬리 없음.
+    void 요약_반영_지점_이후_원문이_없으면_요약만_반환하고_최근_원문_대화는_비어_있다() {
+        // 요약 반영 지점=5 로 모든 메시지가 요약에 커버됨 → 최근 원문 대화 없음.
         givenSummary(AiChatContextSummaryFixture.persisted(100L, SESSION_ID, "전부 요약됨", 5L, 3, 90));
         givenRecentDesc(List.of(
                 AiChatMessageFixture.persistedAssistantMessage(5L, SESSION_ID, "a"),
@@ -164,6 +164,6 @@ class AiChatHistorySearchServiceTest {
         AssembledContext context = serviceWithHardCap(8000).assembleContext(SESSION_ID);
 
         assertThat(context.summary()).isEqualTo("전부 요약됨");
-        assertThat(context.rawTail()).isEmpty();
+        assertThat(context.recentMessages()).isEmpty();
     }
 }

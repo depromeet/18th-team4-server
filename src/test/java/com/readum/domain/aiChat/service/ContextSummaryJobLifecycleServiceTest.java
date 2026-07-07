@@ -70,7 +70,7 @@ class ContextSummaryJobLifecycleServiceTest {
         givenOwnedProcessingJob();
         given(summaryRepository.findBySessionId(SESSION_ID)).willReturn(Optional.empty());
         // 델타 전체 합 6 < recentRawTokenBudget 10 → 요약 구간 없음.
-        given(messageRepository.findCompletedAfterIdAsc(SESSION_ID, 0L)).willReturn(List.of(
+        given(messageRepository.findCompletedMessagesAfter(SESSION_ID, 0L)).willReturn(List.of(
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "aaa"),
                 AiChatMessageFixture.persistedAssistantMessage(2L, SESSION_ID, "bbb")
         ));
@@ -81,12 +81,12 @@ class ContextSummaryJobLifecycleServiceTest {
     }
 
     @Test
-    void 요약_범위는_recent_budget_만큼_남기고_경계는_ASSISTANT_로_정렬된다() {
+    void 요약_범위는_recent_budget_만큼_남기고_요약_반영_지점은_ASSISTANT_로_정렬된다() {
         givenOwnedProcessingJob();
         given(summaryRepository.findBySessionId(SESSION_ID)).willReturn(Optional.empty());
-        // 각 2토큰, recentRawTokenBudget=6. newest 부터 6 채우면 id4·5·6 이 원문 꼬리, split 은 id4(index3).
-        // 요약 후보 [id1 U, id2 A, id3 U] → 경계 정렬로 꼬리 시작이 USER 가 되도록 id3 U 를 꼬리로 밀어 [id1 U, id2 A] 만 요약.
-        given(messageRepository.findCompletedAfterIdAsc(SESSION_ID, 0L)).willReturn(List.of(
+        // 각 2토큰, recentRawTokenBudget=6. newest 부터 6 채우면 id4·5·6 이 최근 원문 대화, recentMessagesStartIndex 는 id4(index3).
+        // 요약 후보 [id1 U, id2 A, id3 U] → 경계 정렬로 최근 원문 대화 시작이 USER 가 되도록 id3 U 를 최근 원문 대화로 밀어 [id1 U, id2 A] 만 요약.
+        given(messageRepository.findCompletedMessagesAfter(SESSION_ID, 0L)).willReturn(List.of(
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "11"),
                 AiChatMessageFixture.persistedAssistantMessage(2L, SESSION_ID, "22"),
                 AiChatMessageFixture.persistedUserMessage(3L, SESSION_ID, "33"),
@@ -98,8 +98,8 @@ class ContextSummaryJobLifecycleServiceTest {
         ContextSummaryGenerationContext context = serviceWithRecentBudget(6).prepareGeneration(JOB_ID, OWNER);
 
         assertThat(context).isNotNull();
-        assertThat(context.deltaToSummarize()).extracting(AiChatMessage::getId).containsExactly(1L, 2L);
-        assertThat(context.newBoundaryMessageId()).isEqualTo(2L);
+        assertThat(context.messagesToSummarize()).extracting(AiChatMessage::getId).containsExactly(1L, 2L);
+        assertThat(context.lastSummarizedMessageId()).isEqualTo(2L);
         assertThat(context.previousVersion()).isNull();
         assertThat(context.previousSummaryContent()).isNull();
     }
@@ -134,17 +134,17 @@ class ContextSummaryJobLifecycleServiceTest {
 
         assertThat(current.getContent()).isEqualTo("최신 요약");
         assertThat(current.getVersion()).isEqualTo(2);
-        assertThat(current.getSummarizedUntilMessageId()).isEqualTo(20L);
+        assertThat(current.getSummarizedUpToMessageId()).isEqualTo(20L);
         verify(summaryRepository, never()).save(any());
         assertThat(job.getStatus()).isEqualTo(AiChatContextSummaryJob.Status.SUCCEEDED);
     }
 
     @Test
-    void 경계가_역행하면_요약을_갱신하지_않는다() {
+    void 요약_반영_지점이_역행하면_요약을_갱신하지_않는다() {
         AiChatContextSummaryJob job = AiChatContextSummaryJobFixture.persistedProcessing(
                 JOB_ID, SESSION_ID, OWNER, LocalDateTime.now().plusMinutes(2), 0);
         given(jobRepository.findByIdForUpdate(JOB_ID)).willReturn(Optional.of(job));
-        // version 은 일치(1)하지만 새 경계(15)가 현재 경계(20)보다 작다(역행) → 폐기.
+        // version 은 일치(1)하지만 새 요약 반영 지점(15)가 현재 요약 반영 지점(20)보다 작다(역행) → 폐기.
         AiChatContextSummary current = AiChatContextSummaryFixture.persisted(100L, SESSION_ID, "요약", 20L, 1, 80);
         given(summaryRepository.findBySessionIdForUpdate(SESSION_ID)).willReturn(Optional.of(current));
         ContextSummaryGenerationContext regressingContext = new ContextSummaryGenerationContext(
@@ -154,12 +154,12 @@ class ContextSummaryJobLifecycleServiceTest {
 
         assertThat(current.getContent()).isEqualTo("요약");
         assertThat(current.getVersion()).isEqualTo(1);
-        assertThat(current.getSummarizedUntilMessageId()).isEqualTo(20L);
+        assertThat(current.getSummarizedUpToMessageId()).isEqualTo(20L);
         assertThat(job.getStatus()).isEqualTo(AiChatContextSummaryJob.Status.SUCCEEDED);
     }
 
     @Test
-    void version_이_일치하고_경계가_전진하면_요약을_갱신한다() {
+    void version_이_일치하고_요약_반영_지점이_전진하면_요약을_갱신한다() {
         AiChatContextSummaryJob job = AiChatContextSummaryJobFixture.persistedProcessing(
                 JOB_ID, SESSION_ID, OWNER, LocalDateTime.now().plusMinutes(2), 0);
         given(jobRepository.findByIdForUpdate(JOB_ID)).willReturn(Optional.of(job));
@@ -172,7 +172,7 @@ class ContextSummaryJobLifecycleServiceTest {
 
         assertThat(current.getContent()).isEqualTo("갱신된 요약");
         assertThat(current.getVersion()).isEqualTo(2);
-        assertThat(current.getSummarizedUntilMessageId()).isEqualTo(20L);
+        assertThat(current.getSummarizedUpToMessageId()).isEqualTo(20L);
         assertThat(job.getStatus()).isEqualTo(AiChatContextSummaryJob.Status.SUCCEEDED);
     }
 }

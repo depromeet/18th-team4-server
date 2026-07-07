@@ -111,19 +111,19 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
             Long sessionId, AiChatMessage.Status status, LocalDateTime createdAt);
 
     /**
-     * 요약 경계 이후의 유효(COMPLETED) 원문 메시지를 id 오름차순으로 — 컨텍스트 요약 워커의 델타 원문·범위 계산용.
-     * afterId(요약이 커버한 마지막 메시지 id, 없으면 0) 초과분만 반환한다. id 는 IDENTITY 라 시간순과 단조 일치.
+     * 요약 반영 지점 이후의 유효(COMPLETED) 원문 메시지를 id 오름차순으로 — 컨텍스트 요약 워커의 델타 원문·범위 계산용.
+     * summarizedUpToMessageId(요약이 커버한 마지막 메시지 id, 없으면 0) 초과분만 반환한다. id 는 IDENTITY 라 시간순과 단조 일치.
      */
-    default List<AiChatMessage> findCompletedAfterIdAsc(Long sessionId, Long afterId) {
+    default List<AiChatMessage> findCompletedMessagesAfter(Long sessionId, Long summarizedUpToMessageId) {
         return findBySessionIdAndStatusAndIdGreaterThanOrderByIdAsc(
-                sessionId, AiChatMessage.Status.COMPLETED, afterId);
+                sessionId, AiChatMessage.Status.COMPLETED, summarizedUpToMessageId);
     }
 
     List<AiChatMessage> findBySessionIdAndStatusAndIdGreaterThanOrderByIdAsc(
             Long sessionId, AiChatMessage.Status status, Long id);
 
     /**
-     * 요약 경계 이후 원문 꼬리의 token_count 합 — 요약 트리거 판정용(임계값 초과 시 job 적재).
+     * 요약 반영 지점 이후 최근 원문 대화의 token_count 합 — 요약 트리거 판정용(임계값 초과 시 job 적재).
      * token_count 가 null 인 행은 SUM 에서 무시된다. 행이 없으면 coalesce 로 0.
      */
     @Query("""
@@ -131,9 +131,9 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
               from AiChatMessage aiChatMessage
              where aiChatMessage.sessionId = :sessionId
                and aiChatMessage.status = com.readum.model.aiChat.entity.AiChatMessage.Status.COMPLETED
-               and aiChatMessage.id > :afterId
+               and aiChatMessage.id > :summarizedUpToMessageId
             """)
-    long sumTokenCountAfterId(@Param("sessionId") Long sessionId, @Param("afterId") Long afterId);
+    long sumRecentMessageTokens(@Param("sessionId") Long sessionId, @Param("summarizedUpToMessageId") Long summarizedUpToMessageId);
 
     /**
      * 사용자별 폭주(10초 창) 가드용 카운트 — 상태 무관.
