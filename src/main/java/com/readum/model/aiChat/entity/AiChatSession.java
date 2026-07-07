@@ -34,6 +34,10 @@ public class AiChatSession {
 
     private static final int TITLE_MAX_LENGTH = 100;
 
+    // 제목 생성(첫 응답 후 비동기)이 실패하거나 빈 결과가 왔을 때, 빈 제목이 영구히 남지 않도록
+    // 대체해 넣는 기본 제목. 생성 전 표시는 클라이언트가 담당하므로 생성 시점엔 박지 않는다.
+    public static final String DEFAULT_TITLE = "새로운 대화";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

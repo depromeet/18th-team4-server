@@ -68,7 +68,7 @@ class AiChatSessionTitleServiceTest {
     }
 
     @Test
-    void LLM_이_빈_제목을_반환하면_갱신을_위임하지_않는다() {
+    void LLM_이_빈_제목을_반환하면_기본_제목으로_대체를_위임한다() {
         Long sessionId = 7L;
         List<AiChatMessage> messages = List.of();
         given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
@@ -76,6 +76,21 @@ class AiChatSessionTitleServiceTest {
 
         titleService.execute(new GenerateSessionTitleCommand(sessionId, messages));
 
+        verify(aiChatSessionTitleWriter).applyDefaultTitleIfAbsent(sessionId);
+        verify(aiChatSessionTitleWriter, never()).updateTitle(anyLong(), anyString());
+    }
+
+    @Test
+    void LLM_호출이_실패하면_기본_제목으로_대체하고_예외를_전파한다() {
+        Long sessionId = 7L;
+        List<AiChatMessage> messages = List.of();
+        given(aiChatSessionRepository.existsById(sessionId)).willReturn(true);
+        given(aiChatTitleClient.generate(messages)).willThrow(new RuntimeException("LLM 호출 실패"));
+
+        assertThatThrownBy(() -> titleService.execute(new GenerateSessionTitleCommand(sessionId, messages)))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(aiChatSessionTitleWriter).applyDefaultTitleIfAbsent(sessionId);
         verify(aiChatSessionTitleWriter, never()).updateTitle(anyLong(), anyString());
     }
 }
