@@ -47,6 +47,10 @@ class ContextSummaryJobLifecycleServiceTest {
     private final TokenCounter tokenCounter = text -> text == null ? 0 : text.length();
 
     private ContextSummaryJobLifecycleService serviceWithRecentBudget(int recentRawTokenBudget) {
+        return serviceWith(recentRawTokenBudget, 120000);
+    }
+
+    private ContextSummaryJobLifecycleService serviceWith(int recentRawTokenBudget, int maxRequestTokens) {
         AiChatProperties aiChatProperties = new AiChatProperties(
                 new AiChatProperties.Context(8000, recentRawTokenBudget, 4000, 800),
                 new AiChatProperties.MessageRule(1000),
@@ -54,7 +58,7 @@ class ContextSummaryJobLifecycleServiceTest {
                 new AiChatProperties.TokenBudget(4, 20000, 512),
                 new AiChatProperties.TitleGeneration(4, 2000));
         ContextSummaryJobProperties jobProperties = new ContextSummaryJobProperties(
-                2, 2000, 60000, 120, 5, 60, 120000);
+                2, 2000, 60000, 120, 5, 60, maxRequestTokens);
         return new ContextSummaryJobLifecycleService(
                 jobRepository, summaryRepository, messageRepository, jobProperties, aiChatProperties, tokenCounter);
     }
@@ -102,6 +106,29 @@ class ContextSummaryJobLifecycleServiceTest {
         assertThat(context.lastSummarizedMessageId()).isEqualTo(2L);
         assertThat(context.previousVersion()).isNull();
         assertThat(context.previousSummaryContent()).isNull();
+    }
+
+    @Test
+    void 요약_대상_원문이_한_호출_예산을_넘으면_오래된_쪽부터_예산만큼만_잘라_부분_전진한다() {
+        givenOwnedProcessingJob();
+        given(summaryRepository.findBySessionId(SESSION_ID)).willReturn(Optional.empty());
+        // maxRequestTokens=810, 이전 요약 없음, 출력추정 800 → 청크 예산 10.
+        // recentRawTokenBudget=2 라 최근 원문 대화는 [id5,id6], 요약 후보는 [id1..id4].
+        // 청크 예산 10 이라 오래된 쪽부터 id1(4)+id2(4)=8 까지만 — id3 추가 시 12>10 → 이번엔 [id1,id2] 만 요약(부분 전진, 나머지는 다음 작업).
+        given(messageRepository.findCompletedMessagesAfter(SESSION_ID, 0L)).willReturn(List.of(
+                AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "aaaa"),
+                AiChatMessageFixture.persistedAssistantMessage(2L, SESSION_ID, "bbbb"),
+                AiChatMessageFixture.persistedUserMessage(3L, SESSION_ID, "cccc"),
+                AiChatMessageFixture.persistedAssistantMessage(4L, SESSION_ID, "dddd"),
+                AiChatMessageFixture.persistedUserMessage(5L, SESSION_ID, "ee"),
+                AiChatMessageFixture.persistedAssistantMessage(6L, SESSION_ID, "ff")
+        ));
+
+        ContextSummaryGenerationContext context = serviceWith(2, 810).prepareGeneration(JOB_ID, OWNER);
+
+        assertThat(context).isNotNull();
+        assertThat(context.messagesToSummarize()).extracting(AiChatMessage::getId).containsExactly(1L, 2L);
+        assertThat(context.lastSummarizedMessageId()).isEqualTo(2L);
     }
 
     @Test

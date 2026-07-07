@@ -58,6 +58,7 @@ public class ContextSummaryJobLifecycleService {
      * 생성 준비. 소유권 확인 → 현재 요약(version V, 요약 반영 지점 B) + 요약 반영 지점 이후 원문 로드 → 요약 범위를 처리 시점에 계산한다.
      * 범위: 요약 반영 지점 B 부터, 최신 메시지 중 recent-raw-token-budget 을 남긴 지점(가장 가까운 턴 경계로 내림)까지.
      * 남길 원문이 예산 이하라 요약할 게 없으면(요약 반영 지점 진전 없음) null 을 반환하고 작업을 성공 처리한다.
+     * 요약 대상 원문이 한 호출 예산(maxRequestTokens)을 넘으면 오래된 쪽부터 예산만큼만 잘라 부분 전진한다 — 나머지 backlog 는 다음 작업이 이어 소화(영구 동결 방지).
      */
     @Transactional
     public ContextSummaryGenerationContext prepareGeneration(Long jobId, String owner) {
@@ -76,7 +77,15 @@ public class ContextSummaryJobLifecycleService {
             job.markSucceeded();
             return null;
         }
-        List<AiChatMessage> toSummarize = List.copyOf(delta.subList(0, recentMessagesStartIndex));
+        // 한 작업이 삼키는 요약 대상 원문을 예산 안으로 자른다 — 밀린 backlog 는 여러 작업이 나눠 소화한다.
+        // 예산 = maxRequestTokens - 이전 요약 - 출력 추정(워커 fail-fast 와 같은 기준). 이전 요약이 커져도 fail-fast(영구 동결)가 나지 않게 한다.
+        int previousSummaryTokens = summary != null ? tokenCounter.count(summary.getContent()) : 0;
+        int chunkTokenBudget = jobProperties.maxRequestTokens()
+                - previousSummaryTokens
+                - aiChatProperties.context().summaryEstimatedOutputTokens();
+        int summarizeEndIndex = capSummarizeChunk(delta, recentMessagesStartIndex, chunkTokenBudget);
+
+        List<AiChatMessage> toSummarize = List.copyOf(delta.subList(0, summarizeEndIndex));
         long lastSummarizedMessageId = toSummarize.get(toSummarize.size() - 1).getId();
         return new ContextSummaryGenerationContext(
                 sessionId,
@@ -113,6 +122,34 @@ public class ContextSummaryJobLifecycleService {
             recentMessagesStartIndex -= 1;
         }
         return recentMessagesStartIndex;
+    }
+
+    /**
+     * 이번 작업이 요약할 구간(delta[0..반환값))을 chunkTokenBudget 안으로 자른다(오래된 쪽부터).
+     * 남은 backlog 는 다음 작업이 이어 소화한다 — 큰 backlog 도 fail-fast 없이 요약 반영 지점을 조금씩 전진시키는 장치.
+     * 워커 fail-fast 와 같은 토큰 기준(원문 content)으로 세어 자른 청크가 fail-fast 를 다시 유발하지 않게 한다.
+     * 최소 1개는 포함(진전 보장)하고, 부분 청크의 끝은 완결된 턴(ASSISTANT)에 맞춘다.
+     */
+    private int capSummarizeChunk(List<AiChatMessage> delta, int recentMessagesStartIndex, int chunkTokenBudget) {
+        long chunkTokenSum = 0;
+        int summarizeEndIndex = 0;
+        for (int i = 0; i < recentMessagesStartIndex; i++) {
+            long withNext = chunkTokenSum + tokenCounter.count(delta.get(i).getContent());
+            if (i > 0 && withNext > chunkTokenBudget) {
+                break;
+            }
+            chunkTokenSum = withNext;
+            summarizeEndIndex = i + 1;
+        }
+        if (summarizeEndIndex >= recentMessagesStartIndex) {
+            // backlog 가 예산 안 — 한 번에 따라잡는다(기존 동작).
+            return recentMessagesStartIndex;
+        }
+        // 부분 청크: 끝을 ASSISTANT 로 맞춰 다음 구간이 USER 로 시작하게 한다.
+        while (summarizeEndIndex > 1 && delta.get(summarizeEndIndex - 1).getRole() == AiChatMessage.Role.USER) {
+            summarizeEndIndex -= 1;
+        }
+        return summarizeEndIndex;
     }
 
     /**
