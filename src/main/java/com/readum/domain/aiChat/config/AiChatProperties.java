@@ -18,11 +18,18 @@ public record AiChatProperties(
 ) {
 
     /**
-     * 채팅 컨텍스트 조립 설정. rawTailHardCapTokens: 원문 꼬리 토큰 절대 상한 —
-     * 이력을 newest-first 로 token_count 합산해 이 값까지 싣고, 초과분은 오래된 턴부터 제외한다.
-     * (요약 결합은 PR-3. 지금은 요약 없이 원문 꼬리만.)
+     * 채팅 컨텍스트 조립·요약 설정. 조립 모델: [시스템+책][누적 요약][요약 경계 이후 원문 꼬리][현재 메시지].
+     * - rawTailHardCapTokens: 원문 꼬리 토큰 절대 상한(안전핀). 요약이 밀렸을 때 초과분은 오래된 턴부터 제외.
+     * - recentRawTokenBudget: 요약 진행과 무관하게 항상 원문으로 유지할 꼬리 크기(품질 장치). 요약 범위 계산의 하한.
+     * - summarizeTriggerTokenThreshold: 경계 이후 꼬리 토큰 합이 이를 넘으면 요약 job 을 적재한다.
+     * - summaryEstimatedOutputTokens: 요약 갱신 호출의 출력 추정값 — 게이트 예약 계상용(프롬프트 길이 지시가 아님).
      */
-    public record Context(@Positive int rawTailHardCapTokens) {
+    public record Context(
+            @Positive int rawTailHardCapTokens,
+            @Positive int recentRawTokenBudget,
+            @Positive int summarizeTriggerTokenThreshold,
+            @Positive int summaryEstimatedOutputTokens
+    ) {
     }
 
     public record MessageRule(@Positive int maxContentLength) {
