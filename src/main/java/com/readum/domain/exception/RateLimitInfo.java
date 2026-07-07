@@ -29,6 +29,11 @@ public record RateLimitInfo(
         return new RateLimitInfo(null, null, null, null, null, null, null);
     }
 
+    // 우리 게이트가 자체 거절할 때 쓴다 — retryAfter 만 알고, 외부 시스템이 주는 한도/잔량은 알 수 없다.
+    public static RateLimitInfo retryAfterOnly(Duration retryAfter) {
+        return new RateLimitInfo(retryAfter, null, null, null, null, null, null);
+    }
+
     public boolean hasAny() {
         return retryAfter != null
                 || limitRequests != null

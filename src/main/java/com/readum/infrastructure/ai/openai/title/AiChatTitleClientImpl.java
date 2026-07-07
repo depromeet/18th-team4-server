@@ -1,13 +1,10 @@
 package com.readum.infrastructure.ai.openai.title;
 
-import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatTitleClient;
-import com.readum.domain.exception.RateLimitInfo;
-import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import jakarta.annotation.PostConstruct;
@@ -39,7 +36,7 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
     // 제목 생성 전용 ChatClient(10초 responseTimeout, advisor 미적용). 빈 이름으로 주입해 채팅용 chatClient 와 구분한다.
     private final ChatClient titleGenerationChatClient;
     private final AiPromptAuditLogger auditLogger;
-    private final OpenAiRequestGate requestGate;
+    private final OpenAiRateLimitGuard rateLimitGuard;
     private final TokenCounter tokenCounter;
 
     @Value("${spring.ai.openai.chat.options.model}")
@@ -65,15 +62,7 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
         // error consumer 가 삼킨다 — 기존 제목 생성 실패 처리와 동일한 경로다 (저빈도·실패 허용).
         int estimatedTokens = tokenCounter.count(systemPrompt) + tokenCounter.count(chatHistory)
                 + ESTIMATED_OUTPUT_TOKENS;
-        OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
-        if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
-            AiChatErrorCode code = rejected.reason() == OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN
-                    ? AiChatErrorCode.AI_QUOTA_EXHAUSTED
-                    : AiChatErrorCode.AI_RATE_LIMIT_BURST;
-            throw new TooManyRequestsException(
-                    code,
-                    new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
-        }
+        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
 
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(messages),

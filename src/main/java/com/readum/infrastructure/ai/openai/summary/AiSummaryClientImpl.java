@@ -1,15 +1,12 @@
 package com.readum.infrastructure.ai.openai.summary;
 
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
-import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiSummaryClient;
-import com.readum.domain.exception.RateLimitInfo;
-import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import lombok.extern.slf4j.Slf4j;
@@ -41,7 +38,7 @@ public class AiSummaryClientImpl implements AiSummaryClient {
     // 응답 스키마 구조는 promptAssembler 에서 가져와 인스턴스 필드로 보관한다.
     // static 필드가 아닌 이유: ResponseFormat 조립에 promptAssembler 인스턴스가 필요하기 때문.
     private final ResponseFormat summaryResponseFormat;
-    private final OpenAiRequestGate requestGate;
+    private final OpenAiRateLimitGuard rateLimitGuard;
     // domain 의 config record 를 infrastructure 가 읽는 것은 허용 방향(infrastructure → domain).
     private final SummaryJobProperties summaryJobProperties;
     private final TokenCounter tokenCounter;
@@ -53,14 +50,14 @@ public class AiSummaryClientImpl implements AiSummaryClient {
             ChatClient chatClient,
             AiPromptAuditLogger auditLogger,
             SummaryPromptAssembler promptAssembler,
-            OpenAiRequestGate requestGate,
+            OpenAiRateLimitGuard rateLimitGuard,
             SummaryJobProperties summaryJobProperties,
             TokenCounter tokenCounter
     ) {
         this.chatClient = chatClient;
         this.auditLogger = auditLogger;
         this.promptAssembler = promptAssembler;
-        this.requestGate = requestGate;
+        this.rateLimitGuard = rateLimitGuard;
         this.summaryJobProperties = summaryJobProperties;
         this.tokenCounter = tokenCounter;
         this.summaryResponseFormat = ResponseFormat.builder()
@@ -82,15 +79,7 @@ public class AiSummaryClientImpl implements AiSummaryClient {
         // "브레이커 잠깐 차단(Retry-After 만큼) + 무벌점 반납" 으로 처리한다 (기존 경로 재사용).
         int estimatedTokens = tokenCounter.count(promptAssembler.systemPrompt()) + tokenCounter.count(chatHistory)
                 + summaryJobProperties.estimatedOutputTokens();
-        OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
-        if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
-            AiChatErrorCode code = rejected.reason() == OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN
-                    ? AiChatErrorCode.AI_QUOTA_EXHAUSTED
-                    : AiChatErrorCode.AI_RATE_LIMIT_BURST;
-            throw new TooManyRequestsException(
-                    code,
-                    new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
-        }
+        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
 
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(messages),

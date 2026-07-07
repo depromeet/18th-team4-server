@@ -2,15 +2,12 @@ package com.readum.infrastructure.ai.openai.contextsummary;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.ContextSummaryResult;
-import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiContextSummaryClient;
 import com.readum.domain.aiChat.out.TokenCounter;
-import com.readum.domain.exception.RateLimitInfo;
-import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -39,7 +36,7 @@ public class AiContextSummaryClientImpl implements AiContextSummaryClient {
     private final AiPromptAuditLogger auditLogger;
     private final ContextSummaryPromptAssembler promptAssembler;
     private final ResponseFormat responseFormat;
-    private final OpenAiRequestGate requestGate;
+    private final OpenAiRateLimitGuard rateLimitGuard;
     private final AiChatProperties aiChatProperties;
     private final TokenCounter tokenCounter;
 
@@ -50,14 +47,14 @@ public class AiContextSummaryClientImpl implements AiContextSummaryClient {
             ChatClient chatClient,
             AiPromptAuditLogger auditLogger,
             ContextSummaryPromptAssembler promptAssembler,
-            OpenAiRequestGate requestGate,
+            OpenAiRateLimitGuard rateLimitGuard,
             AiChatProperties aiChatProperties,
             TokenCounter tokenCounter
     ) {
         this.chatClient = chatClient;
         this.auditLogger = auditLogger;
         this.promptAssembler = promptAssembler;
-        this.requestGate = requestGate;
+        this.rateLimitGuard = rateLimitGuard;
         this.aiChatProperties = aiChatProperties;
         this.tokenCounter = tokenCounter;
         this.responseFormat = ResponseFormat.builder()
@@ -79,15 +76,7 @@ public class AiContextSummaryClientImpl implements AiContextSummaryClient {
         int estimatedTokens = tokenCounter.count(promptAssembler.systemPrompt())
                 + tokenCounter.count(userMessage)
                 + aiChatProperties.context().summaryEstimatedOutputTokens();
-        OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
-        if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
-            AiChatErrorCode code = rejected.reason() == OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN
-                    ? AiChatErrorCode.AI_QUOTA_EXHAUSTED
-                    : AiChatErrorCode.AI_RATE_LIMIT_BURST;
-            throw new TooManyRequestsException(
-                    code,
-                    new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
-        }
+        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
 
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(deltaMessages),

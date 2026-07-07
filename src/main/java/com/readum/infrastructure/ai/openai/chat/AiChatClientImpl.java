@@ -4,15 +4,12 @@ import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
-import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.exception.BusinessException;
-import com.readum.domain.exception.RateLimitInfo;
-import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.domain.aiChat.out.TokenCounter;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -48,7 +45,7 @@ public class AiChatClientImpl implements AiChatClient {
 
     private final ChatClient chatClient;
     private final AiPromptAuditLogger auditLogger;
-    private final OpenAiRequestGate requestGate;
+    private final OpenAiRateLimitGuard rateLimitGuard;
     private final AiChatProperties aiChatProperties;
     private final TokenCounter tokenCounter;
 
@@ -80,15 +77,7 @@ public class AiChatClientImpl implements AiChatClient {
         }
         int estimatedTokens = payloadTokens
                 + aiChatProperties.tokenBudget().estimatedOutputTokens();
-        OpenAiRequestGate.Decision decision = requestGate.tryAcquire(chatModel, estimatedTokens);
-        if (decision instanceof OpenAiRequestGate.Decision.Rejected rejected) {
-            AiChatErrorCode code = rejected.reason() == OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN
-                    ? AiChatErrorCode.AI_QUOTA_EXHAUSTED
-                    : AiChatErrorCode.AI_RATE_LIMIT_BURST;
-            throw new TooManyRequestsException(
-                    code,
-                    new RateLimitInfo(rejected.retryAfter(), null, null, null, null, null, null));
-        }
+        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
 
         List<Message> messages = command.history().stream()
                 .map(this::toSpringMessage)
