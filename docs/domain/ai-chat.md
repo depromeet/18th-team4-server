@@ -66,6 +66,21 @@ LLM 으로 제목을 만든다. 채팅 저장과 분리한 이유: 제목 생성
 실패·지연이 채팅 본편을 롤백하거나 막아서는 안 되기 때문. 격벽 크기는
 thread 32 / thread 당 큐 64 (docs/record/0001 참조).
 
+**컨텍스트 요약 (비동기)** — 긴 대화의 호출당 입력 토큰을 유계로 만들기 위해
+과거 원문을 누적 요약으로 대체한다. ASSISTANT 응답 저장 커밋 후
+(`@TransactionalEventListener(AFTER_COMMIT)`) "요약 경계 이후 원문 꼬리
+토큰 합 > 4,000" 이면 요약 job(`ai_chat_context_summary_job`)을 멱등 적재한다
+(세션당 활성 1개 unique). 전용 워커(`ContextSummaryWorker`)가 감상문 큐
+골격(SKIP LOCKED·lease·재시도·reaper)을 복제해 처리한다 — 이전 요약 +
+경계 이후 델타 원문을 LLM(전역 게이트 경유)으로 합쳐 새 누적 요약을 만들고,
+`ai_chat_context_summary` 를 **`version` 낙관적 갱신 + 경계 단조 증가** 로만
+반영한다(늦게 돌아온 옛 워커의 덮어쓰기 차단). 요약 범위는 처리 시점에
+계산한다: 현재 경계부터, 최신 원문 중 2,000 토큰을 남긴 지점(가장 가까운
+턴 경계로 내림)까지. 감상문 큐와 공통 추상화로 묶지 않는다 — 두 큐의
+생명주기가 다르다(요약은 세션 잠금 없이 반복 갱신). 요약 실패는 채팅에
+무영향이다: 조립기가 하드캡(8,000) 안에서 원문으로 계속 동작하고, 계속
+밀리면 오래된 쪽부터 잘리는 우아한 열화 + 로그.
+
 **감상문 흐름 (경계에 걸친 시나리오)** — 시작은 둘 중 하나:
 
 - 수동: 사용자가 요청 → `SummaryDraftService` 가 자격 판정(누적 토큰 500
@@ -84,7 +99,8 @@ aiChat 의 `SummaryEditService` 가 담당한다 (LLM 무관, 사용자 직접 �
 
 | 항목 | 값 |
 |---|---|
-| 컨텍스트 조립 | 토큰 예산 기반 원문 꼬리 — hard-cap 8,000 토큰(`COMPLETED` 만), newest-first 로 `token_count` 합산, 턴 경계 정렬(꼬리는 USER 시작), 마지막 턴 강제 포함. 초과분은 오래된 턴부터 제외. 요약 결합은 PR-3 |
+| 컨텍스트 조립 | `[시스템+책][누적 요약][요약 경계 이후 원문 꼬리][현재 메시지]`. 요약 경계(`summarized_until_message_id`) 이후 `COMPLETED` 원문만 꼬리로, newest-first 로 `token_count` 합산해 hard-cap 8,000 까지(안전핀), 턴 경계 정렬(꼬리는 USER 시작), 마지막 턴 강제 포함. 경계 앞은 누적 요약이 대체 — 중복도 구멍도 없다. 요약은 시스템 프롬프트 뒤 저변동 블록으로 붙고 사용자 예산엔 미계상 |
+| 컨텍스트 요약 | ASSISTANT 응답 커밋 후 "경계 이후 꼬리 토큰 합 > 4,000" 이면 요약 job 적재(멱등). 워커가 비동기로 이전 요약 + 델타 원문 → 새 누적 요약(전역 게이트 경유, 사용자 예산 미계상). 최신 2,000 토큰은 항상 원문으로 남긴다. 요약 실패는 채팅 무영향(하드캡 안에서 원문으로 우아한 열화) |
 | 토큰 계산 | jtokkit(o200k_base) 로컬 계산. `ai_chat_message.token_count` = USER 로컬 계산 · ASSISTANT 실측 출력 |
 | 메시지 최대 길이 | 1,000자 |
 | 폭주 가드 (DB 카운트) | 10초/5건 — 상태 무관 USER 메시지 |
@@ -94,7 +110,7 @@ aiChat 의 `SummaryEditService` 가 담당한다 (LLM 무관, 사용자 직접 �
 
 ## 경계
 
-**이 도메인에 속하는 것**: 세션·메시지 생명주기, 컨텍스트 윈도우 정책,
+**이 도메인에 속하는 것**: 세션·메시지 생명주기, 컨텍스트 조립·요약 정책,
 감상문의 사용자 대면 3종(요청 접수 `SummaryDraftService` · 자격/진행률 조회
 `SummaryDraftSearchService` · 완성본 편집 `SummaryEditService`).
 
@@ -119,12 +135,14 @@ aiChat 의 `SummaryEditService` 가 담당한다 (LLM 무관, 사용자 직접 �
 
 ## 관련 패키지
 
-- `domain/aiChat/` — service(11개) · service/policy · out(포트 4) · event ·
-  listener · config · dto
-- `model/aiChat/` — AiChatSession, AiChatMessage
-- `infrastructure/ai/openai/` — 포트 구현체, advisor 체인
+- `domain/aiChat/` — service(컨텍스트 요약 워커·생명주기·적재 포함) · service/policy ·
+  out(포트: `AiChatClient` · `AiSummaryClient` · `TokenCounter` · `AiContextSummaryClient` 등) ·
+  event · listener(제목 생성 · 컨텍스트 요약 트리거) · config · dto
+- `model/aiChat/` — AiChatSession, AiChatMessage, AiChatContextSummary, AiChatContextSummaryJob
+- `infrastructure/ai/openai/` — 포트 구현체, 기능별 하위 패키지(chat · title · summary ·
+  contextsummary · guardrail · moderation · ratelimit) + 공용 배관은 루트
 - `infrastructure/redis/` — 토큰 예산 어댑터(`ChatTokenBudgetRedisAdapter`), 창 계산기
-- `infrastructure/aiChat/scheduler/` — 감상문 작업 적재 스케줄러
+- `infrastructure/aiChat/scheduler/` — 감상문 작업 적재 스케줄러 + 컨텍스트 요약 디스패처·reaper·풀
 - `presentation/controller/aiChat/`
 
 ## 관련 기록

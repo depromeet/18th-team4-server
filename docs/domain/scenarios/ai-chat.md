@@ -71,7 +71,7 @@ flowchart TD
     L -->|예| M["400 SESSION_ALREADY_SUMMARIZED — 감상문 확정, 영구 대화 불가"]
     L -->|아니오| N{"활성 summary_job 존재 — existsBlockingSummaryJob"}
     N -->|예| O["400 SESSION_LOCKED — 감상문 생성 중, 일시 전송 불가"]
-    N -->|아니오| P["이력 조회 — COMPLETED 만 최근 40개(20턴) + 책 정보 조회"]
+    N -->|아니오| P["컨텍스트 조립 — 누적 요약 + 요약 경계 이후 COMPLETED 원문 꼬리(토큰 예산 기반, hard-cap 8,000) + 책 정보"]
     P --> Q{"InputModerationClient.check — SSE 시작 전 동기 호출"}
     Q -->|BLOCKED| R["USER 메시지 REJECTED 저장 → 400 GUARDRAIL_BLOCKED_INPUT"]
     Q -->|UNAVAILABLE| S["저장 없이 503 GUARDRAIL_MODERATION_UNAVAILABLE — 판정 불가 시 차단"]
@@ -79,7 +79,7 @@ flowchart TD
     T --> U["AiChatClient.stream — 출력 advisor 체인: PromptInjectionPatternAdvisor → SafeGuardAdvisor → ModerationOutputAdvisor (infrastructure)"]
     U --> V["token 이벤트 스트리밍 — delta 를 즉시 전송하며 본문 누적"]
     V --> W{"스트림 종료 방식"}
-    W -->|"정상 종료 (usage 청크 도착)"| X["saveAssistantSuccess — ASSISTANT COMPLETED 저장 + 출력 토큰 누적, 첫 응답이면 제목 생성 이벤트 발행"]
+    W -->|"정상 종료 (usage 청크 도착)"| X["saveAssistantSuccess — ASSISTANT COMPLETED 저장 + 출력 토큰 누적, 첫 응답이면 제목 생성 이벤트, 커밋 후 컨텍스트 요약 트리거 이벤트(꼬리>4,000이면 요약 job 적재)"]
     X --> Y["done 이벤트 (tokenCount, createdAt)"]
     W -->|"스트림 에러 (OpenAI 429/5xx, 네트워크)"| Z["error 이벤트 즉시 전송 + 부분 응답 FAILED 비동기 저장"]
     W -->|"클라이언트 중단 (cancel)"| AB{"수신 상태"}
