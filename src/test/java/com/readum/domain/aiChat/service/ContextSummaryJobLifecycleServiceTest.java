@@ -46,13 +46,13 @@ class ContextSummaryJobLifecycleServiceTest {
     // 결정적 test double: 토큰 = 글자 수(null 은 0).
     private final TokenCounter tokenCounter = text -> text == null ? 0 : text.length();
 
-    private ContextSummaryJobLifecycleService serviceWithRecentBudget(int recentRawTokenBudget) {
-        return serviceWith(recentRawTokenBudget, 120000);
+    private ContextSummaryJobLifecycleService serviceWithRecentBudget(int keepRecentRawTokens) {
+        return serviceWith(keepRecentRawTokens, 120000);
     }
 
-    private ContextSummaryJobLifecycleService serviceWith(int recentRawTokenBudget, int maxRequestTokens) {
+    private ContextSummaryJobLifecycleService serviceWith(int keepRecentRawTokens, int maxRequestTokens) {
         AiChatProperties aiChatProperties = new AiChatProperties(
-                new AiChatProperties.Context(8000, recentRawTokenBudget, 4000, 800),
+                new AiChatProperties.Context(8000, keepRecentRawTokens, 4000, 800),
                 new AiChatProperties.MessageRule(1000),
                 new AiChatProperties.RateLimit(10, 5),
                 new AiChatProperties.TokenBudget(4, 20000, 512),
@@ -60,7 +60,8 @@ class ContextSummaryJobLifecycleServiceTest {
         ContextSummaryJobProperties jobProperties = new ContextSummaryJobProperties(
                 2, 2000, 60000, 120, 5, 60, maxRequestTokens);
         return new ContextSummaryJobLifecycleService(
-                jobRepository, summaryRepository, messageRepository, jobProperties, aiChatProperties, tokenCounter);
+                jobRepository, summaryRepository, messageRepository, jobProperties, tokenCounter,
+                new SummaryRangeSelector(aiChatProperties, jobProperties, tokenCounter));
     }
 
     private void givenOwnedProcessingJob() {
@@ -71,9 +72,11 @@ class ContextSummaryJobLifecycleServiceTest {
 
     @Test
     void 남길_원문이_예산_이하면_요약할_구간이_없어_null_을_반환하고_작업을_성공_종료한다() {
-        givenOwnedProcessingJob();
+        AiChatContextSummaryJob job = AiChatContextSummaryJobFixture.persistedProcessing(
+                JOB_ID, SESSION_ID, OWNER, LocalDateTime.now().plusMinutes(2), 0);
+        given(jobRepository.findByIdForUpdate(JOB_ID)).willReturn(Optional.of(job));
         given(summaryRepository.findBySessionId(SESSION_ID)).willReturn(Optional.empty());
-        // 델타 전체 합 6 < recentRawTokenBudget 10 → 요약 구간 없음.
+        // 델타 전체 합 6 < keepRecentRawTokens 10 → 요약 구간 없음.
         given(messageRepository.findCompletedMessagesAfter(SESSION_ID, 0L)).willReturn(List.of(
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "aaa"),
                 AiChatMessageFixture.persistedAssistantMessage(2L, SESSION_ID, "bbb")
@@ -82,13 +85,16 @@ class ContextSummaryJobLifecycleServiceTest {
         ContextSummaryGenerationContext context = serviceWithRecentBudget(10).prepareGeneration(JOB_ID, OWNER);
 
         assertThat(context).isNull();
+        assertThat(job.getStatus())
+                .as("요약할 구간이 없으면 준비 단계에서 작업을 성공 종료한다")
+                .isEqualTo(AiChatContextSummaryJob.Status.SUCCEEDED);
     }
 
     @Test
     void 요약_범위는_recent_budget_만큼_남기고_요약_반영_지점은_ASSISTANT_로_정렬된다() {
         givenOwnedProcessingJob();
         given(summaryRepository.findBySessionId(SESSION_ID)).willReturn(Optional.empty());
-        // 각 2토큰, recentRawTokenBudget=6. newest 부터 6 채우면 id4·5·6 이 최근 원문 대화, recentMessagesStartIndex 는 id4(index3).
+        // 각 2토큰, keepRecentRawTokens=6. newest 부터 6 채우면 id4·5·6 이 최근 원문 대화, recentMessagesStartIndex 는 id4(index3).
         // 요약 후보 [id1 U, id2 A, id3 U] → 경계 정렬로 최근 원문 대화 시작이 USER 가 되도록 id3 U 를 최근 원문 대화로 밀어 [id1 U, id2 A] 만 요약.
         given(messageRepository.findCompletedMessagesAfter(SESSION_ID, 0L)).willReturn(List.of(
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "11"),
@@ -113,7 +119,7 @@ class ContextSummaryJobLifecycleServiceTest {
         givenOwnedProcessingJob();
         given(summaryRepository.findBySessionId(SESSION_ID)).willReturn(Optional.empty());
         // maxRequestTokens=810, 이전 요약 없음, 출력추정 800 → 청크 예산 10.
-        // recentRawTokenBudget=2 라 최근 원문 대화는 [id5,id6], 요약 후보는 [id1..id4].
+        // keepRecentRawTokens=2 라 최근 원문 대화는 [id5,id6], 요약 후보는 [id1..id4].
         // 청크 예산 10 이라 오래된 쪽부터 id1(4)+id2(4)=8 까지만 — id3 추가 시 12>10 → 이번엔 [id1,id2] 만 요약(부분 전진, 나머지는 다음 작업).
         given(messageRepository.findCompletedMessagesAfter(SESSION_ID, 0L)).willReturn(List.of(
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "aaaa"),

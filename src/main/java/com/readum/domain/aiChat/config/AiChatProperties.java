@@ -19,14 +19,17 @@ public record AiChatProperties(
 
     /**
      * 채팅 컨텍스트 조립·요약 설정. 조립 모델: [시스템+책][누적 요약][요약 반영 지점 이후 최근 원문 대화][현재 메시지].
-     * - recentRawHardCapTokens: 최근 원문 대화 토큰 절대 상한(안전핀). 요약이 밀렸을 때 초과분은 오래된 턴부터 제외.
-     * - recentRawTokenBudget: 요약 진행과 무관하게 항상 원문으로 유지할 최근 원문 대화 크기(품질 장치). 요약 범위 계산의 하한.
+     * - assemblyRecentRawMaxTokens: 조립기가 한 호출에 실어보낼 최근 원문 대화의 최대 토큰(안전핀). 요약이 밀렸을 때 초과분은 오래된 턴부터 제외.
+     * - keepRecentRawTokens: 워커가 요약하지 않고 항상 원문으로 남겨둘 최근 원문 대화 크기(품질 장치). 요약 범위 계산의 하한.
      * - summarizeTriggerTokenThreshold: 요약 반영 지점 이후 최근 원문 대화 토큰 합이 이를 넘으면 요약 job 을 적재한다.
      * - summaryEstimatedOutputTokens: 요약 갱신 호출의 출력 추정값 — 게이트 예약 계상용(프롬프트 길이 지시가 아님).
+     *
+     * 불변식(계약): {@code assemblyRecentRawMaxTokens >= keepRecentRawTokens} 여야 한다. 조립기가 실어보낼 최대가
+     * 워커가 남겨둔 최근 원문보다 작으면, 워커가 남긴 원문을 조립기가 다 싣지 못해 오래된 턴이 조용히 누락된다.
      */
     public record Context(
-            @Positive int recentRawHardCapTokens,
-            @Positive int recentRawTokenBudget,
+            @Positive int assemblyRecentRawMaxTokens,
+            @Positive int keepRecentRawTokens,
             @Positive int summarizeTriggerTokenThreshold,
             @Positive int summaryEstimatedOutputTokens
     ) {

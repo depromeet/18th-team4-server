@@ -38,9 +38,9 @@ class AiChatHistorySearchServiceTest {
     // 결정적 test double: 메시지 토큰 = 내용 글자 수. token_count 미설정 fixture 라 이 fallback 이 쓰인다.
     private final TokenCounter tokenCounter = text -> text == null ? 0 : text.length();
 
-    private AiChatHistorySearchService serviceWithHardCap(int hardCap) {
+    private AiChatHistorySearchService serviceWithAssemblyMax(int assemblyMax) {
         AiChatProperties properties = new AiChatProperties(
-                new AiChatProperties.Context(hardCap, 2000, 4000, 800),
+                new AiChatProperties.Context(assemblyMax, 2000, 4000, 800),
                 new AiChatProperties.MessageRule(1000),
                 new AiChatProperties.RateLimit(10, 5),
                 new AiChatProperties.TokenBudget(4, 20000, 512),
@@ -65,7 +65,7 @@ class AiChatHistorySearchServiceTest {
 
     @Test
     void 요약이_없으면_요약은_null_이고_예산_이내면_전부_시간순으로_반환한다() {
-        // newest-first(DESC) 로 반환됨. 합 10 < hard-cap 100 → 전부 포함, ASC 로 정렬.
+        // newest-first(DESC) 로 반환됨. 합 10 < 최대 토큰 100 → 전부 포함, ASC 로 정렬.
         givenNoSummary();
         givenRecentDesc(List.of(
                 AiChatMessageFixture.persistedAssistantMessage(4L, SESSION_ID, "aaaa"),
@@ -74,7 +74,7 @@ class AiChatHistorySearchServiceTest {
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "d")
         ));
 
-        AssembledContext context = serviceWithHardCap(100).assembleContext(SESSION_ID);
+        AssembledContext context = serviceWithAssemblyMax(100).assembleContext(SESSION_ID);
 
         assertThat(context.summary()).isNull();
         assertThat(context.recentMessages()).hasSize(4);
@@ -85,7 +85,7 @@ class AiChatHistorySearchServiceTest {
 
     @Test
     void 예산을_넘으면_오래된_턴을_드랍하고_최근_원문_대화는_USER로_시작한다() {
-        // 각 3토큰, hard-cap 10 → newest 3개(합 9)만 담기고 4번째(12)는 제외.
+        // 각 3토큰, 최대 토큰 10 → newest 3개(합 9)만 담기고 4번째(12)는 제외.
         // 담긴 3개(newest-first)의 가장 오래된 쪽이 ASSISTANT 면 턴 경계 정렬로 제거된다.
         givenNoSummary();
         givenRecentDesc(List.of(
@@ -97,7 +97,7 @@ class AiChatHistorySearchServiceTest {
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "fff")
         ));
 
-        List<HistoryMessage> history = serviceWithHardCap(10).assembleContext(SESSION_ID).recentMessages();
+        List<HistoryMessage> history = serviceWithAssemblyMax(10).assembleContext(SESSION_ID).recentMessages();
 
         // 담김 [id6 ASST, id5 USER, id4 ASST] → 오래된 id4 ASST 제거 → [id5 USER, id6 ASST]
         assertThat(history).hasSize(2);
@@ -108,13 +108,13 @@ class AiChatHistorySearchServiceTest {
 
     @Test
     void 마지막_턴은_예산을_넘어도_최소_한_개는_포함한다() {
-        // 단일 메시지가 hard-cap(1) 보다 커도 빈 최근 원문 대화를 만들지 않는다.
+        // 단일 메시지가 최대 토큰(1) 보다 커도 빈 최근 원문 대화를 만들지 않는다.
         givenNoSummary();
         givenRecentDesc(List.of(
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "xxxxxxxxxx")
         ));
 
-        List<HistoryMessage> history = serviceWithHardCap(1).assembleContext(SESSION_ID).recentMessages();
+        List<HistoryMessage> history = serviceWithAssemblyMax(1).assembleContext(SESSION_ID).recentMessages();
 
         assertThat(history).hasSize(1);
         assertThat(history.get(0).content()).isEqualTo("xxxxxxxxxx");
@@ -125,7 +125,7 @@ class AiChatHistorySearchServiceTest {
         givenNoSummary();
         givenRecentDesc(List.of());
 
-        AssembledContext context = serviceWithHardCap(8000).assembleContext(SESSION_ID);
+        AssembledContext context = serviceWithAssemblyMax(8000).assembleContext(SESSION_ID);
 
         assertThat(context.summary()).isNull();
         assertThat(context.recentMessages()).isEmpty();
@@ -143,7 +143,7 @@ class AiChatHistorySearchServiceTest {
                 AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "older-user")
         ));
 
-        AssembledContext context = serviceWithHardCap(8000).assembleContext(SESSION_ID);
+        AssembledContext context = serviceWithAssemblyMax(8000).assembleContext(SESSION_ID);
 
         assertThat(context.summary()).isEqualTo("누적 요약 본문");
         assertThat(context.recentMessages()).hasSize(2);
@@ -161,7 +161,7 @@ class AiChatHistorySearchServiceTest {
                 AiChatMessageFixture.persistedUserMessage(4L, SESSION_ID, "b")
         ));
 
-        AssembledContext context = serviceWithHardCap(8000).assembleContext(SESSION_ID);
+        AssembledContext context = serviceWithAssemblyMax(8000).assembleContext(SESSION_ID);
 
         assertThat(context.summary()).isEqualTo("전부 요약됨");
         assertThat(context.recentMessages()).isEmpty();

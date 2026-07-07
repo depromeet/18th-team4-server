@@ -58,6 +58,11 @@ public class AiChatContextSummary {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    /** 마지막으로 요약된 메시지 id(요약 반영 지점)를 null 안전하게 읽는다. 요약 행이 아직 없으면 0(= 모든 원문이 아직 요약 안 됨). */
+    public static long lastSummarizedMessageIdOrZero(AiChatContextSummary summary) {
+        return summary != null ? summary.summarizedUpToMessageId : 0L;
+    }
+
     /** 세션의 첫 요약. version=1 로 시작한다. */
     public static AiChatContextSummary create(
             Long sessionId, String content, Long summarizedUpToMessageId, int tokenCount

@@ -32,8 +32,8 @@ jwt:
 
 ai-chat:
   context:
-    recent-raw-hard-cap-tokens: 8000
-    recent-raw-token-budget: 2000
+    assembly-recent-raw-max-tokens: 8000
+    keep-recent-raw-tokens: 2000
     summarize-trigger-token-threshold: 4000
     summary-estimated-output-tokens: 800
   message:

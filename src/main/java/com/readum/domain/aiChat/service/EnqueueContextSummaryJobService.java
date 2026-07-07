@@ -40,10 +40,10 @@ public class EnqueueContextSummaryJobService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 200, multiplier = 2.0, maxDelay = 1000))
     public void enqueueIfRecentMessagesExceedThreshold(Long sessionId) {
-        long summarizedUpToMessageId = summaryRepository.findBySessionId(sessionId)
-                .map(AiChatContextSummary::getSummarizedUpToMessageId)
-                .orElse(0L);
-        long recentTokenSum = messageRepository.sumRecentMessageTokens(sessionId, summarizedUpToMessageId);
+        // 트리거도 체크포인트(마지막 요약 메시지 id)가 필요하다 — "그 이후 원문 토큰 합"으로 판정하기 때문. 읽기는 조립기·선택기와 같은 접근자로 통일.
+        AiChatContextSummary summary = summaryRepository.findBySessionId(sessionId).orElse(null);
+        long lastSummarizedMessageId = AiChatContextSummary.lastSummarizedMessageIdOrZero(summary);
+        long recentTokenSum = messageRepository.sumRecentMessageTokens(sessionId, lastSummarizedMessageId);
         if (recentTokenSum <= aiChatProperties.context().summarizeTriggerTokenThreshold()) {
             return;
         }

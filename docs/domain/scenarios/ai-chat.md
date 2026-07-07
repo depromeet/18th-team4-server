@@ -71,7 +71,7 @@ flowchart TD
     L -->|예| M["400 SESSION_ALREADY_SUMMARIZED — 감상문 확정, 영구 대화 불가"]
     L -->|아니오| N{"활성 summary_job 존재 — existsBlockingSummaryJob"}
     N -->|예| O["400 SESSION_LOCKED — 감상문 생성 중, 일시 전송 불가"]
-    N -->|아니오| P["컨텍스트 조립 — 누적 요약 + 요약 반영 지점 이후 COMPLETED 최근 원문 대화(토큰 예산 기반, hard-cap 8,000) + 책 정보"]
+    N -->|아니오| P["컨텍스트 조립 — 누적 요약 + 요약 반영 지점 이후 COMPLETED 최근 원문 대화(토큰 예산 기반, 최근 원문 최대 8,000) + 책 정보"]
     P --> Q{"InputModerationClient.check — SSE 시작 전 동기 호출"}
     Q -->|BLOCKED| R["USER 메시지 REJECTED 저장 → 400 GUARDRAIL_BLOCKED_INPUT"]
     Q -->|UNAVAILABLE| S["저장 없이 503 GUARDRAIL_MODERATION_UNAVAILABLE — 판정 불가 시 차단"]

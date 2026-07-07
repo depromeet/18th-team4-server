@@ -27,7 +27,7 @@ import java.util.UUID;
  * 감상문 워커(SummaryGenerationWorker)와 같은 골격 — 공통 추상화로 묶지 않는다(두 큐의 생명주기가 다름).
  *
  * 실패 분류:
- * - 추정 토큰 > maxRequestTokens → 호출 전 즉시 FAILED(fail-fast). 채팅은 하드캡 안에서 원문으로 계속 동작.
+ * - 추정 토큰 > maxRequestTokens → 호출 전 즉시 FAILED(fail-fast). 채팅은 최근 원문 최대 토큰 안에서 원문으로 계속 동작.
  * - burst 429(게이트 분당 예산 포화) → 무벌점 반납
  * - quota 429(게이트 쿨다운) → 재시도 가능 실패로 기록. 쿨다운은 게이트가 관리
  * - 5xx → 재시도 / 4xx → 즉시 FAILED
@@ -77,7 +77,7 @@ public class ContextSummaryWorker {
 
         int estimatedTokens = estimateTokens(context);
         if (estimatedTokens > jobProperties.maxRequestTokens()) {
-            // 상한보다 큰 요청은 게이트에서도 계속 막힌다 → 즉시 실패로 드러낸다. 채팅은 하드캡 안에서 계속 동작.
+            // 상한보다 큰 요청은 게이트에서도 계속 막힌다 → 즉시 실패로 드러낸다. 채팅은 최근 원문 최대 토큰 안에서 계속 동작.
             lifecycleService.recordFailure(jobId, owner, false, ERROR_SESSION_TOO_LARGE,
                     "요약 입력이 너무 큽니다 (추정 토큰 " + estimatedTokens
                             + " > 상한 " + jobProperties.maxRequestTokens() + ")", null);
