@@ -19,10 +19,10 @@ class IncidentIssueLinkFactoryTest {
             new IncidentIssueLinkFactory("https://github.com/depromeet/18th-team4-server", "dev", "abc1234");
 
     @Test
-    void 링크는_incident_라벨이_붙은_이슈_생성_화면을_가리킨다() {
+    void 링크는_error_라벨이_붙은_이슈_생성_화면을_가리킨다() {
         String url = factory.create(errorEvent("적재 실패", null), "fp");
 
-        assertThat(url).startsWith("https://github.com/depromeet/18th-team4-server/issues/new?labels=incident");
+        assertThat(url).startsWith("https://github.com/depromeet/18th-team4-server/issues/new?labels=error");
         assertThat(url).contains("&title=");
         assertThat(url).contains("&body=");
     }

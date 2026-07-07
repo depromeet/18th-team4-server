@@ -7,7 +7,7 @@
 ```
 ERROR 발생
   → Slack 알림 (fingerprint + "분석 이슈 열기" 프리필 링크 — SlackWebhookAppender)
-  → 사람이 링크 클릭 → 이슈 생성 (incident 라벨, 본문에 배포 커밋·stacktrace 프리필)
+  → 사람이 링크 클릭 → 이슈 생성 (error 라벨, 본문에 배포 커밋·stacktrace 프리필)
   → incident-analysis.yml 발동 → 배포 커밋 checkout → Claude Code 분석 → 이슈 코멘트
   → Slack 완료/실패 알림
 ```
@@ -15,11 +15,11 @@ ERROR 발생
 - **수집·링크 생성**: `com.readum.infrastructure.logging` 의 `SlackWebhookAppender` 가
   `IncidentFingerprint`(오류 요약 키)와 `IncidentIssueLinkFactory`(프리필 URL)를 사용한다.
   배포 커밋은 빌드 시 gradle-git-properties 가 jar 에 넣은 `git.properties` 에서 읽는다.
-- **분석 실행**: `.github/workflows/incident-analysis.yml`. `incident` 라벨이 붙은 이슈가
+- **분석 실행**: `.github/workflows/incident-analysis.yml`. `error` 라벨이 붙은 이슈가
   트리거다. 이슈 본문의 `<!-- deploy-sha: ... -->` 마커를 파싱해 그 커밋을 checkout 하고,
   Claude Code(`claude-code-action`)가 원인 후보·재현 조건·수정 방향을 이슈 코멘트로 남긴다.
   분석은 읽기 전용 — 코드 수정·PR 생성은 하지 않는다.
-- **두 번째 수동 경로**: 링크 없이도 아무 이슈에 `incident` 라벨을 붙이면 분석이 발동한다.
+- **두 번째 수동 경로**: 링크 없이도 아무 이슈에 `error` 라벨을 붙이면 분석이 발동한다.
   본문에 배포 커밋 마커가 없으면 기본 브랜치 최신 커밋 기준으로 분석하고 그 사실을 코멘트에 명시한다.
 - **Slack 알림은 원본 에러 알림의 스레드를 우선한다**: 분석 시작·완료·실패 알림은
   Bot 토큰이 있으면 채널 최근 이력(200건)에서 같은 fingerprint 를 담은 에러 알림을 찾아

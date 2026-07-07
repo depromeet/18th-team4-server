@@ -1,6 +1,6 @@
 # 운영 장애 분석 워크플로우.
-# Slack ERROR 알림의 "분석 이슈 열기" 링크(또는 이슈에 수동으로 incident 라벨 부착)로
-# incident 라벨 이슈가 생기면, 이슈 본문의 배포 커밋을 checkout 해 Claude Code 가
+# Slack ERROR 알림의 "분석 이슈 열기" 링크(또는 이슈에 수동으로 error 라벨 부착)로
+# error 라벨 이슈가 생기면, 이슈 본문의 배포 커밋을 checkout 해 Claude Code 가
 # 원인 후보를 분석하고 이슈 코멘트로 남긴 뒤 Slack 으로 완료/실패를 알린다.
 # 배포 파이프라인(deploy.yml)과 완전히 독립이다. 전체 흐름: docs/ops/incident-analysis.md
 
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   analyze:
-    if: github.event.label.name == 'incident'
+    if: github.event.label.name == 'error'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

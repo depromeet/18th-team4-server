@@ -13,7 +13,7 @@ import java.util.Properties;
 /**
  * ERROR 로그 한 건을 GitHub "분석 이슈 생성" 프리필 링크로 변환한다.
  *
- * <p>링크를 누르면 이슈 생성 화면이 제목/본문/{@code incident} 라벨이 채워진 상태로 열리고,
+ * <p>링크를 누르면 이슈 생성 화면이 제목/본문/{@code error} 라벨이 채워진 상태로 열리고,
  * 사람이 생성 버튼을 누르는 순간(=분석 승인) {@code incident-analysis.yml} 워크플로우가 발동한다.
  * 본문 끝의 {@code <!-- deploy-sha: ... -->} 주석은 워크플로우가 분석 대상 커밋을
  * checkout 할 때 파싱하는 마커다.
@@ -116,7 +116,7 @@ final class IncidentIssueLinkFactory {
 
     private String buildUrl(String title, String body) {
         return repositoryUrl + "/issues/new"
-                + "?labels=incident"
+                + "?labels=error"
                 + "&title=" + encode(title)
                 + "&body=" + encode(body);
     }
