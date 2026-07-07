@@ -88,7 +88,7 @@ class AiChatMessageSendServiceTest {
             (text == null || text.isEmpty()) ? 0 : (int) Math.ceil(text.length() / 2.5);
 
     private final AiChatProperties aiChatProperties = new AiChatProperties(
-            new AiChatProperties.Context(8000),
+            new AiChatProperties.Context(8000, 2000, 4000, 800),
             new AiChatProperties.MessageRule(1000),
             new AiChatProperties.RateLimit(10, 5),
             new AiChatProperties.TokenBudget(4, 20000, 512),
@@ -114,7 +114,7 @@ class AiChatMessageSendServiceTest {
 
     private void givenLoadHistory(Long sessionId, List<HistoryMessage> history, Long userBookId) {
         given(persistService.loadHistory(sessionId, USER_ID))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(history, userBookId));
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(null, history, userBookId));
     }
 
     @Test
