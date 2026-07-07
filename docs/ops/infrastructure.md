@@ -47,6 +47,7 @@
 | 구성물 | 위치 (서버) | 원본 |
 |---|---|---|
 | nginx server 블록 | `/etc/nginx/sites-available/app.conf` | `infra/nginx/app.conf` |
+| nginx WebSocket map | `/etc/nginx/conf.d/websocket-upgrade.conf` | `infra/nginx/websocket-upgrade.conf` — app.conf 가 쓰는 `$connection_upgrade` 를 정의하는 map. map 은 http 컨텍스트에만 둘 수 있어 server 블록 밖 conf.d 조각으로 분리. 없으면 nginx 기동 실패 |
 | 전환 스위치(upstream) | `/etc/nginx/conf.d/readum-upstream.conf` | 없음 — "지금 어느 색이 활성인가"라는 런타임 상태. `deploy.sh` 가 생성·갱신하며 활성 색 판정도 이 파일에서 읽는다 |
 | systemd 유닛 | `/etc/systemd/system/readum-{blue,green}.service` | `infra/systemd/` |
 | 배포 스크립트 | `/opt/readum/bin/deploy.sh` | `infra/scripts/deploy.sh` (CI 가 배포 때마다 동기화) |
@@ -94,7 +95,7 @@
 | DNS 관리 | 가비아 |
 | 프론트엔드 | readum.kr (CloudFront) |
 | 백엔드 API | api.readum.kr → EC2 |
-| SSL 인증서 | Let's Encrypt (Certbot 자동 갱신, nginx 에서 TLS 종료) |
+| SSL 인증서 | Let's Encrypt (Certbot 자동 갱신, nginx 에서 TLS 종료). 이 서버 인증서는 **api.readum.kr 단독** — readum.kr 은 CloudFront 로 가므로 이 서버에서 ACME 검증이 안 돼 인증서에 포함하면 갱신이 실패한다 (2026-07-07 readum.kr 제거) |
 
 서버 공인 IP 는 탄력적 IP 로 고정한다 (미고정 상태에서 인스턴스 stop/start 시 IP 가 바뀌어 DNS 가 끊긴 사고가 2026-07-06 실제로 발생). 배포 대상 주소의 원본은 `deploy.yml` 의 `env.DEPLOY_HOST`.
 
