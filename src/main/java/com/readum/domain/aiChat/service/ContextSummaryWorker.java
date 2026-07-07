@@ -28,9 +28,13 @@ import java.util.UUID;
  *
  * 실패 분류:
  * - 추정 토큰 > maxRequestTokens → 호출 전 즉시 FAILED(fail-fast). 채팅은 최근 원문 최대 토큰 안에서 원문으로 계속 동작.
- * - burst 429(게이트 분당 예산 포화) → 무벌점 반납
- * - quota 429(게이트 쿨다운) → 재시도 가능 실패로 기록. 쿨다운은 게이트가 관리
+ * - burst 429(게이트 분당 예산 포화) → 무벌점 반납 + 이번 드레인 사이클 중단
+ * - quota 429(게이트 쿨다운) → 재시도 가능 실패로 기록 + 이번 드레인 사이클 중단. 쿨다운은 게이트가 관리
  * - 5xx → 재시도 / 4xx → 즉시 FAILED
+ *
+ * burst/quota 는 계정 전역 신호다 — 게이트는 HTTP 전에(로컬 예산 검사만으로) 429 를 던지므로, 무벌점 반납한 작업을
+ * 같은 사이클에서 다시 선점하면 예산이 찰 때까지 claim→반납을 무한 반복하며 DB 를 두드린다. 그래서 quota 쿨다운
+ * 조기 반환과 같은 취지로, 전역 게이트가 포화면 이번 드레인 사이클을 멈추고 다음 dispatch 주기에 다시 시도한다.
  */
 @Slf4j
 @Component
@@ -64,15 +68,16 @@ public class ContextSummaryWorker {
         if (jobId == null) {
             return false;
         }
-        runJob(jobId, owner);
-        return !Thread.currentThread().isInterrupted();
+        boolean continueDraining = runJob(jobId, owner);
+        return continueDraining && !Thread.currentThread().isInterrupted();
     }
 
-    private void runJob(Long jobId, String owner) {
+    /** @return 이번 드레인 사이클을 계속할지 여부. 전역 게이트 포화(burst/quota)면 false 로 멈춘다(타이트 재선점 루프 방지). */
+    private boolean runJob(Long jobId, String owner) {
         ContextSummaryGenerationContext context = lifecycleService.prepareGeneration(jobId, owner);
         if (context == null) {
             // 요약할 구간 없음(경계 진전 없음) — 준비 단계에서 이미 성공 종료됨.
-            return;
+            return true;
         }
 
         int estimatedTokens = estimateTokens(context);
@@ -81,31 +86,31 @@ public class ContextSummaryWorker {
             lifecycleService.recordFailure(jobId, owner, false, ERROR_SESSION_TOO_LARGE,
                     "요약 입력이 너무 큽니다 (추정 토큰 " + estimatedTokens
                             + " > 상한 " + jobProperties.maxRequestTokens() + ")", null);
-            return;
+            return true;
         }
 
         ContextSummaryResult result;
         try {
             result = aiContextSummaryClient.generate(context.previousSummaryContent(), context.messagesToSummarize());
         } catch (TooManyRequestsException e) {
-            handleRateLimited(jobId, owner, e);
-            return;
+            return handleRateLimited(jobId, owner, e);
         } catch (NonTransientAiException e) {
             log.warn("컨텍스트 요약 회복 불가 오류 jobId={} sessionId={}", jobId, context.sessionId(), e);
             lifecycleService.recordFailure(jobId, owner, false,
                     AiChatErrorCode.AI_PROVIDER_ERROR.name(), e.getMessage(), null);
-            return;
+            return true;
         } catch (TransientAiException e) {
             lifecycleService.recordFailure(jobId, owner, true,
                     AiChatErrorCode.AI_PROVIDER_TRANSIENT.name(), e.getMessage(), null);
-            return;
+            return true;
         } catch (Exception e) {
             log.warn("컨텍스트 요약 실패 jobId={} sessionId={}", jobId, context.sessionId(), e);
             lifecycleService.recordFailure(jobId, owner, true,
                     AiChatErrorCode.AI_PROVIDER_TRANSIENT.name(), e.getMessage(), null);
-            return;
+            return true;
         }
         lifecycleService.recordSuccess(jobId, owner, context, result);
+        return true;
     }
 
     private int estimateTokens(ContextSummaryGenerationContext context) {
@@ -116,15 +121,17 @@ public class ContextSummaryWorker {
         return total + aiChatProperties.context().summaryEstimatedOutputTokens();
     }
 
-    private void handleRateLimited(Long jobId, String owner, TooManyRequestsException e) {
+    /** @return 항상 false — 전역 게이트 포화이므로 이번 드레인 사이클을 멈춘다(다음 dispatch 주기에 재시도). */
+    private boolean handleRateLimited(Long jobId, String owner, TooManyRequestsException e) {
         if (e.getErrorCode() == AiChatErrorCode.AI_QUOTA_EXHAUSTED) {
             // 계정 quota 소진 — 쿨다운은 게이트가 이미 열었다(전 경로 공통). 재시도 가능 실패로 기록.
             lifecycleService.recordFailure(jobId, owner, true,
                     e.getErrorCode().name(), e.getMessage(), retryAtFrom(e.getRateLimitInfo()));
-            return;
+            return false;
         }
         // burst — 게이트 분당 예산 포화(backpressure). 무벌점 반납(가짜 실패 방지).
         lifecycleService.releaseWithoutPenalty(jobId, owner);
+        return false;
     }
 
     private LocalDateTime retryAtFrom(RateLimitInfo info) {

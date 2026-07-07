@@ -86,25 +86,42 @@ class SummaryGenerationWorkerTest {
     }
 
     @Test
-    void burst_429면_무벌점_반납한다() throws Exception {
+    void burst_429면_무벌점_반납하고_이번_드레인_사이클을_멈춘다() throws Exception {
         when(aiSummaryClient.generate(any()))
                 .thenThrow(new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST, RateLimitInfo.empty()));
 
-        worker.processOne();
+        boolean continueDraining = worker.processOne();
 
+        org.assertj.core.api.Assertions.assertThat(continueDraining)
+                .as("burst 는 전역 게이트 포화 신호 — 이번 드레인 사이클을 멈춘다")
+                .isFalse();
         verify(lifecycleService).releaseWithoutPenalty(eq(1L), anyString());
         verify(lifecycleService, never()).recordFailure(anyLong(), anyString(), anyBoolean(), anyString(), anyString(), any());
     }
 
     @Test
-    void quota_429면_재시도_가능_실패로_기록한다() throws Exception {
+    void quota_429면_재시도_가능_실패로_기록하고_이번_드레인_사이클을_멈춘다() throws Exception {
         when(aiSummaryClient.generate(any()))
                 .thenThrow(new TooManyRequestsException(AiChatErrorCode.AI_QUOTA_EXHAUSTED, RateLimitInfo.empty()));
 
-        worker.processOne();
+        boolean continueDraining = worker.processOne();
 
+        org.assertj.core.api.Assertions.assertThat(continueDraining).isFalse();
         verify(lifecycleService).recordFailure(eq(1L), anyString(), eq(true), anyString(), any(), any());
         verify(lifecycleService, never()).releaseWithoutPenalty(anyLong(), anyString());
+    }
+
+    @Test
+    void burst_가_계속_나도_같은_job_을_즉시_재선점하지_않고_드레인을_멈춘다() throws Exception {
+        // claimOne 이 계속 같은 job 을 돌려주고 generate 가 매번 burst 여도, 멈추지 않으면 무한 루프가 된다.
+        // processUntilEmpty 가 끝난다는 것(claimOne 1회)이 타이트 재선점 루프가 사라졌다는 증거.
+        when(aiSummaryClient.generate(any()))
+                .thenThrow(new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST, RateLimitInfo.empty()));
+
+        worker.processUntilEmpty();
+
+        verify(lifecycleService, org.mockito.Mockito.times(1)).claimOne(anyString());
+        verify(lifecycleService, org.mockito.Mockito.times(1)).releaseWithoutPenalty(eq(1L), anyString());
     }
 
     @Test
