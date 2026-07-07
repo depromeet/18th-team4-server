@@ -34,8 +34,8 @@ public class AiChatSession {
 
     private static final int TITLE_MAX_LENGTH = 100;
 
-    // 제목 생성(첫 응답 후 비동기)이 끝나기 전이나 실패했을 때 빈 제목이 노출되지 않도록,
-    // 세션 생성 시점에 박아두는 기본 제목. 생성에 성공하면 updateTitle 이 덮어쓴다.
+    // 제목 생성(첫 응답 후 비동기)이 실패하거나 빈 결과가 왔을 때, 빈 제목이 영구히 남지 않도록
+    // 대체해 넣는 기본 제목. 생성 전 표시는 클라이언트가 담당하므로 생성 시점엔 박지 않는다.
     public static final String DEFAULT_TITLE = "새로운 대화";
 
     @Id
@@ -66,7 +66,7 @@ public class AiChatSession {
 
     public static AiChatSession create(Long userBookId) {
         LocalDateTime now = LocalDateTime.now();
-        return new AiChatSession(null, userBookId, Status.ACTIVE, 0, 0, DEFAULT_TITLE, now, now);
+        return new AiChatSession(null, userBookId, Status.ACTIVE, 0, 0, null, now, now);
     }
 
     /**

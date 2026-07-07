@@ -35,9 +35,19 @@ public class AiChatSessionTitleService {
             throw new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND);
         }
 
-        String generated = aiChatTitleClient.generate(command.messages());
+        String generated;
+        try {
+            generated = aiChatTitleClient.generate(command.messages());
+        } catch (RuntimeException e) {
+            // 생성 실패로 빈 제목이 영구히 남지 않도록 기본 제목으로 대체하고,
+            // 실패 자체는 리스너에서 로깅되도록 예외를 그대로 전파한다.
+            aiChatSessionTitleWriter.applyDefaultTitleIfAbsent(command.sessionId());
+            throw e;
+        }
+
         if (generated == null || generated.isBlank()) {
-            log.warn("세션 제목 생성 결과가 비어 있어 갱신을 skip 한다 sessionId={}", command.sessionId());
+            log.warn("세션 제목 생성 결과가 비어 있어 기본 제목으로 대체한다 sessionId={}", command.sessionId());
+            aiChatSessionTitleWriter.applyDefaultTitleIfAbsent(command.sessionId());
             return;
         }
 
