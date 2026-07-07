@@ -18,3 +18,4 @@
 | [0005](0005-context-summary-concurrency-transaction.md) | 컨텍스트 요약 워커의 동시성·트랜잭션 설계 (준비·LLM·기록 3분할 + 다층 방어) | 채택 |
 | [0006](0006-openai-rate-limit-defense-flow.md) | OpenAI 호출 rate limit·quota 방어 설계 — 전역 게이트 → 가드 → 다층 처리 흐름 | 채택 |
 | [0007](0007-context-summary-enqueue-async-best-effort.md) | 컨텍스트 요약 작업 적재를 비동기·best-effort 로 (감상문 동기 적재와의 분기, 재시도 제거) | 채택 |
+| [0008](0008-chat-context-budget-and-prompt-assembly.md) | 채팅 답변 생성의 유효 컨텍스트 예산(8~12K, 상한 16K)과 프롬프트 조립 구조 (긴 컨텍스트 연구 근거) | 채택 |
