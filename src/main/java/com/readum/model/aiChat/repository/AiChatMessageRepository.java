@@ -125,6 +125,10 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
     /**
      * 요약 반영 지점 이후 최근 원문 대화의 token_count 합 — 요약 트리거 판정용(임계값 초과 시 job 적재).
      * token_count 가 null 인 행은 SUM 에서 무시된다. 행이 없으면 coalesce 로 0.
+     *
+     * 암묵적 계약: 이 합이 정확하려면 COMPLETED 메시지의 token_count 가 반드시 채워져 있어야 한다
+     * (선택기·조립기와 달리 여기엔 content 길이 fallback 이 없다). AiChatMessagePersistService 가 저장 시
+     * USER=jtokkit 로컬 계산, ASSISTANT=실측 출력(없으면 로컬 계산)으로 항상 채워 이 계약을 지킨다.
      */
     @Query("""
             select coalesce(sum(aiChatMessage.tokenCount), 0)
