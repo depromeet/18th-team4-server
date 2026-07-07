@@ -2,6 +2,13 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.0.5'
 	id 'io.spring.dependency-management' version '1.1.7'
+	// jar 안에 git.properties 를 생성해 실행 중인 배포 커밋을 식별한다 (Slack 장애 알림의 분석 이슈 링크에 사용)
+	id 'com.gorylenko.gradle-git-properties' version '4.0.1'
+}
+
+gitProperties {
+	// .git 이 없는 환경(소스 아카이브 등)에서도 빌드가 실패하지 않게 한다. 이때 git.properties 는 생성되지 않는다.
+	failOnNoGitDirectory = false
 }
 
 group = 'com'
