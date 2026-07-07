@@ -17,3 +17,4 @@
 | [0004](0004-aichat-guardrail-flow.md) | AI 채팅 가드레일 재설계 — 책 맥락 완화 판정 + 메시지 상태 분리, 전체 흐름 설명서 | 채택 |
 | [0005](0005-context-summary-concurrency-transaction.md) | 컨텍스트 요약 워커의 동시성·트랜잭션 설계 (준비·LLM·기록 3분할 + 다층 방어) | 채택 |
 | [0006](0006-openai-rate-limit-defense-flow.md) | OpenAI 호출 rate limit·quota 방어 설계 — 전역 게이트 → 가드 → 다층 처리 흐름 | 채택 |
+| [0007](0007-context-summary-enqueue-async-best-effort.md) | 컨텍스트 요약 작업 적재를 비동기·best-effort 로 (감상문 동기 적재와의 분기, 재시도 제거) | 채택 |
