@@ -120,6 +120,8 @@ class UserBookDeleteServiceTest {
     private void verifyNoDeletes() {
         verify(aiChatMessageRepository, never()).deleteAllByUserBookId(anyLong());
         verify(summaryJobRepository, never()).deleteAllByUserBookId(anyLong());
+        verify(aiChatContextSummaryJobRepository, never()).deleteAllByUserBookId(anyLong());
+        verify(aiChatContextSummaryRepository, never()).deleteAllByUserBookId(anyLong());
         verify(aiChatSessionRepository, never()).deleteAllByUserBookId(anyLong());
         verify(summaryRepository, never()).deleteAllByUserBookId(anyLong());
         verify(userRepository, never()).clearLastSelectedUserBook(anyLong());

@@ -108,6 +108,7 @@ class ContextSummaryConcurrencyLoadTest {
         await().atMost(Duration.ofSeconds(30)).until(() ->
                 sessionIds.stream().allMatch(id -> summaryRepository.findBySessionId(id).isPresent())
                         && jobRepository.findAll().stream()
+                                .filter(job -> sessionIds.contains(job.getSessionId()))
                                 .allMatch(job -> job.getStatus() == AiChatContextSummaryJob.Status.SUCCEEDED));
         pool.shutdownNow();
         pool.awaitTermination(5, TimeUnit.SECONDS);
@@ -145,13 +146,13 @@ class ContextSummaryConcurrencyLoadTest {
 
         seedConversation(sessionId, 3);
         enqueueService.enqueueIfRecentMessagesExceedThreshold(sessionId);
-        drainUntilNoJobs();
+        drainUntilNoJobs(sessionId);
         AiChatContextSummary firstRound = summaryRepository.findBySessionId(sessionId).orElseThrow();
 
         // 대화를 더 쌓아 요약 반영 지점 이후 최근 원문 대화를 다시 임계값 이상으로.
         seedConversation(sessionId, 3);
         enqueueService.enqueueIfRecentMessagesExceedThreshold(sessionId);
-        drainUntilNoJobs();
+        drainUntilNoJobs(sessionId);
         AiChatContextSummary secondRound = summaryRepository.findBySessionId(sessionId).orElseThrow();
 
         assertThat(secondRound.getVersion()).isEqualTo(firstRound.getVersion() + 1);
@@ -170,10 +171,11 @@ class ContextSummaryConcurrencyLoadTest {
         }
     }
 
-    private void drainUntilNoJobs() {
+    private void drainUntilNoJobs(Long sessionId) {
         await().atMost(Duration.ofSeconds(20)).until(() -> {
             worker.processUntilEmpty();
             return jobRepository.findAll().stream()
+                    .filter(job -> job.getSessionId().equals(sessionId))
                     .allMatch(job -> job.getStatus() == AiChatContextSummaryJob.Status.SUCCEEDED
                             || job.getStatus() == AiChatContextSummaryJob.Status.FAILED);
         });

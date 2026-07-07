@@ -31,7 +31,10 @@ class AiChatContextSummaryJobRepositoryTest {
     @Test
     void findClaimable_은_처리시점이_지난_PENDING만_nextAttemptAt_오름차순으로_가져온다() {
         LocalDateTime now = LocalDateTime.now();
-        AiChatContextSummaryJob ready = jobRepository.save(
+        // 처리시점이 지난 claimable 을 둘 시딩해 오름차순 정렬을 실제로 검증한다(하나만 두면 정렬 여부를 알 수 없다).
+        AiChatContextSummaryJob earlier = jobRepository.save(
+                AiChatContextSummaryJobFixture.persistedPendingDueAt(null, nextSessionId(), now.minusSeconds(30)));
+        AiChatContextSummaryJob later = jobRepository.save(
                 AiChatContextSummaryJobFixture.persistedPendingDueAt(null, nextSessionId(), now.minusSeconds(10)));
         jobRepository.save(
                 AiChatContextSummaryJobFixture.persistedPendingDueAt(null, nextSessionId(), now.plusMinutes(10)));
@@ -39,7 +42,8 @@ class AiChatContextSummaryJobRepositoryTest {
         List<AiChatContextSummaryJob> claimable = jobRepository.findClaimable(
                 AiChatContextSummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
 
-        assertThat(claimable).extracting(AiChatContextSummaryJob::getId).contains(ready.getId());
+        assertThat(claimable).extracting(AiChatContextSummaryJob::getId)
+                .containsSubsequence(earlier.getId(), later.getId());
         assertThat(claimable).allMatch(job -> !job.getNextAttemptAt().isAfter(now));
     }
 
