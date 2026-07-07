@@ -5,6 +5,7 @@
 | 파일 | 내용 |
 |------|------|
 | [infrastructure.md](infrastructure.md) | 개발 서버 구성 일체 — EC2·blue/green 배포 구조·Docker MySQL/Redis·도메인·접속 방법 |
+| [incident-analysis.md](incident-analysis.md) | 운영 장애 분석 흐름 — Slack 알림의 분석 이슈 링크, incident 라벨 워크플로우, 필요한 secrets |
 | [_template.md](_template.md) | 운영 문서 작성 템플릿 |
 
 ## 이 디렉토리에 적지 않는 것 (2026-07-05 결정)
