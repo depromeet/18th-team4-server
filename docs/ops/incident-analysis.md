@@ -21,12 +21,19 @@ ERROR 발생
   분석은 읽기 전용 — 코드 수정·PR 생성은 하지 않는다.
 - **두 번째 수동 경로**: 링크 없이도 아무 이슈에 `incident` 라벨을 붙이면 분석이 발동한다.
   본문에 배포 커밋 마커가 없으면 기본 브랜치 최신 커밋 기준으로 분석하고 그 사실을 코멘트에 명시한다.
+- **Slack 알림은 원본 에러 알림의 스레드를 우선한다**: 분석 시작·완료·실패 알림은
+  Bot 토큰이 있으면 채널 최근 이력(200건)에서 같은 fingerprint 를 담은 에러 알림을 찾아
+  그 스레드에 게시한다 (완료/실패는 채널에도 함께 노출). Bot 토큰이 없거나 원본을 못
+  찾으면 Incoming Webhook 채널 일반 메시지로 대체된다 — 등급이 내려갈 뿐 유실되지 않는다.
+  게시 로직은 `.github/scripts/incident-slack-notify.sh` 한 곳에 있다.
 - **필요한 GitHub Actions secrets**:
 
 | secret | 용도 | 비고 |
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code 실행 | claude.yml 과 공유, 이미 등록됨 |
-| `SLACK_WEBHOOK_URL` | 완료/실패 알림 | 미등록이면 알림만 조용히 생략되고 분석은 정상 동작 |
+| `SLACK_WEBHOOK_URL` | 채널 일반 메시지 알림 (기본 경로) | 미등록이면 알림만 조용히 생략되고 분석은 정상 동작 |
+| `SLACK_BOT_TOKEN` | 스레드 알림 (선택 승급) | Slack 앱 Bot 토큰, 권한은 `chat:write` + `channels:history` (비공개 채널이면 `groups:history`). 봇을 에러 알림 채널에 초대해야 한다 |
+| `SLACK_CHANNEL_ID` | 스레드 탐색 대상 채널 | 에러 알림이 오는 채널의 ID (`C...`). `SLACK_BOT_TOKEN` 과 함께 있어야 스레드 모드가 켜진다 |
 
 ## 변경 절차와 주의점
 

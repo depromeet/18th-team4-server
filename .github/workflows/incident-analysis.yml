@@ -31,6 +31,10 @@ jobs:
           # 배포 커밋이 기본 브랜치보다 뒤에 있을 수 있어 전체 이력을 받는다
           fetch-depth: 0
 
+      # 배포 커밋 checkout 으로 작업 트리가 과거로 가도 스크립트를 쓸 수 있게 미리 복사해 둔다
+      - name: Slack 알림 스크립트 보존
+        run: cp .github/scripts/incident-slack-notify.sh "$RUNNER_TEMP/"
+
       - name: 배포 커밋 checkout (이슈 본문의 deploy-sha 마커)
         id: deploy_sha
         env:
@@ -45,6 +49,34 @@ jobs:
           else
             echo "note=본문에서 배포 커밋을 찾지 못해 기본 브랜치 최신 커밋 기준" >> "$GITHUB_OUTPUT"
           fi
+
+      # 원본 에러 알림(본문에 같은 fingerprint 포함)을 채널 최근 이력에서 찾아 스레드 ts 를 얻는다.
+      # Bot 토큰/채널 ID 미설정이거나 탐색 실패면 ts 는 빈 값 → 이후 알림은 전부 webhook 채널 메시지로 동작.
+      - name: 원본 에러 알림 스레드 찾기 + 분석 시작 알림
+        id: slack_thread
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          REQUESTER: ${{ github.event.sender.login }}
+        run: |
+          THREAD_TS=""
+          FINGERPRINT=$(printf '%s' "$ISSUE_BODY" | sed -n 's/^- fingerprint: `\(.*\)`.*$/\1/p' | head -1)
+          if [ -n "${SLACK_BOT_TOKEN:-}" ] && [ -n "${SLACK_CHANNEL_ID:-}" ] && [ -n "$FINGERPRINT" ]; then
+            HISTORY=$(curl -sS -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              "https://slack.com/api/conversations.history?channel=${SLACK_CHANNEL_ID}&limit=200" || echo '{}')
+            # "ERROR 발생" 마커로 원본 에러 알림만 고른다 — 이 워크플로우가 남기는 분석 메시지에도 fingerprint 가 들어가므로
+            THREAD_TS=$(printf '%s' "$HISTORY" | jq -r --arg fingerprint "$FINGERPRINT" \
+              '[.messages[]? | select(((.text // "") | contains($fingerprint)) and ((.text // "") | contains("ERROR 발생")))] | (first.ts // empty)')
+          fi
+          echo "thread_ts=$THREAD_TS" >> "$GITHUB_OUTPUT"
+          bash "$RUNNER_TEMP/incident-slack-notify.sh" \
+            ":mag: *장애 분석 시작* — <${ISSUE_URL}|#${ISSUE_NUMBER} ${ISSUE_TITLE}> (요청: ${REQUESTER})" \
+            "$THREAD_TS" false
 
       - name: Claude Code 분석
         uses: anthropics/claude-code-action@v1
@@ -73,41 +105,40 @@ jobs:
             주의: 코드를 수정하거나 PR 을 만들지 않는다. 분석과 이슈 코멘트만 한다.
             확신이 없는 부분은 확신이 없다고 적는다.
 
-      - name: Slack 완료 알림
+      - name: Slack 완료 알림 (스레드 우선, 채널에도 노출)
         if: success()
         env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          THREAD_TS: ${{ steps.slack_thread.outputs.thread_ts }}
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
         run: |
-          if [ -z "$SLACK_WEBHOOK_URL" ]; then
-            echo "SLACK_WEBHOOK_URL 미설정 — 알림을 생략한다"
-            exit 0
-          fi
           # 마지막 코멘트(방금 남긴 분석)의 첫 줄을 요약으로 싣는다
           SUMMARY=$(gh issue view "$ISSUE_NUMBER" --json comments \
             --jq '.comments | last | .body' 2>/dev/null | head -n 1 | cut -c1-300 || true)
-          TEXT=":mag: *장애 분석 완료* — <${ISSUE_URL}|#${ISSUE_NUMBER} ${ISSUE_TITLE}>"
+          TEXT=":white_check_mark: *장애 분석 완료* — <${ISSUE_URL}|#${ISSUE_NUMBER} ${ISSUE_TITLE}>"
           if [ -n "$SUMMARY" ]; then
             TEXT="${TEXT}"$'\n'"${SUMMARY}"
           fi
-          jq -n --arg text "$TEXT" '{text: $text}' \
-            | curl -sS -X POST -H 'Content-Type: application/json' -d @- "$SLACK_WEBHOOK_URL"
+          bash "$RUNNER_TEMP/incident-slack-notify.sh" "$TEXT" "$THREAD_TS" true
 
-      - name: Slack 실패 알림
+      - name: Slack 실패 알림 (스레드 우선, 채널에도 노출)
         if: failure()
         env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          THREAD_TS: ${{ steps.slack_thread.outputs.thread_ts }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ -z "$SLACK_WEBHOOK_URL" ]; then
-            echo "SLACK_WEBHOOK_URL 미설정 — 알림을 생략한다"
-            exit 0
-          fi
           TEXT=":rotating_light: *장애 분석 실패* — <${ISSUE_URL}|#${ISSUE_NUMBER}> 분석이 실패했다. <${RUN_URL}|Actions 로그>"
-          jq -n --arg text "$TEXT" '{text: $text}' \
-            | curl -sS -X POST -H 'Content-Type: application/json' -d @- "$SLACK_WEBHOOK_URL"
+          # 보존 step 전에 실패한 경우를 대비해 저장소 원본 경로로도 시도한다
+          NOTIFY="$RUNNER_TEMP/incident-slack-notify.sh"
+          [ -f "$NOTIFY" ] || NOTIFY=".github/scripts/incident-slack-notify.sh"
+          bash "$NOTIFY" "$TEXT" "$THREAD_TS" true
