@@ -69,7 +69,7 @@ public class AiChatClientImpl implements AiChatClient {
 
     @Override
     public Flux<AiChatChunk> stream(AiChatStreamCommand command) {
-        String systemPrompt = buildSystemPrompt(command.bookContext());
+        String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
 
         // 전역 게이트: 조립 시점(동기) 검사 — 여기서 던지면 SSE 시작 전에 GlobalExceptionHandler 가 429 로 변환한다.
         // Flux 체인 안으로 옮기면 mid-stream 에러가 되므로 반드시 이 위치를 유지할 것.
@@ -137,18 +137,26 @@ public class AiChatClientImpl implements AiChatClient {
         return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
-    private String buildSystemPrompt(AiChatStreamCommand.BookContext ctx) {
-        if (ctx == null) {
-            return baseSystemPrompt;
-        }
+    /**
+     * 시스템 프롬프트를 조립한다: [base + 책 정보] + [누적 요약]. 프롬프트 캐시를 고려한 배치(고정 → 저변동):
+     * base·책 정보는 세션 내 고정, 누적 요약은 요약 갱신 때만 변동한다. 매 턴 변동하는 원문 꼬리는 messages 로 따로 실린다.
+     */
+    private String buildSystemPrompt(AiChatStreamCommand.BookContext ctx, String contextSummary) {
         StringBuilder sb = new StringBuilder(baseSystemPrompt);
-        sb.append("\n\n# 대화 대상 도서\n");
-        sb.append("제목: ").append(ctx.title()).append("\n");
-        if (ctx.authors() != null && !ctx.authors().isBlank()) {
-            sb.append("저자: ").append(ctx.authors()).append("\n");
+        if (ctx != null) {
+            sb.append("\n\n# 대화 대상 도서\n");
+            sb.append("제목: ").append(ctx.title()).append("\n");
+            if (ctx.authors() != null && !ctx.authors().isBlank()) {
+                sb.append("저자: ").append(ctx.authors()).append("\n");
+            }
+            if (ctx.publisher() != null && !ctx.publisher().isBlank()) {
+                sb.append("출판사: ").append(ctx.publisher()).append("\n");
+            }
         }
-        if (ctx.publisher() != null && !ctx.publisher().isBlank()) {
-            sb.append("출판사: ").append(ctx.publisher()).append("\n");
+        if (contextSummary != null && !contextSummary.isBlank()) {
+            sb.append("\n\n# 이전 대화 요약\n");
+            sb.append("아래는 지금까지 나눈 대화의 요약이다. 최근 대화 원문은 이어지는 메시지로 제공된다.\n");
+            sb.append(contextSummary).append("\n");
         }
         return sb.toString();
     }

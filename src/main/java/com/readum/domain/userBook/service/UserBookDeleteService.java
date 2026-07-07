@@ -4,6 +4,8 @@ import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.userBook.dto.UserBookDeleteCommand;
 import com.readum.domain.userBook.dto.UserBookDeleteResult;
 import com.readum.domain.userBook.exception.UserBookErrorCode;
+import com.readum.model.aiChat.repository.AiChatContextSummaryJobRepository;
+import com.readum.model.aiChat.repository.AiChatContextSummaryRepository;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.aiChat.repository.AiChatSessionRepository;
 import com.readum.model.summary.repository.SummaryJobRepository;
@@ -36,6 +38,8 @@ public class UserBookDeleteService {
     private final AiChatSessionRepository aiChatSessionRepository;
     private final SummaryRepository summaryRepository;
     private final SummaryJobRepository summaryJobRepository;
+    private final AiChatContextSummaryRepository aiChatContextSummaryRepository;
+    private final AiChatContextSummaryJobRepository aiChatContextSummaryJobRepository;
 
     @Transactional
     public UserBookDeleteResult execute(UserBookDeleteCommand command) {
@@ -48,8 +52,10 @@ public class UserBookDeleteService {
         Long userBookId = command.userBookId();
 
         int deletedMessages = aiChatMessageRepository.deleteAllByUserBookId(userBookId);
-        // summary_job 은 세션 서브쿼리로 좁히므로 세션 삭제 전에 먼저 지운다(메시지와 같은 이유).
+        // summary_job 및 컨텍스트 요약/작업 은 세션 서브쿼리로 좁히므로 세션 삭제 전에 먼저 지운다(메시지와 같은 이유).
         int deletedJobs = summaryJobRepository.deleteAllByUserBookId(userBookId);
+        aiChatContextSummaryJobRepository.deleteAllByUserBookId(userBookId);
+        aiChatContextSummaryRepository.deleteAllByUserBookId(userBookId);
         int deletedSessions = aiChatSessionRepository.deleteAllByUserBookId(userBookId);
         int deletedSummaries = summaryRepository.deleteAllByUserBookId(userBookId);
         userRepository.clearLastSelectedUserBook(userBookId);

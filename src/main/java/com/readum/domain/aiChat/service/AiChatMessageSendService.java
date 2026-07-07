@@ -109,7 +109,7 @@ public class AiChatMessageSendService {
         StringBuilder contentBuffer = new StringBuilder();
         AtomicReference<AiChatChunk.Completion> completionRef = new AtomicReference<>();
 
-        return aiChatClient.stream(new AiChatStreamCommand(sessionId, withCurrent, bookContext))
+        return aiChatClient.stream(new AiChatStreamCommand(sessionId, withCurrent, bookContext, loaded.contextSummary()))
                 .concatMap(chunk -> bufferAndConvertChunk(chunk, contentBuffer, completionRef))
                 // doOnCancel 위치 주의: concatMap 직후, concatWith 앞.
                 // Phase 1 (LLM 스트리밍 중) 에 클라이언트가 끊기면 여기로 cancel 이 전파돼 fire.
