@@ -32,7 +32,7 @@ public class AiContextSummaryClientImpl implements AiContextSummaryClient {
     private static final String PROMPT_TEMPLATE_ID = "chat-context-summarizer";
     private static final String PROMPT_TEMPLATE_VERSION = "v1";
 
-    private final ChatClient chatClient;
+    private final ChatClient contextSummaryChatClient;
     private final AiPromptAuditLogger auditLogger;
     private final ContextSummaryPromptAssembler promptAssembler;
     private final ResponseFormat responseFormat;
@@ -44,14 +44,14 @@ public class AiContextSummaryClientImpl implements AiContextSummaryClient {
     private String chatModel;
 
     public AiContextSummaryClientImpl(
-            ChatClient chatClient,
+            ChatClient contextSummaryChatClient,
             AiPromptAuditLogger auditLogger,
             ContextSummaryPromptAssembler promptAssembler,
             OpenAiRateLimitGuard rateLimitGuard,
             AiChatProperties aiChatProperties,
             TokenCounter tokenCounter
     ) {
-        this.chatClient = chatClient;
+        this.contextSummaryChatClient = contextSummaryChatClient;
         this.auditLogger = auditLogger;
         this.promptAssembler = promptAssembler;
         this.rateLimitGuard = rateLimitGuard;
@@ -86,7 +86,7 @@ public class AiContextSummaryClientImpl implements AiContextSummaryClient {
         );
         long startNanos = System.nanoTime();
         try {
-            ResponseEntity<ChatResponse, ContextSummaryResult> responseEntity = chatClient.prompt()
+            ResponseEntity<ChatResponse, ContextSummaryResult> responseEntity = contextSummaryChatClient.prompt()
                     .system(promptAssembler.systemPrompt())
                     .user(userMessage)
                     .options(OpenAiChatOptions.builder()
