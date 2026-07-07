@@ -111,6 +111,31 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
             Long sessionId, AiChatMessage.Status status, LocalDateTime createdAt);
 
     /**
+     * 요약 경계 이후의 유효(COMPLETED) 원문 메시지를 id 오름차순으로 — 컨텍스트 요약 워커의 델타 원문·범위 계산용.
+     * afterId(요약이 커버한 마지막 메시지 id, 없으면 0) 초과분만 반환한다. id 는 IDENTITY 라 시간순과 단조 일치.
+     */
+    default List<AiChatMessage> findCompletedAfterIdAsc(Long sessionId, Long afterId) {
+        return findBySessionIdAndStatusAndIdGreaterThanOrderByIdAsc(
+                sessionId, AiChatMessage.Status.COMPLETED, afterId);
+    }
+
+    List<AiChatMessage> findBySessionIdAndStatusAndIdGreaterThanOrderByIdAsc(
+            Long sessionId, AiChatMessage.Status status, Long id);
+
+    /**
+     * 요약 경계 이후 원문 꼬리의 token_count 합 — 요약 트리거 판정용(임계값 초과 시 job 적재).
+     * token_count 가 null 인 행은 SUM 에서 무시된다. 행이 없으면 coalesce 로 0.
+     */
+    @Query("""
+            select coalesce(sum(aiChatMessage.tokenCount), 0)
+              from AiChatMessage aiChatMessage
+             where aiChatMessage.sessionId = :sessionId
+               and aiChatMessage.status = com.readum.model.aiChat.entity.AiChatMessage.Status.COMPLETED
+               and aiChatMessage.id > :afterId
+            """)
+    long sumTokenCountAfterId(@Param("sessionId") Long sessionId, @Param("afterId") Long afterId);
+
+    /**
      * 사용자별 폭주(10초 창) 가드용 카운트 — 상태 무관.
      * 10초에 5건 이상은 상태(COMPLETED/REJECTED/FAILED)와 무관하게 정상 사용이 아니라고 보고 하나의 가드로 센다.
      * (2026-07-06: COMPLETED/REJECTED 분리 카운터를 단일 가드로 통합 — moderation 오탐 사용자를

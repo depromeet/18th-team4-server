@@ -1,0 +1,145 @@
+package com.readum.model.aiChat.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+
+/**
+ * 채팅 컨텍스트 요약 작업 큐의 한 행. 감상문 {@code summary_job} 의 큐 골격(SKIP LOCKED·lease·재시도)을 복제한다.
+ * 공통 추상화로 묶지 않는다 — 두 큐의 생명주기가 다르고(요약은 세션 잠금 없이 반복 갱신), 격리 목적의 공통 추상화는 만들지 않는 원칙.
+ * 상태: PENDING → PROCESSING(워커 점유) → SUCCEEDED / FAILED.
+ * active_session_id: 미완료(PENDING/PROCESSING) 동안만 세션 id → unique 제약으로 "세션당 활성 작업 1개".
+ */
+@Getter
+@Entity
+@Table(
+        name = "ai_chat_context_summary_job",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_ai_chat_context_summary_job_active_session", columnNames = "active_session_id")
+        },
+        indexes = {
+                @Index(name = "idx_ai_chat_context_summary_job_session", columnList = "session_id, status"),
+                @Index(name = "idx_ai_chat_context_summary_job_claim", columnList = "status, next_attempt_at")
+        }
+)
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor(access = AccessLevel.PACKAGE)
+public class AiChatContextSummaryJob {
+
+    public enum Status {
+        PENDING, PROCESSING, SUCCEEDED, FAILED
+    }
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "session_id", nullable = false)
+    private Long sessionId;
+
+    @Column(name = "active_session_id")
+    private Long activeSessionId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private Status status;
+
+    @Column(name = "lock_owner", length = 36)
+    private String lockOwner;
+
+    @Column(name = "locked_until")
+    private LocalDateTime lockedUntil;
+
+    @Column(name = "attempt_count", nullable = false)
+    private int attemptCount;
+
+    @Column(name = "next_attempt_at", nullable = false)
+    private LocalDateTime nextAttemptAt;
+
+    @Column(name = "last_error_code", length = 50)
+    private String lastErrorCode;
+
+    @Column(name = "last_error_message", columnDefinition = "TEXT")
+    private String lastErrorMessage;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    /** 새 작업은 즉시 처리 가능한 PENDING 으로 시작한다. */
+    public static AiChatContextSummaryJob createPending(Long sessionId) {
+        LocalDateTime now = LocalDateTime.now();
+        return new AiChatContextSummaryJob(
+                null, sessionId, sessionId, Status.PENDING,
+                null, null, 0, now, null, null, now, now
+        );
+    }
+
+    /** 워커가 작업을 점유한다. owner 는 이 선점만의 토큰(UUID), lockedUntil 은 lease 만료 시각. */
+    public void claim(String owner, LocalDateTime lockedUntil) {
+        this.status = Status.PROCESSING;
+        this.lockOwner = owner;
+        this.lockedUntil = lockedUntil;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public boolean isOwnedBy(String owner) {
+        return this.status == Status.PROCESSING
+                && owner != null && owner.equals(this.lockOwner);
+    }
+
+    public void markSucceeded() {
+        this.status = Status.SUCCEEDED;
+        this.activeSessionId = null;
+        this.lockOwner = null;
+        this.lockedUntil = null;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /** 일시 실패 — 백오프 후 다시 처리하도록 PENDING 으로. 활성(active_session_id) 은 유지. */
+    public void scheduleRetry(LocalDateTime nextAttemptAt, String errorCode, String errorMessage) {
+        this.status = Status.PENDING;
+        this.attemptCount += 1;
+        this.lockOwner = null;
+        this.lockedUntil = null;
+        this.nextAttemptAt = nextAttemptAt;
+        this.lastErrorCode = errorCode;
+        this.lastErrorMessage = errorMessage;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /** 회복 불가 또는 시도 상한 초과 — 종료. 활성 해제로 다음 트리거의 새 작업 적재를 허용. */
+    public void markFailed(String errorCode, String errorMessage) {
+        this.status = Status.FAILED;
+        this.activeSessionId = null;
+        this.lockOwner = null;
+        this.lockedUntil = null;
+        this.lastErrorCode = errorCode;
+        this.lastErrorMessage = errorMessage;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /** 무벌점 반납 — lease 만료 회수(reaper) 또는 게이트 backpressure 시, 시도 횟수 미증가로 즉시 재선점 가능한 PENDING 으로. */
+    public void releaseAfterOrphan(LocalDateTime now) {
+        this.status = Status.PENDING;
+        this.lockOwner = null;
+        this.lockedUntil = null;
+        this.nextAttemptAt = now;
+        this.updatedAt = LocalDateTime.now();
+    }
+}
