@@ -6,10 +6,10 @@
 name: deploy
 
 on:
+  # 수동 실행(workflow_dispatch) + dev 브랜치 머지 시 자동 배포. 최초 전환(cutover) 검증 완료로 활성화.
   workflow_dispatch:
-  # 최초 전환(cutover) 검증이 끝나면 아래 주석을 풀어 dev 머지 자동 배포를 켠다.
-  # push:
-  #   branches: [dev]
+  push:
+    branches: [dev]
 
 # 배포는 한 번에 하나만. 겹치면 뒤 실행이 대기한다 (진행 중인 배포를 끊지 않는다).
 concurrency:
@@ -19,7 +19,7 @@ concurrency:
 env:
   # 서버 주소는 비밀이 아니라(DNS 에 공개) 워크플로우에 직접 둔다. 탄력적 IP 기준.
   # DNS(api.readum.kr) A 레코드가 이 IP 로 정리된 뒤에는 도메인으로 바꿔도 된다.
-  DEPLOY_HOST: 3.37.163.153
+  DEPLOY_HOST: 54.116.108.68
 
 jobs:
   build-and-deploy:
