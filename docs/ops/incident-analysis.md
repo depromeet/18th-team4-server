@@ -7,26 +7,64 @@
 ```
 ERROR 발생
   → Slack 알림 (fingerprint + "분석 이슈 열기" 프리필 링크 — SlackWebhookAppender)
-  → 사람이 링크 클릭 → 이슈 생성 (incident 라벨, 본문에 배포 커밋·stacktrace 프리필)
+  → 사람이 링크 클릭 → 이슈 생성 (error 라벨, 본문에 배포 커밋·stacktrace 프리필)
   → incident-analysis.yml 발동 → 배포 커밋 checkout → Claude Code 분석 → 이슈 코멘트
   → Slack 완료/실패 알림
 ```
 
-- **수집·링크 생성**: `com.readum.infrastructure.logging` 의 `SlackWebhookAppender` 가
-  `IncidentFingerprint`(오류 요약 키)와 `IncidentIssueLinkFactory`(프리필 URL)를 사용한다.
-  배포 커밋은 빌드 시 gradle-git-properties 가 jar 에 넣은 `git.properties` 에서 읽는다.
-- **분석 실행**: `.github/workflows/incident-analysis.yml`. `incident` 라벨이 붙은 이슈가
-  트리거다. 이슈 본문의 `<!-- deploy-sha: ... -->` 마커를 파싱해 그 커밋을 checkout 하고,
-  Claude Code(`claude-code-action`)가 원인 후보·재현 조건·수정 방향을 이슈 코멘트로 남긴다.
-  분석은 읽기 전용 — 코드 수정·PR 생성은 하지 않는다.
-- **두 번째 수동 경로**: 링크 없이도 아무 이슈에 `incident` 라벨을 붙이면 분석이 발동한다.
-  본문에 배포 커밋 마커가 없으면 기본 브랜치 최신 커밋 기준으로 분석하고 그 사실을 코멘트에 명시한다.
-- **필요한 GitHub Actions secrets**:
+### 오류를 무엇으로 "같은 오류"로 보는가 — 키 두 개
+
+| 키 | 계산 | 용도 | 틀리는 방향 |
+|---|---|---|---|
+| 알림 억제 키 | `logger + level + 예외클래스 + 포맷된 메시지 전문` | 같은 키는 60초에 1건만 Slack 전송 | 좁아서 알림이 더 오는 쪽 (무해) |
+| fingerprint (`IncidentFingerprint`) | 예외 있으면 `예외클래스 @ 스택의 첫 com.readum 프레임` (바깥 스택에 없으면 cause 사슬 탐색, 그래도 없으면 logger). 예외 없으면 `logger \| 포맷 전 메시지 템플릿` — `{}` 치환 전 원문이라 ID 같은 가변 인자에 흔들리지 않는다 | 사람이 "전에 본 오류"인지 알아보는 표시. Slack 알림·이슈 제목에 그대로 노출 | 굵어서 뭉치는 쪽 (표시일 뿐이라 무해) |
+
+fingerprint 는 어떤 것도 자동 차단하지 않는다. 분석할지 말지의 중복 판단은 사람이 하고,
+그 판단을 돕도록 이슈 제목이 fingerprint 그대로라 목록·검색에서 같은 오류가 한눈에 보인다.
+
+### 이슈 생성을 요청하면 일어나는 일
+
+1. Slack 알림의 **"분석 이슈 열기"** 링크 클릭 → GitHub 이슈 생성 화면이 프리필로 열림.
+   제목 = `[장애] {fingerprint}`, 라벨 = `error`, 본문 = 발생 시각·환경·배포 커밋·fingerprint·
+   traceId·logger·마스킹된 메시지·stacktrace(절단) + 워크플로우가 파싱할 `<!-- deploy-sha: ... -->` 마커.
+2. 사람이 생성 버튼 클릭(=분석 승인) → `error` 라벨 트리거로 `incident-analysis.yml` 발동.
+3. 워크플로우가 본문의 배포 커밋을 checkout(못 찾으면 기본 브랜치 최신, 코멘트에 명시)하고
+   Claude Code 가 **원인 후보(근거 `파일:라인`)·재현 조건·수정 방향**을 이슈 코멘트로 남긴다.
+   분석은 읽기 전용 — 코드 수정·PR 생성은 하지 않는다.
+4. 두 번째 경로: 링크 없이 아무 이슈에 `error` 라벨을 손으로 붙여도 같은 분석이 돈다.
+   배포 커밋은 빌드 시 gradle-git-properties 가 jar 에 넣은 `git.properties` 에서 읽는다.
+
+### Slack 원본 알림의 스레드에 쌓이는 것
+
+Bot 토큰이 있으면 워크플로우가 채널 최근 이력(200건)에서 같은 fingerprint 를 담은
+에러 알림을 찾아 그 스레드에 게시한다. 스레드에는 순서대로:
+
+- 🔍 **분석 시작** — 이슈 링크(`#N 제목`) + 요청자 아이디 → "누가 이미 요청했는지"가 채널에서 보인다
+- ✅ **분석 완료** — 분석 코멘트의 첫 줄 요약 + 이슈 링크 (채널에도 함께 노출)
+- 🚨 **분석 실패** — Actions 실행 로그 링크 (채널에도 함께 노출)
+
+Bot 토큰이 없거나 원본 알림을 못 찾으면 같은 내용이 Incoming Webhook 채널 일반
+메시지로 온다 — 등급이 내려갈 뿐 유실되지 않는다. 게시 로직은
+`.github/scripts/incident-slack-notify.sh` 한 곳에 있다.
+
+### 중복 에러는 어떻게 되나
+
+- **알림 중복**: 억제 키가 같은 로그는 60초에 1건만 Slack 으로 간다 (인메모리, 재시작 시 리셋).
+  메시지 전문까지 같아야 억제되므로 다른 오류가 억제 때문에 묻히는 일은 사실상 없다.
+- **분석 중복**: 기계가 막지 않는다 — 사람이 게이트다. 같은 fingerprint 의 이슈 제목이
+  목록·Slack 스레드에 이미 보이면 안 만들면 된다. 실수로 두 번 만들어도 분석이 두 번 돌 뿐
+  (비용 약간) 시스템 문제는 없고, 한쪽을 duplicate 로 닫으면 된다.
+- **같은 이슈에 라벨 재부착**: 재분석이 돈다(의도된 재실행 경로). concurrency 가 이슈 번호
+  단위라 같은 이슈의 분석이 동시에 겹치지는 않는다 (뒤 실행은 대기).
+
+### 필요한 GitHub Actions secrets
 
 | secret | 용도 | 비고 |
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code 실행 | claude.yml 과 공유, 이미 등록됨 |
-| `SLACK_WEBHOOK_URL` | 완료/실패 알림 | 미등록이면 알림만 조용히 생략되고 분석은 정상 동작 |
+| `SLACK_WEBHOOK_URL` | 채널 일반 메시지 알림 (기본 경로) | 미등록이면 알림만 조용히 생략되고 분석은 정상 동작 |
+| `SLACK_BOT_TOKEN` | 스레드 알림 (선택 승급) | Slack 앱 Bot 토큰, 권한은 `chat:write` + `channels:history` (비공개 채널이면 `groups:history`). 봇을 에러 알림 채널에 초대해야 한다 |
+| `SLACK_CHANNEL_ID` | 스레드 탐색 대상 채널 | 에러 알림이 오는 채널의 ID (`C...`). `SLACK_BOT_TOKEN` 과 함께 있어야 스레드 모드가 켜진다 |
 
 ## 변경 절차와 주의점
 
@@ -36,9 +74,11 @@ ERROR 발생
   `repository_dispatch` 트리거를 추가하는 방향으로 확장한다 (Epic #100 코멘트의 확장 계획 참조).
 - **분석 프롬프트 수정**은 `incident-analysis.yml` 의 `prompt` 를 고친다. 앱 재배포가 필요 없다.
 - **비용 제어는 사람이 한다.** 이슈를 만들어야만 분석이 돌므로, 분석이 과하면 그냥 안 누르면 된다.
-  같은 이슈에 라벨을 다시 붙이면 재분석이 돈다 (concurrency 로 동시 실행만 막는다).
 - **민감정보**: 이슈 본문에 실리는 메시지·stacktrace 는 앱에서 마스킹(`SensitiveDataMasker`)을
   거친 값이다. 마스킹 규칙을 바꾸면 Slack 본문과 이슈 링크 본문에 함께 적용된다.
+- **알림 포맷과 스레드 탐색은 암묵적 계약이다.** 워크플로우는 원본 알림을 "본문에 fingerprint 포함
+  + `ERROR 발생` 문구 포함"으로 찾는다. 앱의 Slack 알림 포맷에서 이 두 요소를 바꾸면
+  `incident-analysis.yml` 의 탐색 조건도 같이 고쳐야 한다 (어긋나도 채널 메시지로 fallback 될 뿐 유실은 없음).
 
 ## 관련 기록
 
