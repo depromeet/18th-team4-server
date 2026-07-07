@@ -67,7 +67,7 @@ public class SummaryRangeSelector {
     /**
      * 이번 회차 요약 구간(delta[0..반환값))을 chunkTokenBudget 안으로 자른다(오래된 쪽부터). 남은 backlog 는 다음 작업이 이어 소화한다.
      * 워커 fail-fast 와 같은 토큰 기준(원문 content)으로 세어, 자른 청크가 fail-fast 를 다시 유발하지 않게 한다.
-     * 최소 1개는 포함(진전 보장)하고, 부분 청크의 끝은 완결된 턴(ASSISTANT)에 맞춘다.
+     * 부분 청크의 끝은 완결된 턴(ASSISTANT)에 맞춘다. 첫 완결 턴(USER→ASSISTANT)조차 예산에 못 담으면 0 을 반환해 요약하지 않는다.
      */
     private int limitToCallBudget(List<AiChatMessage> delta, int summarizeEnd, int chunkTokenBudget) {
         long chunkTokenSum = 0;
@@ -83,7 +83,14 @@ public class SummaryRangeSelector {
         if (end >= summarizeEnd) {
             return summarizeEnd;
         }
-        return ChatTurnAligner.alignSummarizeEndToCompletedTurn(delta, end, 1);
+        int aligned = ChatTurnAligner.alignSummarizeEndToCompletedTurn(delta, end, 1);
+        if (delta.get(aligned - 1).getRole() == AiChatMessage.Role.USER) {
+            // 예산이 첫 완결 턴(USER→ASSISTANT)도 못 담아 반쪽(USER 로 끝)만 남았다. 반쪽 턴을 요약하면 그 답변(ASSISTANT)이
+            // 조립 시 최근 원문 시작 정렬에 잘려 요약에도 raw 에도 남지 않는다. 요약 반영 지점을 진전시키지 않는다(호출자가 none 처리).
+            // 첫 완결 턴이 청크 예산을 넘는다는 건 곧 상한(maxRequestTokens)도 넘는다는 뜻이라, 강제 포함해도 워커가 fail-fast 할 뿐이다.
+            return 0;
+        }
+        return aligned;
     }
 
     private int messageTokens(AiChatMessage message) {

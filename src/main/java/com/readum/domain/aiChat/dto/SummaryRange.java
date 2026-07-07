@@ -20,8 +20,14 @@ public record SummaryRange(
         return NONE;
     }
 
-    /** 요약할 원문 묶음(오름차순)으로부터 구간을 만든다. 마지막 원소의 id 가 요약 반영 지점이 된다. */
+    /**
+     * 요약할 원문 묶음(오름차순)으로부터 구간을 만든다. 마지막 원소의 id 가 요약 반영 지점이 된다.
+     * 빈 묶음은 "요약할 게 없음"이라 {@link #none()} 으로 흡수한다(public 팩토리라 호출부 계약과 무관하게 방어).
+     */
     public static SummaryRange of(List<AiChatMessage> messagesToSummarize) {
+        if (messagesToSummarize.isEmpty()) {
+            return none();
+        }
         return new SummaryRange(
                 messagesToSummarize,
                 messagesToSummarize.get(messagesToSummarize.size() - 1).getId());

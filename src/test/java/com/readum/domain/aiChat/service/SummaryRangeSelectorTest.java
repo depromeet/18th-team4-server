@@ -85,6 +85,25 @@ class SummaryRangeSelectorTest {
     }
 
     @Test
+    void 첫_완결_턴조차_청크_예산에_못_담으면_반쪽_USER_를_요약하지_않고_none_을_반환한다() {
+        // maxRequestTokens=805, 출력추정 800 → 청크 예산 5. keep=2 라 요약 후보 [id1 U, id2 A, id3 U, id4 A].
+        // id1(2) 은 담기지만 id2(A,20) 를 더하면 22>5 → 예산만으론 [id1] 반쪽 USER. 이를 요약하면 답변 id2 가
+        // 조립 시 최근 원문 시작 정렬에 잘려 요약에도 raw 에도 남지 않는다. 첫 완결 턴이 예산을 넘는다는 건 상한(805)도
+        // 넘는다는 뜻(청크 예산 = 상한 − 이전요약 − 출력)이라 요약해봐야 워커 fail-fast — 진전 없이 none 을 반환한다.
+        List<AiChatMessage> delta = List.of(
+                AiChatMessageFixture.persistedUserMessage(1L, SESSION_ID, "aa"),
+                AiChatMessageFixture.persistedAssistantMessage(2L, SESSION_ID, "bbbbbbbbbbbbbbbbbbbb"),
+                AiChatMessageFixture.persistedUserMessage(3L, SESSION_ID, "cc"),
+                AiChatMessageFixture.persistedAssistantMessage(4L, SESSION_ID, "dd"),
+                AiChatMessageFixture.persistedUserMessage(5L, SESSION_ID, "ee"),
+                AiChatMessageFixture.persistedAssistantMessage(6L, SESSION_ID, "ff"));
+
+        SummaryRange range = selectorWith(2, 805).select(delta, 0);
+
+        assertThat(range.isEmpty()).isTrue();
+    }
+
+    @Test
     void 이전_요약_토큰이_크면_청크_예산이_줄어_더_적게_요약한다() {
         // maxRequestTokens=820, 출력추정 800, 이전 요약 6 → 청크 예산 820-800-6=14.
         // keep=2 라 요약 후보 [id1..id4](각 4). id1(4)+id2(4)+id3(4)=12, id4 추가 시 16>14 → [id1,id2,id3] 후보.
