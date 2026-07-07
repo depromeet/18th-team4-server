@@ -93,7 +93,11 @@ public class AiChatMessagePersistService {
         aiChatMessageRepository.save(AiChatMessage.createUserMessageRejected(sessionId, normalizedContent));
     }
 
-    public record MessageLoadResult(String contextSummary, List<HistoryMessage> history, Long userBookId) {}
+    /**
+     * @param notSummarizedChatRaws 요약 경계 이후의 원문 대화(요약이 대체하지 못한 최근 꼬리). 전체 이력이 아니다 —
+     *                              앞부분은 {@code contextSummary} 가 대체한다. 현재 보내는 USER 메시지는 아직 포함하지 않는다.
+     */
+    public record MessageLoadResult(String contextSummary, List<HistoryMessage> notSummarizedChatRaws, Long userBookId) {}
 
     @Transactional
     public AiChatMessage saveAssistantSuccess(

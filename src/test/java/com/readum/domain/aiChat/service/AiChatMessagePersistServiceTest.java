@@ -132,9 +132,9 @@ class AiChatMessagePersistServiceTest {
         AiChatMessagePersistService.MessageLoadResult result =
                 persistService.loadHistory(sessionId, userId);
 
-        assertThat(result.history()).hasSize(2);
-        assertThat(result.history().get(0).content()).isEqualTo("이전 질문");
-        assertThat(result.history().get(1).content()).isEqualTo("이전 응답");
+        assertThat(result.notSummarizedChatRaws()).hasSize(2);
+        assertThat(result.notSummarizedChatRaws().get(0).content()).isEqualTo("이전 질문");
+        assertThat(result.notSummarizedChatRaws().get(1).content()).isEqualTo("이전 응답");
         assertThat(result.userBookId()).isEqualTo(100L);
 
         // 검증/조회만 — USER 미저장, 턴 카운트 미증가

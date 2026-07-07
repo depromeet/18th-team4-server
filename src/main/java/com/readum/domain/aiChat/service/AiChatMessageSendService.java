@@ -102,8 +102,8 @@ public class AiChatMessageSendService {
         // 통과한 경우에만 USER 메시지를 COMPLETED 로 저장(턴 카운트 포함).
         aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
-        List<HistoryMessage> withCurrent = new ArrayList<>(loaded.history().size() + 1);
-        withCurrent.addAll(loaded.history());
+        List<HistoryMessage> withCurrent = new ArrayList<>(loaded.notSummarizedChatRaws().size() + 1);
+        withCurrent.addAll(loaded.notSummarizedChatRaws());
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
 
         StringBuilder contentBuffer = new StringBuilder();
