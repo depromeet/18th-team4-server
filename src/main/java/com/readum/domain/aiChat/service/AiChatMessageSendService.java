@@ -102,14 +102,14 @@ public class AiChatMessageSendService {
         // 통과한 경우에만 USER 메시지를 COMPLETED 로 저장(턴 카운트 포함).
         aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
-        List<HistoryMessage> withCurrent = new ArrayList<>(loaded.history().size() + 1);
-        withCurrent.addAll(loaded.history());
+        List<HistoryMessage> withCurrent = new ArrayList<>(loaded.notSummarizedChatRaws().size() + 1);
+        withCurrent.addAll(loaded.notSummarizedChatRaws());
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
 
         StringBuilder contentBuffer = new StringBuilder();
         AtomicReference<AiChatChunk.Completion> completionRef = new AtomicReference<>();
 
-        return aiChatClient.stream(new AiChatStreamCommand(sessionId, withCurrent, bookContext))
+        return aiChatClient.stream(new AiChatStreamCommand(sessionId, withCurrent, bookContext, loaded.contextSummary()))
                 .concatMap(chunk -> bufferAndConvertChunk(chunk, contentBuffer, completionRef))
                 // doOnCancel 위치 주의: concatMap 직후, concatWith 앞.
                 // Phase 1 (LLM 스트리밍 중) 에 클라이언트가 끊기면 여기로 cancel 이 전파돼 fire.

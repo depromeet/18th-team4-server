@@ -111,6 +111,35 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
             Long sessionId, AiChatMessage.Status status, LocalDateTime createdAt);
 
     /**
+     * 요약 반영 지점 이후의 유효(COMPLETED) 원문 메시지를 id 오름차순으로 — 컨텍스트 요약 워커의 델타 원문·범위 계산용.
+     * summarizedUpToMessageId(요약이 커버한 마지막 메시지 id, 없으면 0) 초과분만 반환한다. id 는 IDENTITY 라 시간순과 단조 일치.
+     */
+    default List<AiChatMessage> findCompletedMessagesAfter(Long sessionId, Long summarizedUpToMessageId) {
+        return findBySessionIdAndStatusAndIdGreaterThanOrderByIdAsc(
+                sessionId, AiChatMessage.Status.COMPLETED, summarizedUpToMessageId);
+    }
+
+    List<AiChatMessage> findBySessionIdAndStatusAndIdGreaterThanOrderByIdAsc(
+            Long sessionId, AiChatMessage.Status status, Long id);
+
+    /**
+     * 요약 반영 지점 이후 최근 원문 대화의 token_count 합 — 요약 트리거 판정용(임계값 초과 시 job 적재).
+     * token_count 가 null 인 행은 SUM 에서 무시된다. 행이 없으면 coalesce 로 0.
+     *
+     * 암묵적 계약: 이 합이 정확하려면 COMPLETED 메시지의 token_count 가 반드시 채워져 있어야 한다
+     * (선택기·조립기와 달리 여기엔 content 길이 fallback 이 없다). AiChatMessagePersistService 가 저장 시
+     * USER=jtokkit 로컬 계산, ASSISTANT=실측 출력(없으면 로컬 계산)으로 항상 채워 이 계약을 지킨다.
+     */
+    @Query("""
+            select coalesce(sum(aiChatMessage.tokenCount), 0)
+              from AiChatMessage aiChatMessage
+             where aiChatMessage.sessionId = :sessionId
+               and aiChatMessage.status = com.readum.model.aiChat.entity.AiChatMessage.Status.COMPLETED
+               and aiChatMessage.id > :summarizedUpToMessageId
+            """)
+    long sumRecentMessageTokens(@Param("sessionId") Long sessionId, @Param("summarizedUpToMessageId") Long summarizedUpToMessageId);
+
+    /**
      * 사용자별 폭주(10초 창) 가드용 카운트 — 상태 무관.
      * 10초에 5건 이상은 상태(COMPLETED/REJECTED/FAILED)와 무관하게 정상 사용이 아니라고 보고 하나의 가드로 센다.
      * (2026-07-06: COMPLETED/REJECTED 분리 카운터를 단일 가드로 통합 — moderation 오탐 사용자를

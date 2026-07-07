@@ -1,6 +1,7 @@
 package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.dto.AiChatChunk;
+import com.readum.domain.aiChat.dto.AssembledContext;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.event.FirstAssistantResponseCompletedEvent;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
@@ -32,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -122,17 +124,17 @@ class AiChatMessagePersistServiceTest {
         given(aiChatSessionRepository.findByIdAndOwner(sessionId, userId)).willReturn(Optional.of(active));
         given(summaryJobRepository.existsBlockingSummaryJob(eq(sessionId), any(LocalDateTime.class)))
                 .willReturn(false);
-        given(aiChatHistorySearchService.findPreviousHistory(sessionId)).willReturn(List.of(
+        given(aiChatHistorySearchService.assembleContext(sessionId)).willReturn(new AssembledContext(null, List.of(
                 new HistoryMessage(HistoryMessage.Role.USER, "이전 질문"),
                 new HistoryMessage(HistoryMessage.Role.ASSISTANT, "이전 응답")
-        ));
+        )));
 
         AiChatMessagePersistService.MessageLoadResult result =
                 persistService.loadHistory(sessionId, userId);
 
-        assertThat(result.history()).hasSize(2);
-        assertThat(result.history().get(0).content()).isEqualTo("이전 질문");
-        assertThat(result.history().get(1).content()).isEqualTo("이전 응답");
+        assertThat(result.notSummarizedChatRaws()).hasSize(2);
+        assertThat(result.notSummarizedChatRaws().get(0).content()).isEqualTo("이전 질문");
+        assertThat(result.notSummarizedChatRaws().get(1).content()).isEqualTo("이전 응답");
         assertThat(result.userBookId()).isEqualTo(100L);
 
         // 검증/조회만 — USER 미저장, 턴 카운트 미증가
@@ -195,10 +197,14 @@ class AiChatMessagePersistServiceTest {
 
         persistService.saveAssistantSuccess(sessionId, "첫 응답", meta);
 
-        ArgumentCaptor<FirstAssistantResponseCompletedEvent> captor =
-                ArgumentCaptor.forClass(FirstAssistantResponseCompletedEvent.class);
-        verify(eventPublisher).publishEvent(captor.capture());
-        FirstAssistantResponseCompletedEvent event = captor.getValue();
+        // saveAssistantSuccess 는 제목 생성 이벤트 외에 컨텍스트 요약 트리거 이벤트도 발행하므로, 모든 발행을 캡처해 걸러낸다.
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, atLeastOnce()).publishEvent(captor.capture());
+        FirstAssistantResponseCompletedEvent event = captor.getAllValues().stream()
+                .filter(FirstAssistantResponseCompletedEvent.class::isInstance)
+                .map(FirstAssistantResponseCompletedEvent.class::cast)
+                .findFirst()
+                .orElseThrow();
         assertThat(event.sessionId()).isEqualTo(sessionId);
         assertThat(event.firstUserMessage())
                 .as("제목 생성 입력은 유저의 첫 질문이어야 한다")

@@ -6,7 +6,9 @@ spring:
         options:
           model: gpt-4o-mini
           stream-usage: true
-          max-tokens: 1024
+          # max-tokens 를 두지 않는다 — 응답을 중간에 자르는 하드 스톱이라 어느 경로에도 걸지 않는다.
+          # 특히 컨텍스트 누적 요약은 잘리면 정보가 유실되므로 절대 금지(압축 스펙 8절).
+          # 비용 상한은 truncation 이 아니라 사용자 토큰 예산(Redis 4h/20k) + 전역 게이트가 담당한다.
       moderation:
         options:
           model: omni-moderation-latest
@@ -17,11 +19,13 @@ spring:
     username: ${MYSQL_USER}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
-    # 요약 워커(summary-job.pool-size=12)의 짧은 DB 단계가 순간적으로 겹쳐도 웹 요청과
-    # 경합하지 않도록 풀을 20 으로 둔다. RDS db.t4g.micro 의 max_connections(약 85)의 24% 수준이라
-    # 외부 접속·인스턴스 증설 여지를 남긴다. (minimum-idle 미지정 시 Hikari 가 max 와 같게 잡아 고정 크기)
+    # 두 워커 풀(summary-job.pool-size=12 + context-summary-job.pool-size=4 = 최대 16)의 짧은 DB 단계가
+    # 순간적으로 겹쳐도 웹 요청과 경합하지 않도록 풀을 24 로 둔다(워커가 다 겹쳐도 웹에 ~8 커넥션 확보).
+    # 워커는 TX 단계(수 ms)에서만 커넥션을 쥐고 느린 LLM 호출은 TX 밖이라 상시 점유는 이보다 훨씬 낮다.
+    # EC2 Docker MySQL 의 max_connections(기본 151)의 약 16% 수준이라 외부 접속·증설 여지를 남긴다.
+    # (minimum-idle 미지정 시 Hikari 가 max 와 같게 잡아 고정 크기)
     hikari:
-      maximum-pool-size: 20
+      maximum-pool-size: 24
   jpa:
     hibernate:
       ddl-auto: validate

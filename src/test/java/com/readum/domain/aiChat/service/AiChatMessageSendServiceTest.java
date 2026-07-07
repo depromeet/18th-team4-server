@@ -88,7 +88,7 @@ class AiChatMessageSendServiceTest {
             (text == null || text.isEmpty()) ? 0 : (int) Math.ceil(text.length() / 2.5);
 
     private final AiChatProperties aiChatProperties = new AiChatProperties(
-            new AiChatProperties.Context(8000),
+            new AiChatProperties.Context(8000, 2000, 4000, 800),
             new AiChatProperties.MessageRule(1000),
             new AiChatProperties.RateLimit(10, 5),
             new AiChatProperties.TokenBudget(4, 20000, 512),
@@ -113,8 +113,12 @@ class AiChatMessageSendServiceTest {
     }
 
     private void givenLoadHistory(Long sessionId, List<HistoryMessage> history, Long userBookId) {
+        givenLoadHistory(sessionId, null, history, userBookId);
+    }
+
+    private void givenLoadHistory(Long sessionId, String contextSummary, List<HistoryMessage> history, Long userBookId) {
         given(persistService.loadHistory(sessionId, USER_ID))
-                .willReturn(new AiChatMessagePersistService.MessageLoadResult(history, userBookId));
+                .willReturn(new AiChatMessagePersistService.MessageLoadResult(contextSummary, history, userBookId));
     }
 
     @Test
@@ -610,5 +614,24 @@ class AiChatMessageSendServiceTest {
         assertThat(sentHistory.get(1).content()).isEqualTo("이전 응답");
         assertThat(sentHistory.get(2).content()).isEqualTo("이번 질문");
         assertThat(sentHistory.get(2).role()).isEqualTo(HistoryMessage.Role.USER);
+    }
+
+    @Test
+    void 누적_요약이_있으면_AiChatStreamCommand_에_contextSummary_로_전달된다() {
+        Long sessionId = 7L;
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "이번 질문");
+
+        givenLoadHistory(sessionId, "이전 대화를 압축한 누적 요약", List.of(), 100L);
+        given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
+                new AiChatChunk.Completion(1, 1, 2, null)
+        ));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, sessionId, "", null, 1, 1, 2));
+
+        service.execute(command).blockLast();
+
+        ArgumentCaptor<AiChatStreamCommand> captor = ArgumentCaptor.forClass(AiChatStreamCommand.class);
+        verify(aiChatClient).stream(captor.capture());
+        assertThat(captor.getValue().contextSummary()).isEqualTo("이전 대화를 압축한 누적 요약");
     }
 }

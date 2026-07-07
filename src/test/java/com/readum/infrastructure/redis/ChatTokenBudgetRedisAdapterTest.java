@@ -35,7 +35,7 @@ class ChatTokenBudgetRedisAdapterTest {
     void setUp() {
         lenient().when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
         AiChatProperties properties = new AiChatProperties(
-                new AiChatProperties.Context(8000),
+                new AiChatProperties.Context(8000, 2000, 4000, 800),
                 new AiChatProperties.MessageRule(1000),
                 new AiChatProperties.RateLimit(10, 5),
                 new AiChatProperties.TokenBudget(4, 20000, 512),

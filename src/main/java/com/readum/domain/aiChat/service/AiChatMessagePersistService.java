@@ -1,7 +1,9 @@
 package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.dto.AiChatChunk;
+import com.readum.domain.aiChat.dto.AssembledContext;
 import com.readum.domain.aiChat.dto.HistoryMessage;
+import com.readum.domain.aiChat.event.ContextSummarizeTriggerEvent;
 import com.readum.domain.aiChat.event.FirstAssistantResponseCompletedEvent;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.TokenCounter;
@@ -58,8 +60,8 @@ public class AiChatMessagePersistService {
             // 지금 생성 중 — 일시적으로 전송 불가
             throw new BadRequestException(AiChatErrorCode.SESSION_LOCKED);
         }
-        List<HistoryMessage> previousHistory = aiChatHistorySearchService.findPreviousHistory(sessionId);
-        return new MessageLoadResult(previousHistory, session.getUserBookId());
+        AssembledContext assembled = aiChatHistorySearchService.assembleContext(sessionId);
+        return new MessageLoadResult(assembled.summary(), assembled.recentMessages(), session.getUserBookId());
     }
 
     /**
@@ -91,7 +93,11 @@ public class AiChatMessagePersistService {
         aiChatMessageRepository.save(AiChatMessage.createUserMessageRejected(sessionId, normalizedContent));
     }
 
-    public record MessageLoadResult(List<HistoryMessage> history, Long userBookId) {}
+    /**
+     * @param notSummarizedChatRaws 요약 경계 이후의 원문 대화(요약이 대체하지 못한 최근 꼬리). 전체 이력이 아니다 —
+     *                              앞부분은 {@code contextSummary} 가 대체한다. 현재 보내는 USER 메시지는 아직 포함하지 않는다.
+     */
+    public record MessageLoadResult(String contextSummary, List<HistoryMessage> notSummarizedChatRaws, Long userBookId) {}
 
     @Transactional
     public AiChatMessage saveAssistantSuccess(
@@ -106,6 +112,9 @@ public class AiChatMessagePersistService {
         AiChatMessage saved = aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(
                 sessionId, accumulated, inputTokens, outputTokens, totalTokens, tokenCount
         ));
+        // ASSISTANT 응답이 COMPLETED 로 쌓였으니, 커밋 후 컨텍스트 요약이 필요한지(최근 원문 대화 토큰 합 > 임계값) 판정하도록 트리거한다.
+        // 실제 임계값 검사·job 적재는 AFTER_COMMIT 리스너가 담당한다(사용자 응답 경로와 분리, LLM 요약은 워커가 비동기 처리).
+        eventPublisher.publishEvent(new ContextSummarizeTriggerEvent(sessionId));
         // 세션 누적치는 ASSISTANT 가 생성한 토큰만 합산한다.
         // totalTokens 는 입력 프롬프트(이전 대화 + 시스템 프롬프트) 까지 포함하므로 누적에 쓰면
         // 같은 컨텍스트가 매 턴 중복 집계되어 실제 생성량보다 부풀려진다.

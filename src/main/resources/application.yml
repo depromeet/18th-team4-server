@@ -48,7 +48,10 @@ user:
 
 ai-chat:
   context:
-    raw-tail-hard-cap-tokens: 8000   # 원문 꼬리 토큰 절대 상한. 초과분은 오래된 턴부터 제외 (요약 결합은 PR-3)
+    assembly-recent-raw-max-tokens: 8000      # 조립기가 한 호출에 실어보낼 최근 원문 대화의 최대 토큰(안전핀). 요약이 밀렸을 때 초과분은 오래된 턴부터 제외. (keep-recent-raw-tokens 이상이어야 함)
+    keep-recent-raw-tokens: 2000              # 워커가 요약하지 않고 항상 원문으로 남겨둘 최근 원문 대화 크기(품질 장치). 요약 범위 계산의 하한.
+    summarize-trigger-token-threshold: 4000   # 요약 반영 지점 이후 최근 원문 대화 토큰 합이 이를 넘으면 요약 job 적재.
+    summary-estimated-output-tokens: 800      # 요약 갱신 호출 출력 추정값 — 게이트 예약 계상용(프롬프트 길이 지시 아님).
   message:
     max-content-length: 1000
   rate-limit:
@@ -121,3 +124,13 @@ summary-job:
   base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
   max-request-tokens: 120000       # 단일 요청 추정 토큰 상한. 초과 세션은 호출 없이 fail-fast.
   estimated-output-tokens: 1024    # 토큰 추정 시 호출당 출력 추정값
+
+# 채팅 컨텍스트 요약 작업 큐 (감상문 summary-job 골격 복제, 별도 손잡이).
+context-summary-job:
+  pool-size: 4
+  dispatch-interval-ms: 2000
+  reaper-interval-ms: 60000
+  lease-seconds: 120        # 2분 lease (요약 1회는 감상문보다 짧다)
+  max-attempts: 5
+  base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
+  max-request-tokens: 120000       # 단일 요청 추정 토큰 상한. 초과 세션은 호출 없이 fail-fast.
