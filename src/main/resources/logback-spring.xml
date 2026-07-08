@@ -40,9 +40,11 @@
         </encoder>
     </appender>
 
-    <!-- ================= local : 콘솔만 ================= -->
+    <!-- ================= local : 콘솔만 (파일·Slack 없음 — 로컬 ERROR 가 팀 채널로 가지 않는다) ================= -->
     <springProfile name="local">
-        <root level="DEBUG">
+        <!-- root 는 INFO — dev 와 같은 이유(워커 폴링의 프레임워크 DEBUG 도배).
+             앱 코드 DEBUG 는 application-local.yml 의 logging.level.com.readum 이 살린다. -->
+        <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
     </springProfile>

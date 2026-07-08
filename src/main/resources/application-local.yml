@@ -1,0 +1,86 @@
+# 로컬 개발 프로파일 (SPRING_PROFILES_ACTIVE=local).
+# 접속 대상은 로컬 컨테이너(infra/docker/docker-compose.local.yml 의 MySQL·Redis)다.
+# logback 은 local 블록(콘솔만)이 켜진다 — 파일(/var/log/readum)도 Slack 알림도 붙지 않으므로
+# 로컬에서 난 ERROR 가 팀 채널로 가지 않는다. 서버(dev 프로파일)와 다른 점은 로그 목적지뿐이고,
+# 그 외 값은 dev 와 같게 유지한다 (로컬-서버 동작 차이 최소화 — 값을 바꿀 땐 application-dev.yml 과 함께 검토).
+spring:
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4o-mini
+          stream-usage: true
+          # max-tokens 를 두지 않는 이유는 application-dev.yml 의 같은 항목 주석 참조.
+      moderation:
+        options:
+          model: omni-moderation-latest
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:readum}?characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+    username: ${MYSQL_USER:readum}
+    password: ${MYSQL_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # Hikari 풀은 기본값(10)을 그대로 쓴다 — dev 의 24 는 서버의 워커·웹 동시성 계산값이라 로컬엔 불필요.
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: 6379
+      password: ${REDIS_PASSWORD}
+
+readum:
+  guardrail:
+    input:
+      max-characters: 4000
+      max-tokens: 1500
+    output:
+      max-response-tokens: 1024
+    moderation:
+      model: omni-moderation-latest
+      # 카테고리 구성은 dev 와 동일하게 둔다 — 로컬에서만 다르면 가드레일 동작을 로컬에서 검증할 수 없다.
+      always-block-categories:
+        - self-harm
+        - self-harm-intent
+        - self-harm-instructions
+        - sexual-minors
+        - dangerous-and-criminal-content
+      book-context-relaxed-categories:
+        - violence
+        - violence-graphic
+        - harassment
+        - harassment-threatening
+        - sexual
+        - hate
+        - hate-threatening
+      failure-policy: CLOSED
+
+# 콘솔에는 앱 코드 DEBUG 만 살린다 (logback local root=INFO 와 짝 — dev 와 같은 원칙).
+logging:
+  level:
+    com.readum: DEBUG
+
+aladin:
+  ttb-key: ${ALADIN_TTB_KEY:}
+  base-url: https://www.aladin.co.kr/ttb/api
+  search-target: Book
+  output: JS
+  version: 20131101
+  cover: Big
+  request-timeout: PT3S
+  search-result-limit: 200
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
