@@ -5,6 +5,12 @@ spring:
   # 엔티티에 JPA 연관관계가 0개라 트랜잭션 밖 LAZY 접근이 없어 LazyInitializationException 위험이 없다.
   jpa:
     open-in-view: false
+    # 스키마 정본은 Flyway. Hibernate 는 엔티티와 대조만 한다(환경 무관). 테스트는 자체 yml 에서 create-drop.
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
   # 블로킹 I/O(입력 moderation 동기 호출 등)를 값싸게 대량 동시 처리 (#103). Java 25 라 synchronized 핀닝은 사실상 해소됨.
   threads:
     virtual:
@@ -15,6 +21,19 @@ spring:
         log-prompt: false
         log-completion: false
         include-error-logging: true
+    # 모델·옵션은 환경 무관(코드 동작). api-key 만 환경변수. (프로파일별로 다르지 않다)
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4o-mini
+          stream-usage: true
+          # max-tokens 를 두지 않는다 — 응답을 중간에 자르는 하드 스톱이라 어느 경로에도 걸지 않는다.
+          # 특히 컨텍스트 누적 요약은 잘리면 정보가 유실되므로 절대 금지(압축 스펙 8절).
+          # 비용 상한은 truncation 이 아니라 사용자 토큰 예산(Redis 4h/20k) + 전역 게이트가 담당한다.
+      moderation:
+        options:
+          model: omni-moderation-latest
   # @Scheduled 3개(6시 적재 · dispatch · reaper)가 단일 스레드에서 직렬화되지 않도록 풀 분리.
   task:
     scheduling:
@@ -65,6 +84,46 @@ ai-chat:
     thread-cap: 32                       # 동시 제목 생성 상한. 스레드는 lazy 생성 + 60초 유휴 회수라 평소엔 0 에 수렴.
                                          # 저빈도 백그라운드라 32 면 충분. 전용 ChatClient 의 10초 responseTimeout 이 매달린 호출을 끊어 blast-radius 를 시간으로 제한.
     queue-cap: 64                        # backing thread 1개당 큐 한도(per-thread). 전역 backlog 상한 = thread-cap × queue-cap = 32 × 64 ≈ 2,048. 초과 시 RejectedExecutionException(로그 후 스킵).
+
+# 입출력 가드레일 — 환경 무관 비즈니스 룰. moderation 카테고리 정본은 OpenAiInputModerationClientImpl 레지스트리.
+readum:
+  guardrail:
+    input:
+      max-characters: 4000
+      max-tokens: 1500
+    output:
+      max-response-tokens: 1024
+    moderation:
+      model: omni-moderation-latest
+      # 책 맥락 유무와 무관하게 항상 차단.
+      always-block-categories:
+        - self-harm
+        - self-harm-intent
+        - self-harm-instructions
+        - sexual-minors
+        - dangerous-and-criminal-content
+      # 책 맥락(독서 토론) 이 있을 때만 통과시키는 카테고리.
+      book-context-relaxed-categories:
+        - violence
+        - violence-graphic
+        - harassment
+        - harassment-threatening
+        - sexual
+        - hate
+        - hate-threatening
+      # 외부 Moderation API 장애 시 차단 우선(503). OPEN 은 개발 환경에서만 명시 전환(프로파일에서 override).
+      failure-policy: CLOSED
+
+# 알라딘 도서 검색 API — 외부 스펙이라 환경 무관. ttb-key 만 환경변수.
+aladin:
+  ttb-key: ${ALADIN_TTB_KEY:}
+  base-url: https://www.aladin.co.kr/ttb/api
+  search-target: Book
+  output: JS
+  version: 20131101
+  cover: Big
+  request-timeout: PT3S
+  search-result-limit: 200
 
 springdoc:
   api-docs:

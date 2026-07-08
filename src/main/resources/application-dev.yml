@@ -1,17 +1,6 @@
+# 개발 서버 프로파일 (SPRING_PROFILES_ACTIVE=dev). 환경별 값만 둔다 —
+# 환경 무관 값(openai 옵션·jpa·guardrail·aladin)은 application.yml 이 정본이다.
 spring:
-  ai:
-    openai:
-      api-key: ${OPENAI_API_KEY}
-      chat:
-        options:
-          model: gpt-4o-mini
-          stream-usage: true
-          # max-tokens 를 두지 않는다 — 응답을 중간에 자르는 하드 스톱이라 어느 경로에도 걸지 않는다.
-          # 특히 컨텍스트 누적 요약은 잘리면 정보가 유실되므로 절대 금지(압축 스펙 8절).
-          # 비용 상한은 truncation 이 아니라 사용자 토큰 예산(Redis 4h/20k) + 전역 게이트가 담당한다.
-      moderation:
-        options:
-          model: omni-moderation-latest
   datasource:
     # sslMode 미지정 = PREFERRED (서버가 지원하면 TLS). RDS 시절의 REQUIRED 는 컨테이너 이관으로 제거 —
     # MySQL 이 127.0.0.1 에만 바인딩되어 루프백 구간 강제 TLS 는 실익이 없다.
@@ -26,45 +15,11 @@ spring:
     # (minimum-idle 미지정 시 Hikari 가 max 와 같게 잡아 고정 크기)
     hikari:
       maximum-pool-size: 24
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    properties:
-      hibernate:
-        format_sql: true
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}   # 앱은 호스트에서 systemd 로 돌고 Redis 는 루프백 바인딩
       port: 6379
       password: ${REDIS_PASSWORD}
-
-readum:
-  guardrail:
-    input:
-      max-characters: 4000
-      max-tokens: 1500
-    output:
-      max-response-tokens: 1024
-    moderation:
-      model: omni-moderation-latest
-      # 책 맥락 유무와 무관하게 항상 차단. 카테고리 이름 정본은 OpenAiInputModerationClientImpl 레지스트리.
-      always-block-categories:
-        - self-harm
-        - self-harm-intent
-        - self-harm-instructions
-        - sexual-minors
-        - dangerous-and-criminal-content
-      # 책 맥락(독서 토론) 이 있을 때만 통과시키는 카테고리.
-      book-context-relaxed-categories:
-        - violence
-        - violence-graphic
-        - harassment
-        - harassment-threatening
-        - sexual
-        - hate
-        - hate-threatening
-      # 외부 Moderation API 장애 시 차단 우선(503). OPEN 은 개발 환경에서만 명시 전환.
-      failure-policy: CLOSED
 
 # 콘솔(journald)에는 앱 코드 DEBUG 만 살린다. 파일은 logback 필터가 INFO 이상만 남긴다.
 # org.hibernate.SQL DEBUG 는 두지 않는다 — 워커 폴링 SELECT(2초 주기)가 콘솔을 도배하고,
@@ -72,16 +27,6 @@ readum:
 logging:
   level:
     com.readum: DEBUG
-
-aladin:
-  ttb-key: ${ALADIN_TTB_KEY:}
-  base-url: https://www.aladin.co.kr/ttb/api
-  search-target: Book
-  output: JS
-  version: 20131101
-  cover: Big
-  request-timeout: PT3S
-  search-result-limit: 200
 
 springdoc:
   api-docs:
