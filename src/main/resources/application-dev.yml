@@ -66,11 +66,12 @@ readum:
       # 외부 Moderation API 장애 시 차단 우선(503). OPEN 은 개발 환경에서만 명시 전환.
       failure-policy: CLOSED
 
+# 콘솔(journald)에는 앱 코드 DEBUG 만 살린다. 파일은 logback 필터가 INFO 이상만 남긴다.
+# org.hibernate.SQL DEBUG 는 두지 않는다 — 워커 폴링 SELECT(2초 주기)가 콘솔을 도배하고,
+# 파일에는 어차피 INFO 필터로 안 남아 실익이 없다. SQL 관찰은 MySQL slow_log(TABLE)를 쓴다.
 logging:
   level:
     com.readum: DEBUG
-    org.hibernate.SQL: DEBUG
-    org.hibernate.orm.jdbc.bind: WARN
 
 aladin:
   ttb-key: ${ALADIN_TTB_KEY:}

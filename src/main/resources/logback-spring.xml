@@ -52,7 +52,7 @@
         <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
             <file>${LOG_PATH}/${LOG_FILE_NAME}.log</file>
             <append>true</append>
-            <!-- root 가 DEBUG 라도 파일에는 INFO 이상만 남긴다 (DEBUG 는 콘솔에서만 확인) -->
+            <!-- root 레벨과 무관하게 파일에는 INFO 이상만 남긴다 (로거별 DEBUG 는 콘솔에서만 확인) -->
             <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
                 <level>INFO</level>
             </filter>
@@ -110,7 +110,12 @@
             <appender-ref ref="AI_PROMPT_AUDIT_FILE"/>
         </logger>
 
-        <root level="DEBUG">
+        <!--
+            root 는 INFO — 워커 폴링(감상문·컨텍스트 요약, 2초 주기 × 풀 16)이 프레임워크 DEBUG
+            (lettuce·Hibernate·JPA 트랜잭션)를 journald 에 도배해 콘솔 로그를 못 쓰게 만들기 때문.
+            앱 코드 DEBUG 는 application-dev.yml 의 logging.level.com.readum 이 콘솔에 살린다.
+        -->
+        <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
             <appender-ref ref="ASYNC_SLACK_ERROR"/>
