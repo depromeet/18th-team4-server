@@ -59,12 +59,17 @@ jobs:
           ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
             'chmod 600 /opt/readum/.env.tmp && mv /opt/readum/.env.tmp /opt/readum/.env'
 
-      - name: jar·배포 스크립트 업로드
+      - name: jar·배포 스크립트·nginx 설정 업로드
         run: |
           scp -i ~/.ssh/deploy_key "readum-${SHORT_SHA}.jar" \
             "ubuntu@${DEPLOY_HOST}:/opt/readum/releases/"
           scp -i ~/.ssh/deploy_key infra/scripts/deploy.sh \
             "ubuntu@${DEPLOY_HOST}:/opt/readum/bin/deploy.sh"
+          # nginx 설정은 스테이징 디렉토리에만 올린다. /etc/nginx 반영(변경분만)과 검증·reload 는
+          # deploy.sh 의 sync_nginx_conf 가 수행한다.
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" 'mkdir -p /opt/readum/nginx'
+          scp -i ~/.ssh/deploy_key infra/nginx/app.conf infra/nginx/websocket-upgrade.conf \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/nginx/"
 
       - name: blue/green 배포 실행
         run: |

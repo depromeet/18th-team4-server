@@ -12,4 +12,6 @@ ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl start readum-blue, \
   /usr/bin/systemctl disable readum-green, \
   /usr/bin/systemctl reload nginx, \
   /usr/sbin/nginx -t, \
-  /usr/bin/tee /etc/nginx/conf.d/readum-upstream.conf
+  /usr/bin/tee /etc/nginx/conf.d/readum-upstream.conf, \
+  /usr/bin/tee /etc/nginx/sites-available/app.conf, \
+  /usr/bin/tee /etc/nginx/conf.d/websocket-upgrade.conf

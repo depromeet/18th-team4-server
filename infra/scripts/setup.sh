@@ -4,8 +4,8 @@
 #   sudo ./setup.sh <repo 의 infra 디렉토리 경로>
 #
 # 이 스크립트가 하는 일: 디렉토리 구조 / systemd 유닛 / sudoers 설치.
-# 하지 않는 일(운영 트래픽에 영향을 주는 것들 — docs/ops/infrastructure.md 의 절차로 수동 수행):
-#   - nginx 설정 교체와 reload (전환 시점을 사람이 정해야 함)
+# 하지 않는 일(docs/ops/infrastructure.md 의 절차로 수행):
+#   - nginx 설정 교체와 reload (배포 파이프라인의 deploy.sh sync_nginx_conf 가 변경분만 반영)
 #   - Docker·Redis 설치와 기동
 #   - 스왑 증설
 set -euo pipefail
@@ -18,7 +18,7 @@ INFRA_DIR="${1:-}"
 [[ "$(id -u)" -eq 0 ]] || { echo "sudo 로 실행해야 한다" >&2; exit 1; }
 
 echo "==> /opt/readum 디렉토리 구조"
-mkdir -p /opt/readum/{blue,green,releases,bin}
+mkdir -p /opt/readum/{blue,green,releases,bin,nginx}
 chown -R ubuntu:ubuntu /opt/readum
 
 echo "==> systemd 유닛 설치"
