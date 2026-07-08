@@ -83,7 +83,13 @@ sync_nginx_conf() {
     [[ -f "$src" ]] || continue   # 서버에서 수동 실행 등 원본이 없으면 건너뜀
     cmp -s "$src" "$dst" 2>/dev/null && continue
     backup="$NGINX_SYNC_DIR/$name.prev"
-    [[ -f "$dst" ]] && cat "$dst" > "$backup"
+    if [[ -f "$dst" ]]; then
+      cat "$dst" > "$backup"
+    else
+      # 최초 반영(대상 파일이 아직 없음) — 이전 배포의 낡은 백업이 남아 있으면 엉뚱한 내용으로
+      # "복구"하게 되므로 지운다. 백업 없음 = 복구 불가는 아래 검증 실패 분기에서 경고로 드러낸다.
+      rm -f "$backup"
+    fi
     log "nginx 설정 갱신: $dst"
     sudo /usr/bin/tee "$dst" < "$src" >/dev/null
     applied+=("$backup:$dst")
@@ -93,9 +99,14 @@ sync_nginx_conf() {
     log "nginx 설정 검증 실패 — 이전 설정으로 복구"
     for entry in "${applied[@]}"; do
       backup="${entry%%:*}"; dst="${entry#*:}"
-      [[ -f "$backup" ]] && sudo /usr/bin/tee "$dst" < "$backup" >/dev/null
+      if [[ -f "$backup" ]]; then
+        sudo /usr/bin/tee "$dst" < "$backup" >/dev/null
+      else
+        # 최초 반영이라 되돌릴 이전 설정이 없다 — 검증 실패한 새 설정이 그대로 남는다.
+        log "경고: $dst 는 이전 설정이 없어(최초 반영) 복구하지 못함 — 검증 실패한 설정이 남아 있으니 수동 정리 필요"
+      fi
     done
-    fail "새 nginx 설정이 검증에 실패해 이전 설정으로 복구함. 배포 중단 (트래픽은 기존 프로세스 유지)"
+    fail "새 nginx 설정이 검증에 실패함. 배포 중단 (트래픽은 기존 프로세스 유지 — 복구 결과는 위 로그 참조)"
   fi
   sudo /usr/bin/systemctl reload nginx
 }
