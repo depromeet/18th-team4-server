@@ -1,12 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"io"
 	"log"
 	"net/http"
 	"time"
 )
+
+const createIssueActionID = "create_incident_issue"
 
 type server struct {
 	signingSecret string
@@ -34,7 +35,7 @@ func (s *server) handleAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	_, inc, err := parseInteraction(body)
+	si, inc, err := parseInteraction(body)
 	if err != nil {
 		log.Printf("payload 파싱 실패: %v", err)
 		http.Error(w, "bad payload", http.StatusBadRequest)
@@ -42,7 +43,22 @@ func (s *server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	// Slack 3초 규칙: 즉시 200 ack, 실제 dispatch 는 비동기로.
 	w.WriteHeader(http.StatusOK)
+
+	if !hasIncidentAction(si) {
+		log.Printf("장애 이슈 생성 버튼이 아니라 dispatch 건너뜀")
+		return
+	}
+	if inc.Fingerprint == "" && inc.DeploySha == "" {
+		log.Printf("fingerprint·deploy 둘 다 비어 있어 dispatch 건너뜀")
+		return
+	}
+
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("dispatch goroutine panic 복구: %v", r)
+			}
+		}()
 		if err := s.dispatcher.dispatch(inc); err != nil {
 			log.Printf("repository_dispatch 실패 fingerprint=%s: %v", inc.Fingerprint, err)
 			return
@@ -51,4 +67,12 @@ func (s *server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }
+// hasIncidentAction 은 상호작용에 장애 이슈 생성 버튼 클릭이 포함됐는지 확인한다.
+func hasIncidentAction(si *slackInteraction) bool {
+	for _, action := range si.Actions {
+		if action.ActionID == createIssueActionID {
+			return true
+		}
+	}
+	return false
+}

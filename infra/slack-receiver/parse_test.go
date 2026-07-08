@@ -1,9 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"net/url"
 	"testing"
 )
+
+// mustJSONString 는 테스트용으로 문자열을 JSON 리터럴(따옴표 포함)로 만든다.
+func mustJSONString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
 
 const sampleMessageText = ":rotating_light: *readum ERROR 발생*\n" +
 	"*env*: `dev`\n" +

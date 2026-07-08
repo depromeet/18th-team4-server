@@ -70,9 +70,3 @@ func extractIncident(text string) *Incident {
 		Stacktrace:  first(reStack),
 	}
 }
-
-// mustJSONString 는 테스트/디버그용으로 문자열을 JSON 리터럴(따옴표 포함)로 만든다.
-func mustJSONString(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
