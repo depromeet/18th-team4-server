@@ -46,3 +46,17 @@ services:
     volumes:
       # RDB 스냅샷을 호스트에 보존 — 컨테이너 재생성 시 토큰 예산 카운터 유실 방지.
       - /opt/readum/redis-data:/data
+
+  slack-receiver:
+    # 이미지는 slack-receiver-deploy.yml 이 빌드해 docker load 로 서버에 적재한다.
+    image: slack-receiver:latest
+    container_name: readum-slack-receiver
+    restart: unless-stopped
+    # 호스트 밖에서는 접근 불가 — 외부 노출은 nginx 가 담당.
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+      INCIDENT_DISPATCH_TOKEN: ${INCIDENT_DISPATCH_TOKEN}
+      GITHUB_REPOSITORY: depromeet/18th-team4-server
+      PORT: 8090
