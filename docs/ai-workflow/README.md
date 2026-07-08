@@ -8,7 +8,7 @@ AI(Claude Code / Codex)가 이 저장소에서 작업할 때 따르는 절차 �
 
 | 파일 | 내용 |
 |---|---|
-| [task-workflow.md](task-workflow.md) | 작업 시 지켜야 할 지시(수정·삭제 범위)와 기본 작업 순서 |
+| [development-workflow.md](development-workflow.md) | 작업 유형 분류·유형별 흐름·단계별 읽을 문서·단일 관심사 원칙 (진입은 `go` 스킬) |
 | [git-and-pr.md](git-and-pr.md) | 브랜치 네이밍, 커밋 메시지 규칙, PR·이슈 생성 스킬로의 위임 |
 | [codex-review-prompt.md](codex-review-prompt.md) | 로컬 Codex CLI 로 코드 리뷰할 때의 리뷰 기준 (컨벤션 상세는 docs/conventions/ 원본을 읽어 적용) |
 

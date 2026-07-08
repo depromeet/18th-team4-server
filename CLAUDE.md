@@ -21,7 +21,7 @@ AI 작업자를 위한 최상단 라우터 문서. 상세 규칙은 링크된 �
 
 ## 작업 전 읽을 문서
 
-- 모든 구현 작업: [docs/ai-workflow/task-workflow.md](docs/ai-workflow/task-workflow.md) (작업 순서) + [docs/conventions/README.md](docs/conventions/README.md) (규칙 색인)
+- 모든 구현 작업: [docs/ai-workflow/development-workflow.md](docs/ai-workflow/development-workflow.md) (작업 유형별 흐름·단계별 읽을 문서) + [docs/conventions/README.md](docs/conventions/README.md) (규칙 색인)
 - 구조 파악: [docs/architecture/system-overview.md](docs/architecture/system-overview.md), 기능이 어느 도메인에 있는지는 [docs/domain/README.md](docs/domain/README.md)
 - 운영·인프라·로컬 실행이 걸린 작업: [docs/ops/README.md](docs/ops/README.md)
 
