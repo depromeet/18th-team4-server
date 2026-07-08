@@ -17,6 +17,13 @@ set -euo pipefail
 BASE_DIR="/opt/readum"
 RELEASES_DIR="$BASE_DIR/releases"
 UPSTREAM_CONF="/etc/nginx/conf.d/readum-upstream.conf"
+NGINX_SYNC_DIR="$BASE_DIR/nginx"
+# CI 가 NGINX_SYNC_DIR 에 올려두는 nginx 설정 원본(repo infra/nginx)과 실제 적용 경로의 짝. "파일명:적용경로"
+# 적용 경로를 바꾸면 sudoers(infra/sudoers/readum-deploy)의 tee 허용 경로도 함께 바꿔야 한다.
+NGINX_CONF_TARGETS=(
+  "app.conf:/etc/nginx/sites-available/app.conf"
+  "websocket-upgrade.conf:/etc/nginx/conf.d/websocket-upgrade.conf"
+)
 BLUE_PORT=8081
 GREEN_PORT=8082
 READINESS_TIMEOUT_SECONDS=90
@@ -65,6 +72,45 @@ wait_readiness() {
   return 1
 }
 
+# CI 가 올려둔 nginx 설정을 실제 경로와 비교해 달라진 파일만 반영한다.
+# 반영 후 nginx -t 실패 시 이전 내용으로 복구하고 배포를 중단한다 (reload 전이므로 트래픽 무영향).
+sync_nginx_conf() {
+  local entry name src dst backup
+  local applied=()
+  for entry in "${NGINX_CONF_TARGETS[@]}"; do
+    name="${entry%%:*}"; dst="${entry#*:}"
+    src="$NGINX_SYNC_DIR/$name"
+    [[ -f "$src" ]] || continue   # 서버에서 수동 실행 등 원본이 없으면 건너뜀
+    cmp -s "$src" "$dst" 2>/dev/null && continue
+    backup="$NGINX_SYNC_DIR/$name.prev"
+    if [[ -f "$dst" ]]; then
+      cat "$dst" > "$backup"
+    else
+      # 최초 반영(대상 파일이 아직 없음) — 이전 배포의 낡은 백업이 남아 있으면 엉뚱한 내용으로
+      # "복구"하게 되므로 지운다. 백업 없음 = 복구 불가는 아래 검증 실패 분기에서 경고로 드러낸다.
+      rm -f "$backup"
+    fi
+    log "nginx 설정 갱신: $dst"
+    sudo /usr/bin/tee "$dst" < "$src" >/dev/null
+    applied+=("$backup:$dst")
+  done
+  [[ ${#applied[@]} -gt 0 ]] || return 0
+  if ! sudo /usr/sbin/nginx -t; then
+    log "nginx 설정 검증 실패 — 이전 설정으로 복구"
+    for entry in "${applied[@]}"; do
+      backup="${entry%%:*}"; dst="${entry#*:}"
+      if [[ -f "$backup" ]]; then
+        sudo /usr/bin/tee "$dst" < "$backup" >/dev/null
+      else
+        # 최초 반영이라 되돌릴 이전 설정이 없다 — 검증 실패한 새 설정이 그대로 남는다.
+        log "경고: $dst 는 이전 설정이 없어(최초 반영) 복구하지 못함 — 검증 실패한 설정이 남아 있으니 수동 정리 필요"
+      fi
+    done
+    fail "새 nginx 설정이 검증에 실패함. 배포 중단 (트래픽은 기존 프로세스 유지 — 복구 결과는 위 로그 참조)"
+  fi
+  sudo /usr/bin/systemctl reload nginx
+}
+
 switch_traffic_to() {
   local port="$1"
   log "nginx upstream 을 127.0.0.1:$port 로 전환"
@@ -111,6 +157,8 @@ activate() {
 cmd_deploy() {
   local jar="${1:-}"
   [[ -n "$jar" && -f "$jar" ]] || fail "사용법: deploy.sh deploy <jar 경로>"
+
+  sync_nginx_conf
 
   local active target
   active="$(active_color)"

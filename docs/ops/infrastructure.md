@@ -46,8 +46,8 @@
 
 | 구성물 | 위치 (서버) | 원본 |
 |---|---|---|
-| nginx server 블록 | `/etc/nginx/sites-available/app.conf` | `infra/nginx/app.conf` |
-| nginx WebSocket map | `/etc/nginx/conf.d/websocket-upgrade.conf` | `infra/nginx/websocket-upgrade.conf` — app.conf 가 쓰는 `$connection_upgrade` 를 정의하는 map. map 은 http 컨텍스트에만 둘 수 있어 server 블록 밖 conf.d 조각으로 분리. 없으면 nginx 기동 실패 |
+| nginx server 블록 | `/etc/nginx/sites-available/app.conf` | `infra/nginx/app.conf` — CI 가 배포 때마다 `/opt/readum/nginx/` 로 올리고, `deploy.sh` 의 `sync_nginx_conf` 가 변경분만 반영(검증 실패 시 이전 설정 복구 + 배포 중단) |
+| nginx WebSocket map | `/etc/nginx/conf.d/websocket-upgrade.conf` | `infra/nginx/websocket-upgrade.conf` — app.conf 가 쓰는 `$connection_upgrade` 를 정의하는 map. map 은 http 컨텍스트에만 둘 수 있어 server 블록 밖 conf.d 조각으로 분리. 없으면 nginx 기동 실패. 반영 방식은 app.conf 와 동일(CI 업로드 + `sync_nginx_conf`) |
 | 전환 스위치(upstream) | `/etc/nginx/conf.d/readum-upstream.conf` | 없음 — "지금 어느 색이 활성인가"라는 런타임 상태. `deploy.sh` 가 생성·갱신하며 활성 색 판정도 이 파일에서 읽는다 |
 | systemd 유닛 | `/etc/systemd/system/readum-{blue,green}.service` | `infra/systemd/` |
 | 배포 스크립트 | `/opt/readum/bin/deploy.sh` | `infra/scripts/deploy.sh` (CI 가 배포 때마다 동기화) |
@@ -68,7 +68,7 @@
 
 - ~~**05:50~06:10 배포 회피**~~ (2026-07 해소) — 6시 감상문 적재 스캔과 전환 구간(두 프로세스 동시 상주)이 겹치면 외부 API(OpenAI) 호출 예산이 잠깐 2배가 됐었다. 전역 게이트(Redis) 도입으로 호출 예산이 프로세스 간 공유되어 이 회피는 불필요해졌다.
 - 전환 구간엔 JVM 2개(각 `-Xmx256m`)가 동시에 뜬다. 배포 중 스왑 피크가 계속 커지면 인스턴스 증설을 검토한다.
-- nginx·systemd·sudoers 파일 변경은 CI 가 반영하지 않는다(root 권한 불필요 원칙) — `sudo ./infra/scripts/setup.sh <repo>/infra` 재실행 + 필요 시 nginx reload 로 수동 반영한다.
+- nginx 설정(`app.conf`·`websocket-upgrade.conf`)은 배포 파이프라인이 반영한다 — sudo 는 고정 경로 `tee` 두 줄만 추가로 허용(sudoers 에 명시). systemd·sudoers 파일 변경은 여전히 CI 가 반영하지 않는다(root 권한 불필요 원칙) — `sudo ./infra/scripts/setup.sh <repo>/infra` 재실행으로 수동 반영한다. sudoers 갱신 전에는 nginx 설정 자동 반영이 sudo 거부로 실패하므로, 이 구조를 처음 켤 때 setup.sh 재실행이 선행돼야 한다.
 
 새 서버를 처음 준비할 때도 같은 `setup.sh` 가 시작점이다 (디렉토리·유닛·sudoers·MySQL 설정 배치).
 
