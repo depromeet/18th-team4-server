@@ -2,7 +2,7 @@
 # repo 루트에서 기동:
 #   docker compose -f infra/docker/docker-compose.local.yml up -d
 #
-# 접속값 기본치는 .env.example 과 맞춰져 있어 별도 설정 없이 앱(dev 프로파일, MYSQL_HOST=localhost)이 붙는다.
+# 접속값 기본치는 .env.example 과 맞춰져 있어 별도 설정 없이 앱(local 프로파일, MYSQL_HOST=localhost)이 붙는다.
 # 값을 바꾸려면 환경변수로 덮어쓴다 (예: MYSQL_PASSWORD=... docker compose ...).
 services:
   mysql:
