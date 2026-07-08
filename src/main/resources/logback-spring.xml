@@ -75,8 +75,6 @@
             <webhookUrl>${SLACK_WEBHOOK_URL}</webhookUrl>
             <appName>${APP_NAME}</appName>
             <env>${APP_ENV}</env>
-            <!-- 분석 이슈 프리필 링크가 가리키는 저장소. 환경 무관 상수라 직접 둔다 -->
-            <issueRepositoryUrl>https://github.com/depromeet/18th-team4-server</issueRepositoryUrl>
             <duplicateSuppressMillis>60000</duplicateSuppressMillis>
             <maxStackTraceChars>1800</maxStackTraceChars>
             <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
@@ -149,8 +147,6 @@
             <webhookUrl>${SLACK_WEBHOOK_URL}</webhookUrl>
             <appName>${APP_NAME}</appName>
             <env>${APP_ENV}</env>
-            <!-- 분석 이슈 프리필 링크가 가리키는 저장소. 환경 무관 상수라 직접 둔다 -->
-            <issueRepositoryUrl>https://github.com/depromeet/18th-team4-server</issueRepositoryUrl>
             <duplicateSuppressMillis>60000</duplicateSuppressMillis>
             <maxStackTraceChars>1800</maxStackTraceChars>
             <filter class="ch.qos.logback.classic.filter.ThresholdFilter">

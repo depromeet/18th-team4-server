@@ -1,0 +1,45 @@
+# slack-receiver 전용 배포. 앱 배포(deploy.yml)와 독립.
+# 수신기 소스가 바뀌면 이미지를 빌드해 서버에 docker load 하고 컨테이너를 재기동한다.
+name: slack-receiver-deploy
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'infra/slack-receiver/**'
+      - '.github/workflows/slack-receiver-deploy.yml'
+  workflow_dispatch:
+
+env:
+  DEPLOY_HOST: 54.116.108.68
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 이미지 빌드 + tar 로 저장
+        run: |
+          docker build -t slack-receiver:latest infra/slack-receiver
+          docker save slack-receiver:latest | gzip > slack-receiver.tar.gz
+
+      - name: SSH 키 준비
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: 이미지 전송 + load + 재기동
+        run: |
+          scp -i ~/.ssh/deploy_key slack-receiver.tar.gz "ubuntu@${DEPLOY_HOST}:/opt/readum/slack-receiver.tar.gz"
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" '
+            set -e
+            gunzip -f /opt/readum/slack-receiver.tar.gz
+            sudo docker load -i /opt/readum/slack-receiver.tar
+            rm -f /opt/readum/slack-receiver.tar
+            cd /opt/readum
+            sudo docker compose --env-file /opt/readum/.env \
+              -f ~/18th-team4-server/infra/docker/docker-compose.dev.yml up -d slack-receiver
+          '

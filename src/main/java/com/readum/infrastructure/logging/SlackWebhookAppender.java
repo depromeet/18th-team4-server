@@ -5,6 +5,9 @@ import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.AppenderBase;
 import lombok.Setter;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -25,19 +28,20 @@ import java.util.concurrent.ConcurrentMap;
  * 중복 전송을 억제하고, 토큰/Authorization 등 민감 문자열은 마스킹한다.
  *
  * <p>메시지에는 오류 식별용 fingerprint({@link IncidentFingerprint})와, 사람이 분석을 승인할 때
- * 누르는 GitHub 분석 이슈 프리필 링크({@link IncidentIssueLinkFactory})가 함께 실린다.
+ * 누르는 "분석 이슈 만들기" 버튼(Block Kit)이 함께 실린다.
  */
 @Setter
 public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
 
+    private static final String UNKNOWN_DEPLOY_COMMIT = "unknown";
+
     private String webhookUrl;
     private String appName = "readum";
     private String env = "unknown";
-    private String issueRepositoryUrl;
     private long duplicateSuppressMillis = 60_000;
     private int maxStackTraceChars = 1800;
 
-    private IncidentIssueLinkFactory issueLinkFactory;
+    private String deployCommit = UNKNOWN_DEPLOY_COMMIT;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2))
@@ -51,12 +55,21 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
             addWarn("Slack webhookUrl is empty. SlackWebhookAppender will not start.");
             return;
         }
-        if (issueRepositoryUrl != null && !issueRepositoryUrl.isBlank()) {
-            issueLinkFactory = new IncidentIssueLinkFactory(
-                    issueRepositoryUrl, env, IncidentIssueLinkFactory.readDeployCommitFromClasspath());
-        }
-
+        deployCommit = readDeployCommitFromClasspath();
         super.start();
+    }
+
+    private static String readDeployCommitFromClasspath() {
+        try (InputStream in = SlackWebhookAppender.class.getResourceAsStream("/git.properties")) {
+            if (in == null) {
+                return UNKNOWN_DEPLOY_COMMIT;
+            }
+            Properties props = new Properties();
+            props.load(in);
+            return props.getProperty("git.commit.id.abbrev", UNKNOWN_DEPLOY_COMMIT);
+        } catch (IOException e) {
+            return UNKNOWN_DEPLOY_COMMIT;
+        }
     }
 
     @Override
@@ -120,11 +133,13 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
             }
         }
 
+        // fallback text = 파싱 계약(수신기가 이 포맷을 regex 로 읽는다). *deploy* 줄 필수.
         String text = """
                 :rotating_light: *%s ERROR 발생*
                 *env*: `%s`
                 *logger*: `%s`
                 *fingerprint*: `%s`
+                *deploy*: `%s`
                 *traceId*: `%s`
                 *spanId*: `%s`
                 *time*: `%s`
@@ -139,6 +154,7 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
                 SensitiveDataMasker.mask(env),
                 SensitiveDataMasker.mask(event.getLoggerName()),
                 SensitiveDataMasker.mask(fingerprint),
+                SensitiveDataMasker.mask(deployCommit),
                 SensitiveDataMasker.mask(traceId),
                 SensitiveDataMasker.mask(spanId),
                 Instant.ofEpochMilli(event.getTimeStamp()),
@@ -146,11 +162,18 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
                 SensitiveDataMasker.mask(stackTrace)
         );
 
-        if (issueLinkFactory != null) {
-            text += "\n:mag: <" + issueLinkFactory.create(event, fingerprint) + "|분석 이슈 열기>";
-        }
-
-        return "{\"text\":\"" + escapeJson(text) + "\"}";
+        String escapedText = escapeJson(text);
+        // blocks: 섹션(요약 표시) + 버튼. 수신기는 blocks 가 아니라 text 를 읽으므로 섹션은 표시용이다.
+        return "{\"text\":\"" + escapedText + "\","
+                + "\"blocks\":["
+                + "{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"" + escapedText + "\"}},"
+                + "{\"type\":\"actions\",\"elements\":["
+                + "{\"type\":\"button\",\"style\":\"primary\","
+                + "\"text\":{\"type\":\"plain_text\",\"text\":\"분석 이슈 만들기\"},"
+                + "\"action_id\":\"create_incident_issue\","
+                + "\"value\":\"" + escapeJson(fingerprint) + "\"}"
+                + "]}"
+                + "]}";
     }
 
     private String escapeJson(String value) {
