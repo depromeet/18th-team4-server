@@ -27,6 +27,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
 @RestControllerAdvice
@@ -60,6 +61,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<GlobalApiResponse<?>> handleNotFound(NotFoundException ex) {
         log.warn("Not found: {}", ex.getErrorCode().getMessage());
         return GlobalApiResponse.error(HttpStatus.NOT_FOUND, ex.getErrorCode().getMessage());
+    }
+
+    // Spring MVC - 매핑되지 않은 경로 요청 (외부 봇의 .env, .git 스캔 등)
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<GlobalApiResponse<?>> handleNoResourceFound(NoResourceFoundException ex) {
+        log.warn("존재하지 않는 리소스 요청: {}", ex.getResourcePath());
+        return GlobalApiResponse.error(HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다.");
     }
 
     // 도메인 비즈니스 예외 - 처리 불가 엔티티 (422)
