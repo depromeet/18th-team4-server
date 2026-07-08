@@ -31,15 +31,15 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
-      - name: 이미지 전송 + load + 재기동
+      - name: compose 파일·이미지 전송 → load → 재기동
         run: |
           scp -i ~/.ssh/deploy_key slack-receiver.tar.gz "ubuntu@${DEPLOY_HOST}:/opt/readum/slack-receiver.tar.gz"
+          scp -i ~/.ssh/deploy_key infra/docker/docker-compose.dev.yml "ubuntu@${DEPLOY_HOST}:/opt/readum/docker-compose.dev.yml"
           ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" '
             set -e
             gunzip -f /opt/readum/slack-receiver.tar.gz
             sudo docker load -i /opt/readum/slack-receiver.tar
             rm -f /opt/readum/slack-receiver.tar
-            cd /opt/readum
             sudo docker compose --env-file /opt/readum/.env \
-              -f ~/18th-team4-server/infra/docker/docker-compose.dev.yml up -d slack-receiver
+              -f /opt/readum/docker-compose.dev.yml up -d slack-receiver
           '
