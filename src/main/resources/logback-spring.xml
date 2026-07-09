@@ -29,7 +29,9 @@
     <springProperty scope="context" name="AI_AUDIT_TOTAL_SIZE_CAP" source="log.config.ai-audit.total-size-cap"/>
 
     <springProperty scope="context" name="SLACK_WEBHOOK_URL" source="slack.webhook-url" defaultValue=""/>
-    <springProperty scope="context" name="APP_ENV" source="APP_ENV"/>
+    <!-- 알림 라벨용 환경 이름. 별도 환경변수 대신 활성 프로파일(local/dev/prod)을 그대로 쓴다 —
+         프로파일이 곧 환경이라 진실의 원본이 하나가 된다. 미해석 시 unknown. -->
+    <springProperty scope="context" name="APP_ENV" source="spring.profiles.active" defaultValue="unknown"/>
     <springProperty scope="context" name="APP_NAME" source="spring.application.name"/>
 
     <!-- 콘솔 출력 (모든 환경 공통, 색상 포함). 자체 필터 없음 → root 레벨(DEBUG)까지 그대로 출력 -->
