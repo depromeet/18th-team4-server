@@ -17,23 +17,31 @@ INFRA_DIR="${1:-}"
 }
 [[ "$(id -u)" -eq 0 ]] || { echo "sudo 로 실행해야 한다" >&2; exit 1; }
 
-echo "==> /opt/readum 디렉토리 구조"
+echo "==> /opt/readum 디렉토리 구조 (개발 + 운영)"
 mkdir -p /opt/readum/{blue,green,releases,bin,nginx}
+# 운영은 /opt/readum/prod 아래에 개발과 같은 구조로 분리해 둔다 (색 디렉토리·릴리스·nginx 스테이징).
+mkdir -p /opt/readum/prod/{blue,green,releases,nginx}
 chown -R ubuntu:ubuntu /opt/readum
 
-echo "==> systemd 유닛 설치"
+echo "==> systemd 유닛 설치 (개발 + 운영)"
 cp "$INFRA_DIR"/systemd/readum-blue.service /etc/systemd/system/
 cp "$INFRA_DIR"/systemd/readum-green.service /etc/systemd/system/
+cp "$INFRA_DIR"/systemd/readum-prod-blue.service /etc/systemd/system/
+cp "$INFRA_DIR"/systemd/readum-prod-green.service /etc/systemd/system/
 systemctl daemon-reload
 
 echo "==> 배포·백업 스크립트 설치"
 install -m 0755 -o ubuntu -g ubuntu "$INFRA_DIR"/scripts/deploy.sh /opt/readum/bin/deploy.sh
 install -m 0755 -o ubuntu -g ubuntu "$INFRA_DIR"/scripts/backup-mysql.sh /opt/readum/bin/backup-mysql.sh
 
-echo "==> MySQL 설정 배치"
+echo "==> MySQL 설정 배치 (개발 + 운영)"
 mkdir -p /opt/readum/mysql /opt/readum/mysql-data /opt/readum/mysql-backup
 install -m 0644 -o ubuntu -g ubuntu "$INFRA_DIR"/mysql/my.cnf /opt/readum/mysql/my.cnf
 chown ubuntu:ubuntu /opt/readum/mysql /opt/readum/mysql-backup
+# 운영 MySQL 설정·데이터 경로 (개발과 완전 분리).
+mkdir -p /opt/readum/prod/mysql /opt/readum/prod/mysql-data
+install -m 0644 -o ubuntu -g ubuntu "$INFRA_DIR"/mysql/my.prod.cnf /opt/readum/prod/mysql/my.cnf
+chown ubuntu:ubuntu /opt/readum/prod/mysql
 
 echo "==> sudoers 설치 (ubuntu 가 배포에 필요한 명령만 비밀번호 없이 실행)"
 visudo -cf "$INFRA_DIR"/sudoers/readum-deploy

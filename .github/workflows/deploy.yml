@@ -59,19 +59,32 @@ jobs:
           ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
             'chmod 600 /opt/readum/.env.tmp && mv /opt/readum/.env.tmp /opt/readum/.env'
 
-      - name: jar·배포 스크립트·nginx 설정 업로드
+      - name: jar·배포 스크립트·nginx·compose 설정 업로드
         run: |
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" 'mkdir -p /opt/readum/nginx /opt/readum/mysql'
           scp -i ~/.ssh/deploy_key "readum-${SHORT_SHA}.jar" \
             "ubuntu@${DEPLOY_HOST}:/opt/readum/releases/"
           scp -i ~/.ssh/deploy_key infra/scripts/deploy.sh \
             "ubuntu@${DEPLOY_HOST}:/opt/readum/bin/deploy.sh"
           # nginx 설정은 스테이징 디렉토리에만 올린다. /etc/nginx 반영(변경분만)과 검증·reload 는
           # deploy.sh 의 sync_nginx_conf 가 수행한다.
-          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" 'mkdir -p /opt/readum/nginx'
           scp -i ~/.ssh/deploy_key infra/nginx/app.conf infra/nginx/websocket-upgrade.conf \
             "ubuntu@${DEPLOY_HOST}:/opt/readum/nginx/"
+          # 컨테이너 정의·MySQL 설정도 최신본을 서버에 둔다(파일만 최신화). MySQL·Redis 기동·재시작은
+          # 수동이다 — 상태 서비스라 코드 배포 사이드이펙트로 재시작하지 않는다.
+          scp -i ~/.ssh/deploy_key infra/docker/docker-compose.dev.yml \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/docker-compose.dev.yml"
+          scp -i ~/.ssh/deploy_key infra/mysql/my.cnf \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/mysql/my.cnf"
+
+      - name: infra 부트스트랩 파일 업로드 (setup.sh 용 — 서버 git 체크아웃 대체)
+        run: |
+          # setup.sh(디렉토리·systemd 유닛·sudoers 설치)가 서버에서 git 없이 돌 수 있도록 infra 전체를 배달한다.
+          # 실제 실행은 root 권한이라 수동: sudo /opt/readum/infra/scripts/setup.sh /opt/readum/infra
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" 'rm -rf /opt/readum/infra'
+          scp -r -i ~/.ssh/deploy_key infra "ubuntu@${DEPLOY_HOST}:/opt/readum/"
 
       - name: blue/green 배포 실행
         run: |
           ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
-            "/opt/readum/bin/deploy.sh deploy /opt/readum/releases/readum-${SHORT_SHA}.jar"
+            "/opt/readum/bin/deploy.sh dev deploy /opt/readum/releases/readum-${SHORT_SHA}.jar"

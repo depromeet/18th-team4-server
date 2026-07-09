@@ -10,8 +10,18 @@ ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl start readum-blue, \
   /usr/bin/systemctl stop readum-green, \
   /usr/bin/systemctl enable readum-green, \
   /usr/bin/systemctl disable readum-green, \
+  /usr/bin/systemctl start readum-prod-blue, \
+  /usr/bin/systemctl stop readum-prod-blue, \
+  /usr/bin/systemctl enable readum-prod-blue, \
+  /usr/bin/systemctl disable readum-prod-blue, \
+  /usr/bin/systemctl start readum-prod-green, \
+  /usr/bin/systemctl stop readum-prod-green, \
+  /usr/bin/systemctl enable readum-prod-green, \
+  /usr/bin/systemctl disable readum-prod-green, \
   /usr/bin/systemctl reload nginx, \
   /usr/sbin/nginx -t, \
   /usr/bin/tee /etc/nginx/conf.d/readum-upstream.conf, \
   /usr/bin/tee /etc/nginx/sites-available/app.conf, \
-  /usr/bin/tee /etc/nginx/conf.d/websocket-upgrade.conf
+  /usr/bin/tee /etc/nginx/conf.d/websocket-upgrade.conf, \
+  /usr/bin/tee /etc/nginx/conf.d/readum-prod-upstream.conf, \
+  /usr/bin/tee /etc/nginx/sites-available/prod-app.conf
