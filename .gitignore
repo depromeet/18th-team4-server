@@ -39,6 +39,7 @@ out/
 ### Environment ###
 .env
 .env.dev
+.env.prod
 .mcp.json
 .DS_Store
 

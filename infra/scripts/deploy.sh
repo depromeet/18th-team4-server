@@ -3,9 +3,10 @@
 # 서버의 /opt/readum/bin/deploy.sh 로 동기화해 사용한다 (전체 구조는 docs/ops/infrastructure.md).
 #
 # 사용법:
-#   deploy.sh deploy <jar 경로>   # 비활성 색에 jar 를 올리고 기동 → readiness 통과 → 트래픽 전환 → 구 프로세스 종료
-#   deploy.sh rollback            # 반대 색(직전 버전 jar 보유)을 재기동해 트래픽을 되돌림
-#   deploy.sh status              # 활성 색·양쪽 유닛 상태·readiness 를 출력
+#   deploy.sh <env> deploy <jar 경로>   # 비활성 색에 jar 를 올리고 기동 → readiness 통과 → 트래픽 전환 → 구 프로세스 종료
+#   deploy.sh <env> rollback            # 반대 색(직전 버전 jar 보유)을 재기동해 트래픽을 되돌림
+#   deploy.sh <env> status              # 활성 색·양쪽 유닛 상태·readiness 를 출력
+#   <env> 는 dev | prod. 개발·운영이 같은 인스턴스에 공존하되 포트·유닛·경로·upstream 이 분리된다.
 #
 # 설계 원칙:
 # - "지금 어느 색이 활성인가"의 유일한 판단 근거는 nginx upstream 파일이다.
@@ -14,23 +15,48 @@
 # - 구 프로세스 종료는 systemctl stop → 앱의 graceful shutdown(진행 중 요청 60초 대기)에 맡긴다.
 set -euo pipefail
 
-BASE_DIR="/opt/readum"
-RELEASES_DIR="$BASE_DIR/releases"
-UPSTREAM_CONF="/etc/nginx/conf.d/readum-upstream.conf"
-NGINX_SYNC_DIR="$BASE_DIR/nginx"
-# CI 가 NGINX_SYNC_DIR 에 올려두는 nginx 설정 원본(repo infra/nginx)과 실제 적용 경로의 짝. "파일명:적용경로"
-# 적용 경로를 바꾸면 sudoers(infra/sudoers/readum-deploy)의 tee 허용 경로도 함께 바꿔야 한다.
-NGINX_CONF_TARGETS=(
-  "app.conf:/etc/nginx/sites-available/app.conf"
-  "websocket-upgrade.conf:/etc/nginx/conf.d/websocket-upgrade.conf"
-)
-BLUE_PORT=8081
-GREEN_PORT=8082
-READINESS_TIMEOUT_SECONDS=90
 RELEASE_KEEP_COUNT=5
+READINESS_TIMEOUT_SECONDS=90
 
 log() { echo "==> $*"; }
 fail() { echo "!! $*" >&2; exit 1; }
+
+# 환경(dev|prod)별 포트·유닛 접두사·경로·upstream 을 고른다. 두 환경은 이 값들만 다르고 로직은 공유한다.
+# 적용 경로(NGINX_CONF_TARGETS·UPSTREAM_CONF)를 바꾸면 sudoers(infra/sudoers/readum-deploy)의
+# 허용 경로(tee·systemctl 유닛)도 함께 바꿔야 한다.
+resolve_env() {
+  case "$1" in
+    dev)
+      BLUE_PORT=8081
+      GREEN_PORT=8082
+      UNIT_PREFIX="readum"
+      UPSTREAM_CONF="/etc/nginx/conf.d/readum-upstream.conf"
+      UPSTREAM_NAME="readum_backend"
+      COLOR_BASE="/opt/readum"                 # 색 디렉토리 = $COLOR_BASE/<color>
+      RELEASES_DIR="/opt/readum/releases"
+      NGINX_SYNC_DIR="/opt/readum/nginx"
+      NGINX_CONF_TARGETS=(
+        "app.conf:/etc/nginx/sites-available/app.conf"
+        "websocket-upgrade.conf:/etc/nginx/conf.d/websocket-upgrade.conf"
+      )
+      ;;
+    prod)
+      BLUE_PORT=8083
+      GREEN_PORT=8084
+      UNIT_PREFIX="readum-prod"
+      UPSTREAM_CONF="/etc/nginx/conf.d/readum-prod-upstream.conf"
+      UPSTREAM_NAME="readum_prod_backend"
+      COLOR_BASE="/opt/readum/prod"
+      RELEASES_DIR="/opt/readum/prod/releases"
+      NGINX_SYNC_DIR="/opt/readum/prod/nginx"
+      NGINX_CONF_TARGETS=(
+        "prod-app.conf:/etc/nginx/sites-available/prod-app.conf"
+        "websocket-upgrade.conf:/etc/nginx/conf.d/websocket-upgrade.conf"
+      )
+      ;;
+    *) fail "알 수 없는 환경: '$1' (dev|prod)" ;;
+  esac
+}
 
 port_of() {
   case "$1" in
@@ -113,8 +139,8 @@ sync_nginx_conf() {
 
 switch_traffic_to() {
   local port="$1"
-  log "nginx upstream 을 127.0.0.1:$port 로 전환"
-  printf 'upstream readum_backend { server 127.0.0.1:%s; }\n' "$port" \
+  log "nginx upstream($UPSTREAM_NAME) 을 127.0.0.1:$port 로 전환"
+  printf 'upstream %s { server 127.0.0.1:%s; }\n' "$UPSTREAM_NAME" "$port" \
     | sudo /usr/bin/tee "$UPSTREAM_CONF" >/dev/null
   sudo /usr/sbin/nginx -t
   sudo /usr/bin/systemctl reload nginx
@@ -127,28 +153,28 @@ activate() {
   target_port="$(port_of "$target")"
   old="$(other_of "$target")"
 
-  [[ -f "$BASE_DIR/$target/app.jar" ]] || fail "$BASE_DIR/$target/app.jar 이 없음"
+  [[ -f "$COLOR_BASE/$target/app.jar" ]] || fail "$COLOR_BASE/$target/app.jar 이 없음"
 
   # 이전 배포 잔재가 떠 있으면 내리고 새로 기동한다.
-  sudo /usr/bin/systemctl stop "readum-$target" 2>/dev/null || true
-  log "readum-$target 기동"
-  sudo /usr/bin/systemctl start "readum-$target"
+  sudo /usr/bin/systemctl stop "${UNIT_PREFIX}-$target" 2>/dev/null || true
+  log "${UNIT_PREFIX}-$target 기동"
+  sudo /usr/bin/systemctl start "${UNIT_PREFIX}-$target"
 
   if ! wait_readiness "$target_port"; then
-    sudo /usr/bin/systemctl stop "readum-$target" || true
-    fail "readum-$target 이 ${READINESS_TIMEOUT_SECONDS}초 안에 readiness 를 통과하지 못함. 트래픽은 기존 프로세스에 그대로 남아 있음. 로그: journalctl -u readum-$target"
+    sudo /usr/bin/systemctl stop "${UNIT_PREFIX}-$target" || true
+    fail "${UNIT_PREFIX}-$target 이 ${READINESS_TIMEOUT_SECONDS}초 안에 readiness 를 통과하지 못함. 트래픽은 기존 프로세스에 그대로 남아 있음. 로그: journalctl -u ${UNIT_PREFIX}-$target"
   fi
 
   switch_traffic_to "$target_port"
 
   # 재부팅 시 활성 색만 자동 기동되도록 enable 을 활성 색으로 맞춘다.
-  sudo /usr/bin/systemctl enable "readum-$target" >/dev/null 2>&1 || true
-  sudo /usr/bin/systemctl disable "readum-$old" >/dev/null 2>&1 || true
+  sudo /usr/bin/systemctl enable "${UNIT_PREFIX}-$target" >/dev/null 2>&1 || true
+  sudo /usr/bin/systemctl disable "${UNIT_PREFIX}-$old" >/dev/null 2>&1 || true
 
   # 구 프로세스는 graceful 종료 (앱이 진행 중 요청을 최대 60초 마무리, systemd 는 75초 대기 후 강제 종료).
-  if systemctl is-active --quiet "readum-$old"; then
-    log "readum-$old graceful 종료"
-    sudo /usr/bin/systemctl stop "readum-$old"
+  if systemctl is-active --quiet "${UNIT_PREFIX}-$old"; then
+    log "${UNIT_PREFIX}-$old graceful 종료"
+    sudo /usr/bin/systemctl stop "${UNIT_PREFIX}-$old"
   fi
 
   log "완료: $target($target_port) 활성"
@@ -156,7 +182,7 @@ activate() {
 
 cmd_deploy() {
   local jar="${1:-}"
-  [[ -n "$jar" && -f "$jar" ]] || fail "사용법: deploy.sh deploy <jar 경로>"
+  [[ -n "$jar" && -f "$jar" ]] || fail "사용법: deploy.sh $ENV deploy <jar 경로>"
 
   sync_nginx_conf
 
@@ -164,9 +190,9 @@ cmd_deploy() {
   active="$(active_color)"
   # 최초 전환(cutover) 전에는 upstream 파일이 없다 → blue 부터 시작.
   target="$([[ -n "$active" ]] && other_of "$active" || echo "blue")"
-  log "활성: ${active:-없음} → 배포 대상: $target"
+  log "[$ENV] 활성: ${active:-없음} → 배포 대상: $target"
 
-  cp "$jar" "$BASE_DIR/$target/app.jar"
+  cp "$jar" "$COLOR_BASE/$target/app.jar"
   activate "$target"
 
   # 오래된 릴리스 정리 (최근 N개 유지).
@@ -178,29 +204,33 @@ cmd_rollback() {
   active="$(active_color)"
   [[ -n "$active" ]] || fail "upstream 파일이 없어 활성 색을 알 수 없음. rollback 불가."
   target="$(other_of "$active")"
-  log "rollback: $active → $target (직전 버전 jar 로 재기동)"
+  log "[$ENV] rollback: $active → $target (직전 버전 jar 로 재기동)"
   activate "$target"
 }
 
 cmd_status() {
   local active
   active="$(active_color)"
-  echo "활성 색: ${active:-없음 (upstream 파일 없음)}"
+  echo "[$ENV] 활성 색: ${active:-없음 (upstream 파일 없음)}"
   for color in blue green; do
     local state port
-    state="$(systemctl is-active "readum-$color" 2>/dev/null || true)"
+    state="$(systemctl is-active "${UNIT_PREFIX}-$color" 2>/dev/null || true)"
     port="$(port_of "$color")"
     local ready="-"
     if curl -fsS "http://127.0.0.1:${port}/actuator/health/readiness" >/dev/null 2>&1; then
       ready="UP"
     fi
-    echo "readum-$color (:$port) — unit=$state, readiness=$ready"
+    echo "${UNIT_PREFIX}-$color (:$port) — unit=$state, readiness=$ready"
   done
 }
 
-case "${1:-}" in
-  deploy) shift; cmd_deploy "$@" ;;
+ENV="${1:-}"
+[[ -n "$ENV" ]] || fail "사용법: deploy.sh {dev|prod} {deploy <jar 경로>|rollback|status}"
+resolve_env "$ENV"
+
+case "${2:-}" in
+  deploy) cmd_deploy "${3:-}" ;;
   rollback) cmd_rollback ;;
   status) cmd_status ;;
-  *) fail "사용법: deploy.sh {deploy <jar 경로>|rollback|status}" ;;
+  *) fail "사용법: deploy.sh $ENV {deploy <jar 경로>|rollback|status}" ;;
 esac
