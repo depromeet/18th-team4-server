@@ -7,6 +7,14 @@ Slack 장애 알림의 "분석 이슈 만들기" 버튼 클릭을 받아 GitHub 
 Slack 버튼 → nginx `/slack/incident-actions` → 이 서비스(:8090) → GitHub repository_dispatch
 → `.github/workflows/incident-analysis.yml`
 
+## 장애 필드는 버튼 value 에서 읽는다
+fingerprint·deploy·traceId·message·stacktrace 는 앱(`SlackWebhookAppender`)이 "분석 이슈 만들기"
+버튼의 `value` 에 구조화 JSON 으로 실어 보내고, 이 수신기는 클릭된 버튼의 `value` 를 그대로 읽는다.
+Slack 상호작용 payload 의 `message.text`(사람이 보는 표시 본문)를 regex 로 긁던 옛 방식은 실제
+payload 에서 `message.text` 를 신뢰할 수 없어 fingerprint·deploy 가 비어 dispatch 가 건너뛰어졌다.
+`value` 는 클릭된 버튼에 Slack 이 항상 실어 보내므로 견고하다. 옛 메시지(값이 fingerprint 문자열)나
+value 누락 시에는 본문 스크래핑으로 폴백한다.
+
 ## 필요한 환경변수 (서버 /opt/readum/.env = ENV_FILE secret)
 - `SLACK_SIGNING_SECRET` — Slack 앱 Basic Information 의 Signing Secret
 - `INCIDENT_DISPATCH_TOKEN` — GitHub 토큰. fine-grained PAT 로 이 저장소 **Contents: Read and write**

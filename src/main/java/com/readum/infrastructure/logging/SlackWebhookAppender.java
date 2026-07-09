@@ -35,6 +35,11 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
 
     private static final String UNKNOWN_DEPLOY_COMMIT = "unknown";
 
+    // 버튼 value 는 Slack Block Kit 제한(최대 2000자)을 넘으면 메시지 전송 자체가 거부된다.
+    // message·stacktrace 는 value 용으로 짧게 자른다(사람이 보는 표시 텍스트는 전체 노출).
+    private static final int MAX_VALUE_MESSAGE_CHARS = 300;
+    private static final int MAX_VALUE_STACKTRACE_CHARS = 1000;
+
     private String webhookUrl;
     private String appName = "readum";
     private String env = "unknown";
@@ -133,7 +138,19 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
             }
         }
 
-        // fallback text = 파싱 계약(수신기가 이 포맷을 regex 로 읽는다). *deploy* 줄 필수.
+        // 마스킹된 값을 한 번만 만들어 표시 텍스트와 버튼 value 에 함께 쓴다.
+        String maskedAppName = SensitiveDataMasker.mask(appName);
+        String maskedEnv = SensitiveDataMasker.mask(env);
+        String maskedLogger = SensitiveDataMasker.mask(event.getLoggerName());
+        String maskedFingerprint = SensitiveDataMasker.mask(fingerprint);
+        String maskedDeploy = SensitiveDataMasker.mask(deployCommit);
+        String maskedTraceId = SensitiveDataMasker.mask(traceId);
+        String maskedSpanId = SensitiveDataMasker.mask(spanId);
+        String maskedMessage = SensitiveDataMasker.mask(event.getFormattedMessage());
+        String maskedStackTrace = SensitiveDataMasker.mask(stackTrace);
+
+        // 표시 텍스트: 사람이 읽는 알림 본문. incident-analysis.yml 의 스레드 탐색이
+        // "fingerprint 포함 + ERROR 발생" 으로 원본 알림을 찾으므로 이 두 요소는 유지한다.
         String text = """
                 :rotating_light: *%s ERROR 발생*
                 *env*: `%s`
@@ -150,20 +167,30 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
                 *stacktrace*
                 ```%s```
                 """.formatted(
-                SensitiveDataMasker.mask(appName),
-                SensitiveDataMasker.mask(env),
-                SensitiveDataMasker.mask(event.getLoggerName()),
-                SensitiveDataMasker.mask(fingerprint),
-                SensitiveDataMasker.mask(deployCommit),
-                SensitiveDataMasker.mask(traceId),
-                SensitiveDataMasker.mask(spanId),
+                maskedAppName,
+                maskedEnv,
+                maskedLogger,
+                maskedFingerprint,
+                maskedDeploy,
+                maskedTraceId,
+                maskedSpanId,
                 Instant.ofEpochMilli(event.getTimeStamp()),
-                SensitiveDataMasker.mask(event.getFormattedMessage()),
-                SensitiveDataMasker.mask(stackTrace)
+                maskedMessage,
+                maskedStackTrace
         );
 
+        // 버튼 value = 수신기가 그대로 읽는 구조화 JSON. 수신기가 본문(text)을 regex 로 긁던 방식은
+        // 실제 Slack 상호작용 payload 의 message.text 에 의존해 취약했다 — value 는 클릭된 버튼에 항상 실려 안전하다.
+        String buttonValue = "{"
+                + "\"fingerprint\":\"" + escapeJson(maskedFingerprint) + "\","
+                + "\"deploy\":\"" + escapeJson(maskedDeploy) + "\","
+                + "\"traceId\":\"" + escapeJson(maskedTraceId) + "\","
+                + "\"message\":\"" + escapeJson(truncate(maskedMessage, MAX_VALUE_MESSAGE_CHARS)) + "\","
+                + "\"stacktrace\":\"" + escapeJson(truncate(maskedStackTrace, MAX_VALUE_STACKTRACE_CHARS)) + "\""
+                + "}";
+
         String escapedText = escapeJson(text);
-        // blocks: 섹션(요약 표시) + 버튼. 수신기는 blocks 가 아니라 text 를 읽으므로 섹션은 표시용이다.
+        // blocks: 섹션(표시) + 버튼. 필요한 필드는 버튼 value 로 전달하므로 섹션·text 는 표시 전용이다.
         return "{\"text\":\"" + escapedText + "\","
                 + "\"blocks\":["
                 + "{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"" + escapedText + "\"}},"
@@ -171,9 +198,16 @@ public class SlackWebhookAppender extends AppenderBase<ILoggingEvent> {
                 + "{\"type\":\"button\",\"style\":\"primary\","
                 + "\"text\":{\"type\":\"plain_text\",\"text\":\"분석 이슈 만들기\"},"
                 + "\"action_id\":\"create_incident_issue\","
-                + "\"value\":\"" + escapeJson(fingerprint) + "\"}"
+                + "\"value\":\"" + escapeJson(buttonValue) + "\"}"
                 + "]}"
                 + "]}";
+    }
+
+    private static String truncate(String value, int maxChars) {
+        if (value.length() <= maxChars) {
+            return value;
+        }
+        return value.substring(0, maxChars) + "…";
     }
 
     private String escapeJson(String value) {
