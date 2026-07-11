@@ -5,6 +5,12 @@
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
+# .java 파일 변경이 없으면 검사 생략
+CHANGED=$(git diff --name-only HEAD -- '*.java' 2>/dev/null; git diff --cached --name-only -- '*.java' 2>/dev/null)
+if [ -z "$CHANGED" ]; then
+  exit 0
+fi
+
 PASS=0
 FAIL=0
 OUT=""
@@ -37,7 +43,49 @@ else
   done <<< "$VALUE_HITS"
 fi
 
-# 3. Service/Repository 대응 테스트 클래스 존재 여부
+# 3. Entity 에 of() 팩토리 사용 탐지
+OF_HITS=$(grep -rn "static.*\bof(" src/main/java/com/readum/model --include="*.java" \
+  | grep -v "src/main/java/com/readum/.*/example/" 2>/dev/null)
+if [ -z "$OF_HITS" ]; then
+  OUT+="  of() 팩토리  ✅ 없음\n"
+else
+  COUNT=$(echo "$OF_HITS" | wc -l | tr -d ' ')
+  OUT+="  of() 팩토리  ❌ ${COUNT}건\n"
+  while IFS= read -r line; do
+    OUT+="    $line\n"
+  done <<< "$OF_HITS"
+  FAIL=$((FAIL + 1))
+fi
+
+# 4. raw RuntimeException / IllegalArgumentException 탐지
+RAW_EX_HITS=$(grep -rn "new RuntimeException\|new IllegalArgumentException" src/main --include="*.java" \
+  | grep -v "src/main/java/com/readum/.*/example/" 2>/dev/null)
+if [ -z "$RAW_EX_HITS" ]; then
+  OUT+="  raw 예외    ✅ 없음\n"
+else
+  COUNT=$(echo "$RAW_EX_HITS" | wc -l | tr -d ' ')
+  OUT+="  raw 예외    ❌ ${COUNT}건\n"
+  while IFS= read -r line; do
+    OUT+="    $line\n"
+  done <<< "$RAW_EX_HITS"
+  FAIL=$((FAIL + 1))
+fi
+
+# 5. 역방향 의존 (domain → infrastructure) 탐지
+REVERSE_DEP_HITS=$(grep -rn "import com.readum.infrastructure" src/main/java/com/readum/domain --include="*.java" \
+  | grep -v "src/main/java/com/readum/.*/example/" 2>/dev/null)
+if [ -z "$REVERSE_DEP_HITS" ]; then
+  OUT+="  역방향 의존  ✅ 없음\n"
+else
+  COUNT=$(echo "$REVERSE_DEP_HITS" | wc -l | tr -d ' ')
+  OUT+="  역방향 의존  ❌ ${COUNT}건\n"
+  while IFS= read -r line; do
+    OUT+="    $line\n"
+  done <<< "$REVERSE_DEP_HITS"
+  FAIL=$((FAIL + 1))
+fi
+
+# 6. Service/Repository 대응 테스트 클래스 존재 여부
 MISSING=$(comm -23 \
   <(find src/main/java -name "*Service.java" -o -name "*Repository.java" \
       | grep -v "src/main/java/com/readum/.*/example/" \
@@ -55,11 +103,12 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# 결과 출력 (이상 있을 때만 표시해 노이즈 최소화)
+# 결과 출력 (이상 있을 때만 stderr + exit 1 로 사용자에게 표시)
 if [ $FAIL -gt 0 ] || [ -n "$VALUE_HITS" ]; then
-  echo ""
-  echo "── /verify (fast) ──────────────────────"
-  echo -e "$OUT"
-  echo "(./gradlew test 는 /verify 수동 실행에서 확인)"
-  echo "────────────────────────────────────────"
+  echo "" >&2
+  echo "── /verify (fast) ──────────────────────" >&2
+  echo -e "$OUT" >&2
+  echo "(./gradlew test 는 /verify 수동 실행에서 확인)" >&2
+  echo "────────────────────────────────────────" >&2
+  exit 1
 fi
