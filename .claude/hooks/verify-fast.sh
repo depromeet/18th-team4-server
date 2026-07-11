@@ -5,6 +5,12 @@
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
+# .java 파일 변경이 없으면 검사 생략
+CHANGED=$(git diff --name-only HEAD -- '*.java' 2>/dev/null; git diff --cached --name-only -- '*.java' 2>/dev/null)
+if [ -z "$CHANGED" ]; then
+  exit 0
+fi
+
 PASS=0
 FAIL=0
 OUT=""
