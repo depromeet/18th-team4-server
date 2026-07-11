@@ -1,6 +1,6 @@
 ---
 name: verify
-description: 구현 직후 결정론적 체크리스트를 실행해 잔존물을 보고한다. 현재 항목: (1) TODO 탐지, (2) 전체 테스트 통과 여부, (3) domain/presentation 계층 @Value 탐지, (4) Service/Repository 대응 테스트 클래스 존재 여부. 사용자가 "/verify" 로 호출할 때 사용.
+description: 구현 직후 결정론적 체크리스트를 실행해 잔존물을 보고한다. 현재 항목: (1) TODO 탐지, (2) 전체 테스트 통과 여부, (3) @Value 탐지, (4) of() 팩토리 탐지, (5) raw 예외 탐지, (6) 역방향 의존 탐지, (7) 누락 테스트 탐지. 사용자가 "/verify" 로 호출할 때 사용.
 ---
 
 # `/verify` 스킬
@@ -44,7 +44,40 @@ grep -rn "@Value" src/main --include="*.java" \
 > 현재 기준선(2026-05-31): `presentation/` 2건 — `AuthController:39`, `UserController:44`.
 > 이 2건은 `@ConfigurationProperties` 미이전 상태로 기존 인지된 항목이다. 새로 추가된 건만 주의 깊게 보면 된다.
 
-### 4. Service/Repository 대응 테스트 클래스 존재 여부
+### 4. Entity 에 of() 팩토리 사용 탐지
+
+```bash
+grep -rn "static.*\bof(" src/main/java/com/readum/model --include="*.java" \
+  | grep -v "src/main/java/com/readum/.*/example/"
+```
+
+- 결과가 0줄이면: `✅ of() 팩토리 없음`
+- 1줄 이상이면: 파일경로:줄번호와 내용을 출력하고 `❌ of() 팩토리 N건` 보고
+- Entity 규칙: 불변식을 강제하는 `create()` 계열만 허용, `of()`(전체 필드 지정) 금지
+
+### 5. raw RuntimeException / IllegalArgumentException 탐지
+
+```bash
+grep -rn "new RuntimeException\|new IllegalArgumentException" src/main --include="*.java" \
+  | grep -v "src/main/java/com/readum/.*/example/"
+```
+
+- 결과가 0줄이면: `✅ raw 예외 없음`
+- 1줄 이상이면: 파일경로:줄번호와 내용을 출력하고 `❌ raw 예외 N건` 보고
+- 예외 규칙: `BusinessException` 서브클래스 + `ErrorCode` 조합만 허용
+
+### 6. 역방향 의존 (domain → infrastructure) 탐지
+
+```bash
+grep -rn "import com.readum.infrastructure" src/main/java/com/readum/domain --include="*.java" \
+  | grep -v "src/main/java/com/readum/.*/example/"
+```
+
+- 결과가 0줄이면: `✅ 역방향 의존 없음`
+- 1줄 이상이면: 파일경로:줄번호와 내용을 출력하고 `❌ 역방향 의존 N건` 보고
+- 계층 규칙: domain → infrastructure 방향 의존 금지
+
+### 7. Service/Repository 대응 테스트 클래스 존재 여부
 
 ```bash
 comm -23 \
@@ -71,6 +104,9 @@ comm -23 \
 | TODO | ✅ 없음 / ❌ N건 |
 | 테스트 | ✅ 전체 통과 / ❌ 실패 |
 | @Value | ✅ 없음 / ⚠️ N건 |
+| of() 팩토리 | ✅ 없음 / ❌ N건 |
+| raw 예외 | ✅ 없음 / ❌ N건 |
+| 역방향 의존 | ✅ 없음 / ❌ N건 |
 | 누락 테스트 | ✅ 없음 / ❌ N건 |
 
 (실패/경고 항목이 있으면 세부 내용을 항목 아래에 나열)
