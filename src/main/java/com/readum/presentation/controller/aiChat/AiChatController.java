@@ -142,7 +142,7 @@ public class AiChatController {
     }
 
     @Operation(
-            summary = "메시지 전송 (SSE 스트리밍 응답)",
+            summary = "메시지 전송 (SSE 응답)",
             description = """
                     사용자 메시지를 즉시 영속화한 뒤 AI 응답을 SSE 로 전달한다.
                     응답은 완성 후 검증(출력 moderation)을 거쳐 한 번에 내려온다.
