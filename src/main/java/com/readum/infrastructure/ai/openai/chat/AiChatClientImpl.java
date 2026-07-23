@@ -1,7 +1,6 @@
 package com.readum.infrastructure.ai.openai.chat;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
-import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.AiChatCompletion;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
@@ -26,13 +25,11 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Component
@@ -63,52 +60,6 @@ public class AiChatClientImpl implements AiChatClient {
         // ChatClient bean 의 defaultSystem 과 동일한 파일이지만,
         // 책 정보를 동적으로 덧붙이기 위해 직접 로드해서 .system() 오버라이드에 사용한다.
         this.baseSystemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
-    }
-
-    @Override
-    public Flux<AiChatChunk> stream(AiChatStreamCommand command) {
-        String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
-
-        // 전역 게이트: 조립 시점(동기) 검사 — 여기서 던지면 SSE 시작 전에 GlobalExceptionHandler 가 429 로 변환한다.
-        // Flux 체인 안으로 옮기면 mid-stream 에러가 되므로 반드시 이 위치를 유지할 것.
-        // 계상은 실제 전송량 전체(시스템 프롬프트 + 이력 + 예약 출력) — 사용자 예산과 달리 오버헤드 포함.
-        int payloadTokens = tokenCounter.count(systemPrompt);
-        for (HistoryMessage historyMessage : command.history()) {
-            payloadTokens += tokenCounter.count(historyMessage.content());
-        }
-        int estimatedTokens = payloadTokens
-                + aiChatProperties.tokenBudget().estimatedOutputTokens();
-        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
-
-        List<Message> messages = command.history().stream()
-                .map(this::toSpringMessage)
-                .toList();
-
-        // 감사 로그: 호출 직전에 알 수 있는 식별 정보만 먼저 잡아두고, 모델/토큰/지연은 종료 시점에 덧채운다.
-        AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
-                conversationIdHash(command.conversationId()),
-                PROMPT_TEMPLATE_ID,
-                PROMPT_TEMPLATE_VERSION,
-                promptHash(command.history())
-        );
-        long startNanos = System.nanoTime();
-        // 토큰 사용량은 스트림 마지막 청크에만 실려 오므로, 그 청크의 ChatResponse 를 잡아 둔다.
-        AtomicReference<ChatResponse> usageResponseRef = new AtomicReference<>();
-
-        return chatClient.prompt()
-                .system(systemPrompt)
-                .messages(messages)
-                .stream()
-                .chatResponse()
-                .concatMap(chatResponse -> toChunks(chatResponse, usageResponseRef))
-                .doOnComplete(() -> auditLogger.success(
-                        ChatResponseAuditMapper.applyResult(baseEvent, usageResponseRef.get(), elapsedMillis(startNanos))))
-                .doOnError(error -> {
-                    logUnexpectedError(error);
-                    auditLogger.failure(
-                            ChatResponseAuditMapper.applyResult(baseEvent, usageResponseRef.get(), elapsedMillis(startNanos)),
-                            error);
-                });
     }
 
     @Override
@@ -177,13 +128,6 @@ public class AiChatClientImpl implements AiChatClient {
         );
     }
 
-    // Task 6 에서 stream() 과 함께 삭제될 임시 브리지.
-    private AiChatChunk.RateLimitSnapshot toChunkSnapshot(AiChatCompletion.RateLimitSnapshot snapshot) {
-        return snapshot == null ? null : new AiChatChunk.RateLimitSnapshot(
-                snapshot.requestsLimit(), snapshot.requestsRemaining(), snapshot.requestsReset(),
-                snapshot.tokensLimit(), snapshot.tokensRemaining(), snapshot.tokensReset());
-    }
-
     private String conversationIdHash(Long conversationId) {
         return conversationId == null ? null : auditLogger.sha256(String.valueOf(conversationId));
     }
@@ -231,44 +175,12 @@ public class AiChatClientImpl implements AiChatClient {
         };
     }
 
-    private Flux<AiChatChunk> toChunks(ChatResponse chatResponse, AtomicReference<ChatResponse> usageResponseRef) {
-        String text = Optional.ofNullable(chatResponse.getResult())
-                .map(result -> result.getOutput())
-                .map(output -> output.getText())
-                .orElse("");
-        ChatResponseMetadata metadata = chatResponse.getMetadata();
-        Usage usage = Optional.ofNullable(metadata).map(ChatResponseMetadata::getUsage).orElse(null);
-
-        // application-{profile}.yml 의 spring.ai.openai.chat.options.stream-usage: true 설정이 켜져 있을 때만,
-        // 마지막 청크에 누적 토큰 사용량(usage)이 채워져 도착한다. 이것으로 스트림 종료 시점을 식별한다.
-        boolean hasUsage = usage != null
-                && usage.getTotalTokens() != null
-                && usage.getTotalTokens() > 0;
-
-        if (hasUsage) {
-            // 종료 시점 감사 로그가 토큰/모델 메타데이터를 읽을 수 있도록 이 청크의 응답을 보관한다.
-            usageResponseRef.set(chatResponse);
-            AiChatChunk completion = new AiChatChunk.Completion(
-                    toIntOrNull(usage.getPromptTokens()),
-                    toIntOrNull(usage.getCompletionTokens()),
-                    toIntOrNull(usage.getTotalTokens()),
-                    toChunkSnapshot(extractRateLimit(metadata))
-            );
-            log.info("[Stream Token Usage] Prompt tokens: {}, Completion tokens: {}, Total tokens: {}",
-                    usage.getPromptTokens(), usage.getCompletionTokens(), usage.getTotalTokens());
-            return text.isEmpty()
-                    ? Flux.just(completion)
-                    : Flux.just(new AiChatChunk.Token(text), completion);
-        }
-        return text.isEmpty() ? Flux.empty() : Flux.just(new AiChatChunk.Token(text));
-    }
-
     private AiChatCompletion.RateLimitSnapshot extractRateLimit(ChatResponseMetadata metadata) {
         if (metadata == null) {
             return null;
         }
         // Spring AI 2.0.0-M4(milestone) 의 RateLimit getter 동작이 안정 보장되지 않아
-        // RuntimeException 으로 안전 폴백한다. 추출 실패 시 null 로 두고 스트림은 계속 진행.
+        // RuntimeException 으로 안전 폴백한다. 추출 실패 시 null 로 두고 응답 처리는 계속 진행.
         try {
             RateLimit rateLimit = metadata.getRateLimit();
             if (rateLimit == null) {

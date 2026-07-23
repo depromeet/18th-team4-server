@@ -27,7 +27,6 @@ spring:
       chat:
         options:
           model: gpt-4o-mini
-          stream-usage: true
           # max-tokens 를 두지 않는다 — 응답을 중간에 자르는 하드 스톱이라 어느 경로에도 걸지 않는다.
           # 특히 컨텍스트 누적 요약은 잘리면 정보가 유실되므로 절대 금지(압축 스펙 8절).
           # 비용 상한은 truncation 이 아니라 사용자 토큰 예산(Redis 4h/20k) + 전역 게이트가 담당한다.

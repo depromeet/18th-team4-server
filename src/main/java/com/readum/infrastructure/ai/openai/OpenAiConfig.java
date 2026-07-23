@@ -11,17 +11,24 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SafeGuardAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.moderation.ModerationModel;
+import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.ResponseErrorHandler;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.client.WebClient;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -33,14 +40,42 @@ public class OpenAiConfig {
     private static final int ORDER_SAFE_GUARD = 200;
     private static final int ORDER_MODERATION_OUTPUT = 1000;
 
+    // 생성이 오래 걸려도 여기서 상한을 건다 — 기존 call 경로는 read 타임아웃이 없어 무한 대기 위험이 있었다.
+    private static final Duration CHAT_READ_TIMEOUT = Duration.ofSeconds(90);
+    private static final Duration CHAT_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+
     @Bean
     public ChatClient chatClient(
-            ChatClient.Builder builder,
             GuardrailProperties guardrailProperties,
             ObjectProvider<ModerationModel> moderationModelProvider,
+            ResponseErrorHandler openAiResponseErrorHandler,
+            @Value("${spring.ai.openai.api-key}") String apiKey,
+            @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
+            @Value("${spring.ai.openai.chat.options.model}") String chatModelName,
             @Value("classpath:prompts/reading-assistant-system.st") Resource systemPromptResource
     ) throws IOException {
         String systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
+
+        // 비스트리밍 1회성 요청/응답 — moderation 빈과 동일하게 블로킹 JDK HttpClient + HTTP/1.1.
+        java.net.http.HttpClient jdkHttpClient = java.net.http.HttpClient.newBuilder()
+                .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                .connectTimeout(CHAT_CONNECT_TIMEOUT)
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(jdkHttpClient);
+        requestFactory.setReadTimeout(CHAT_READ_TIMEOUT);
+        RestClient.Builder restClientBuilder = RestClient.builder().requestFactory(requestFactory);
+
+        OpenAiApi openAiApi = OpenAiApi.builder()
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .restClientBuilder(restClientBuilder)
+                .webClientBuilder(WebClient.builder()) // OpenAiApi 빌더 필수 인자 — call 경로에서는 사용되지 않음
+                .responseErrorHandler(openAiResponseErrorHandler)
+                .build();
+        OpenAiChatModel chatModel = OpenAiChatModel.builder()
+                .openAiApi(openAiApi)
+                .defaultOptions(OpenAiChatOptions.builder().model(chatModelName).build())
+                .build();
 
         List<Advisor> advisors = new ArrayList<>();
 
@@ -69,7 +104,7 @@ public class OpenAiConfig {
                 ORDER_MODERATION_OUTPUT
         ));
 
-        ChatClient.Builder chatClientBuilder = builder.defaultSystem(systemPrompt);
+        ChatClient.Builder chatClientBuilder = ChatClient.builder(chatModel).defaultSystem(systemPrompt);
         if (!advisors.isEmpty()) {
             chatClientBuilder = chatClientBuilder.defaultAdvisors(advisors);
         }
