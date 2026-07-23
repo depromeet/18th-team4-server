@@ -160,24 +160,40 @@ public class AiChatMessageSendService {
         }
     }
 
-    /** 성공: 사용자 예산은 메시지 입력 추정 + 실측 출력만 계상 (기존 정책 동일). */
+    /**
+     * 성공: 사용자 예산은 메시지 입력 추정 + 실측 출력만 계상 (기존 정책 동일).
+     * 보정 실패는 삼킨다 — 응답은 이미 저장·전달 대상이므로, 여기서 던지면 정상 완료된 턴이
+     * 실패 경로(FAILED 중복 저장 + 이중 정산)로 뒤집힌다. 옛 코드도 보정을 fire-and-forget 으로 돌렸다.
+     */
     private void settleOnSuccess(PreparedChatTurn turn, AiChatCompletion completion) {
         if (turn.reservation() == null) {
             return; // Redis 장애 우회(Bypassed) 호출 — 보정할 예약 없음
         }
-        int outputTokens = completion.outputTokens() != null
-                ? completion.outputTokens()
-                : tokenCounter.count(completion.content());
-        chatTokenBudget.settle(turn.userId(), turn.reservation(),
-                turn.estimatedMessageInputTokens() + outputTokens);
+        try {
+            int outputTokens = completion.outputTokens() != null
+                    ? completion.outputTokens()
+                    : tokenCounter.count(completion.content());
+            chatTokenBudget.settle(turn.userId(), turn.reservation(),
+                    turn.estimatedMessageInputTokens() + outputTokens);
+        } catch (RuntimeException settleError) {
+            log.error("토큰 예산 보정 실패(성공 응답은 유지) sessionId={}", turn.sessionId(), settleError);
+        }
     }
 
-    /** 실패·게이트 거절: 사용자 과실이 아니므로 예약 전액 환불 (기존 정책 동일). */
+    /**
+     * 실패·게이트 거절: 사용자 과실이 아니므로 예약 전액 환불 (기존 정책 동일).
+     * 환불 실패는 삼킨다 — 게이트 거절 경로에서 던지면 429 가 500 으로 둔갑하고,
+     * 생성 실패 경로에서 던지면 error 이벤트 전달이 막힌다.
+     */
     private void refundReservation(PreparedChatTurn turn) {
         if (turn.reservation() == null) {
             return;
         }
-        chatTokenBudget.settle(turn.userId(), turn.reservation(), 0);
+        try {
+            chatTokenBudget.settle(turn.userId(), turn.reservation(), 0);
+        } catch (RuntimeException refundError) {
+            log.error("토큰 예산 환불 실패 sessionId={}", turn.sessionId(), refundError);
+        }
     }
 
     /** 실패 저장이 또 실패해도 error 이벤트 전달을 막지 않는다. */
