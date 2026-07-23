@@ -54,15 +54,15 @@ public class AiChatMessageSendService {
 
     /** 사전 단계 결과 — 생성 단계(generateAndPersist)에 필요한 모든 문맥. */
     public record PreparedChatTurn(
-            Long sessionId,
             Long userId,
-            String normalizedContent,
-            AiChatStreamCommand.BookContext bookContext,
-            String contextSummary,
-            List<HistoryMessage> historyWithCurrent,
+            AiChatStreamCommand streamCommand,
             ChatTokenBudget.Result.Granted reservation,
             int estimatedMessageInputTokens
-    ) {}
+    ) {
+        public Long sessionId() {
+            return streamCommand.conversationId();
+        }
+    }
 
     /** Task 4 에서 컨트롤러가 SseEmitter 로 전환되면 제거되는 임시 어댑터. */
     @Deprecated
@@ -114,14 +114,14 @@ public class AiChatMessageSendService {
         withCurrent.addAll(loaded.notSummarizedChatRaws());
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
 
-        PreparedChatTurn prepared = new PreparedChatTurn(sessionId, userId, normalizedContent, bookContext,
-                loaded.contextSummary(), withCurrent, reservation, estimatedMessageInputTokens);
+        AiChatStreamCommand streamCommand = new AiChatStreamCommand(
+                sessionId, withCurrent, bookContext, loaded.contextSummary());
+        PreparedChatTurn prepared = new PreparedChatTurn(userId, streamCommand, reservation, estimatedMessageInputTokens);
 
         // 전역 게이트: 옛 코드처럼 SSE 시작 전에 확보한다. 거절이 예산 예약 뒤에 나므로
         // 예약을 전액 환불하고 던진다 — 옛 코드의 예약 누수(스펙 §5-5)를 고치는 의도된 개선.
         try {
-            aiChatClient.acquireRateLimitPermit(new AiChatStreamCommand(
-                    sessionId, withCurrent, bookContext, loaded.contextSummary()));
+            aiChatClient.acquireRateLimitPermit(streamCommand);
         } catch (RuntimeException gateRejection) {
             refundReservation(prepared);
             throw gateRejection;
@@ -137,26 +137,32 @@ public class AiChatMessageSendService {
      * 클라이언트가 도중에 이탈해도 끝까지 생성·저장한다(스펙 §5-1 의도된 동작 변화).
      */
     public List<MessageStreamEvent> generateAndPersist(PreparedChatTurn turn) {
+        AiChatCompletion completion;
         try {
-            AiChatCompletion completion = aiChatClient.generate(new AiChatStreamCommand(
-                    turn.sessionId(), turn.historyWithCurrent(), turn.bookContext(), turn.contextSummary()));
+            completion = aiChatClient.generate(turn.streamCommand());
+        } catch (RuntimeException generateError) {
+            log.error("AI 응답 생성 실패 sessionId={} error={}", turn.sessionId(), generateError.toString());
+            persistFailedQuietly(turn.sessionId(), "", null);
+            refundReservation(turn);
+            return List.of(buildErrorEvent(generateError));
+        }
 
+        try {
             AiChatMessage saved = aiChatMessagePersistService.saveAssistantSuccess(
                     turn.sessionId(), completion.content(), completion);
-
             settleOnSuccess(turn, completion);
-
             return List.of(
                     new MessageStreamEvent.Token(completion.content()),
                     new MessageStreamEvent.Done(
                             new MessageStreamEvent.TokenCount(
                                     saved.getInputTokens(), saved.getOutputTokens(), saved.getTotalTokens()),
                             saved.getCreatedAt()));
-        } catch (RuntimeException error) {
-            log.error("AI 응답 생성 실패 sessionId={} error={}", turn.sessionId(), error.toString());
-            persistFailedQuietly(turn.sessionId());
+        } catch (RuntimeException persistError) {
+            // 생성은 성공(과금 완료)했는데 저장이 실패한 경우 — 본문·실측 토큰을 FAILED 행으로 보존한다.
+            log.error("AI 응답 저장 실패 sessionId={}", turn.sessionId(), persistError);
+            persistFailedQuietly(turn.sessionId(), completion.content(), completion);
             refundReservation(turn);
-            return List.of(buildErrorEvent(error));
+            return List.of(buildErrorEvent(persistError));
         }
     }
 
@@ -176,7 +182,7 @@ public class AiChatMessageSendService {
             chatTokenBudget.settle(turn.userId(), turn.reservation(),
                     turn.estimatedMessageInputTokens() + outputTokens);
         } catch (RuntimeException settleError) {
-            log.error("토큰 예산 보정 실패(성공 응답은 유지) sessionId={}", turn.sessionId(), settleError);
+            log.error("토큰 예산 보정 실패(성공 응답은 유지) userId={} sessionId={}", turn.userId(), turn.sessionId(), settleError);
         }
     }
 
@@ -192,14 +198,14 @@ public class AiChatMessageSendService {
         try {
             chatTokenBudget.settle(turn.userId(), turn.reservation(), 0);
         } catch (RuntimeException refundError) {
-            log.error("토큰 예산 환불 실패 sessionId={}", turn.sessionId(), refundError);
+            log.error("토큰 예산 환불 실패 userId={} sessionId={}", turn.userId(), turn.sessionId(), refundError);
         }
     }
 
     /** 실패 저장이 또 실패해도 error 이벤트 전달을 막지 않는다. */
-    private void persistFailedQuietly(Long sessionId) {
+    private void persistFailedQuietly(Long sessionId, String content, AiChatCompletion meta) {
         try {
-            aiChatMessagePersistService.saveAssistantFailed(sessionId, "", null);
+            aiChatMessagePersistService.saveAssistantFailed(sessionId, content, meta);
         } catch (RuntimeException persistError) {
             log.error("AI FAILED 메시지 영속화 실패 sessionId={}", sessionId, persistError);
         }

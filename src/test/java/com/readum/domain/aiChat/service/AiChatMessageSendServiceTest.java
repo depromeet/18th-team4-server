@@ -139,7 +139,8 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void NBSP_등_유니코드_공백만_있으면_BadRequest_MESSAGE_CONTENT_BLANK() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "   ");
+        // U+00A0 NBSP, U+202F Narrow No-Break Space, U+2007 Figure Space 세 종류
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "   ");
 
         assertThatThrownBy(() -> service.prepare(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -531,5 +532,27 @@ class AiChatMessageSendServiceTest {
         ArgumentCaptor<AiChatStreamCommand> captor = ArgumentCaptor.forClass(AiChatStreamCommand.class);
         verify(aiChatClient).generate(captor.capture());
         assertThat(captor.getValue().contextSummary()).isEqualTo("이전 대화를 압축한 누적 요약");
+    }
+
+    @Test
+    void 정산이_실패해도_성공_이벤트는_그대로_반환된다() {
+        Long sessionId = 7L;
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+
+        givenLoadHistory(sessionId, List.of(), 100L);
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willReturn(completion("응답", 10, 5, 15));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, sessionId, "응답", null, 10, 5, 15));
+        willThrow(new RuntimeException("redis down"))
+                .given(chatTokenBudget).settle(anyLong(), any(), anyInt());
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0))
+                .asInstanceOf(InstanceOfAssertFactories.type(MessageStreamEvent.Token.class))
+                .extracting(MessageStreamEvent.Token::delta)
+                .isEqualTo("응답");
     }
 }
