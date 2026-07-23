@@ -1,6 +1,6 @@
 package com.readum.domain.aiChat.service;
 
-import com.readum.domain.aiChat.dto.AiChatChunk;
+import com.readum.domain.aiChat.dto.AiChatCompletion;
 import com.readum.domain.aiChat.dto.AssembledContext;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.event.ContextSummarizeTriggerEvent;
@@ -101,7 +101,7 @@ public class AiChatMessagePersistService {
 
     @Transactional
     public AiChatMessage saveAssistantSuccess(
-            Long sessionId, String accumulated, AiChatChunk.Completion meta
+            Long sessionId, String accumulated, AiChatCompletion meta
     ) {
         Integer inputTokens = meta == null ? null : meta.inputTokens();
         Integer outputTokens = meta == null ? null : meta.outputTokens();
@@ -137,7 +137,7 @@ public class AiChatMessagePersistService {
 
     @Transactional
     public void saveAssistantFailed(
-            Long sessionId, String partial, AiChatChunk.Completion meta
+            Long sessionId, String partial, AiChatCompletion meta
     ) {
         Integer inputTokens = meta == null ? null : meta.inputTokens();
         Integer outputTokens = meta == null ? null : meta.outputTokens();

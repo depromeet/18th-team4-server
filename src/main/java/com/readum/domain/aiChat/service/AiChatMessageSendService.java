@@ -2,6 +2,7 @@ package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatChunk;
+import com.readum.domain.aiChat.dto.AiChatCompletion;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.dto.InputModerationResult;
@@ -185,7 +186,7 @@ public class AiChatMessageSendService {
     private Mono<MessageStreamEvent> persistAssistantMessageAndEmitDone(
             Long sessionId, String content, AiChatChunk.Completion completion
     ) {
-        return Mono.fromCallable(() -> aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, completion))
+        return Mono.fromCallable(() -> aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, toCompletionMeta(completion)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(saved -> new MessageStreamEvent.Done(
                         new MessageStreamEvent.TokenCount(
@@ -208,7 +209,7 @@ public class AiChatMessageSendService {
         // 같은 파일의 persistOnClientCancel 과 동일한 비동기 패턴.
         Mono.fromRunnable(() -> {
                     try {
-                        aiChatMessagePersistService.saveAssistantFailed(sessionId, content, completion);
+                        aiChatMessagePersistService.saveAssistantFailed(sessionId, content, toCompletionMeta(completion));
                     } catch (RuntimeException ex) {
                         log.error("AI FAILED 메시지 영속화 실패 sessionId={}", sessionId, ex);
                     }
@@ -238,7 +239,7 @@ public class AiChatMessageSendService {
         Mono.fromRunnable(() -> {
                     try {
                         if (completion != null) {
-                            aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, completion);
+                            aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, toCompletionMeta(completion));
                         } else {
                             aiChatMessagePersistService.saveAssistantFailed(sessionId, content, null);
                         }
@@ -248,6 +249,15 @@ public class AiChatMessageSendService {
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe();
+    }
+
+    // Task 3 에서 서비스 전환과 함께 제거되는 임시 브리지.
+    private AiChatCompletion toCompletionMeta(AiChatChunk.Completion completion) {
+        if (completion == null) {
+            return null;
+        }
+        return new AiChatCompletion(null,
+                completion.inputTokens(), completion.outputTokens(), completion.totalTokens(), null);
     }
 
     private MessageStreamEvent.Error buildErrorEvent(Throwable error) {

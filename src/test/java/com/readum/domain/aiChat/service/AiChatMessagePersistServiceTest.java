@@ -1,6 +1,6 @@
 package com.readum.domain.aiChat.service;
 
-import com.readum.domain.aiChat.dto.AiChatChunk;
+import com.readum.domain.aiChat.dto.AiChatCompletion;
 import com.readum.domain.aiChat.dto.AssembledContext;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.event.FirstAssistantResponseCompletedEvent;
@@ -193,7 +193,7 @@ class AiChatMessagePersistServiceTest {
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
         given(aiChatMessageRepository.findFirstUserMessage(sessionId)).willReturn(Optional.of(firstUserMessage));
 
-        AiChatChunk.Completion meta = new AiChatChunk.Completion(100, 50, 150, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150, null);
 
         persistService.saveAssistantSuccess(sessionId, "첫 응답", meta);
 
@@ -220,7 +220,7 @@ class AiChatMessagePersistServiceTest {
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(laterSession));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
 
-        AiChatChunk.Completion meta = new AiChatChunk.Completion(100, 50, 150, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150, null);
 
         persistService.saveAssistantSuccess(sessionId, "후속 응답", meta);
 
@@ -239,7 +239,7 @@ class AiChatMessagePersistServiceTest {
             return AiChatMessageFixture.persistedCopyOf(99L, incoming);
         });
 
-        AiChatChunk.Completion meta = new AiChatChunk.Completion(312, 58, 370, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 312, 58, 370, null);
         AiChatMessage saved = persistService.saveAssistantSuccess(sessionId, "응답 본문", meta);
 
         ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
@@ -265,7 +265,7 @@ class AiChatMessagePersistServiceTest {
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
 
         // 입력 10, 출력 4 만 받고 끊긴 케이스. 세션 누적은 outputTokens(4) 만 반영되어야 한다.
-        AiChatChunk.Completion meta = new AiChatChunk.Completion(10, 4, 14, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 10, 4, 14, null);
         persistService.saveAssistantFailed(sessionId, null, meta);
 
         ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
