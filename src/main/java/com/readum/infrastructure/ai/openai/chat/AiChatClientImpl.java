@@ -2,6 +2,7 @@ package com.readum.infrastructure.ai.openai.chat;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatChunk;
+import com.readum.domain.aiChat.dto.AiChatCompletion;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.out.AiChatClient;
@@ -110,6 +111,72 @@ public class AiChatClientImpl implements AiChatClient {
                 });
     }
 
+    @Override
+    public AiChatCompletion generate(AiChatStreamCommand command) {
+        String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
+
+        // 전역 게이트: 호출 전 동기 검사. 여기서 던지면 SSE 시작 전에 429 JSON 으로 변환된다 (stream 시절과 동일 위치).
+        int payloadTokens = tokenCounter.count(systemPrompt);
+        for (HistoryMessage historyMessage : command.history()) {
+            payloadTokens += tokenCounter.count(historyMessage.content());
+        }
+        int estimatedTokens = payloadTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
+        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
+
+        List<Message> messages = command.history().stream()
+                .map(this::toSpringMessage)
+                .toList();
+
+        AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
+                conversationIdHash(command.conversationId()),
+                PROMPT_TEMPLATE_ID,
+                PROMPT_TEMPLATE_VERSION,
+                promptHash(command.history())
+        );
+        long startNanos = System.nanoTime();
+
+        try {
+            ChatResponse chatResponse = chatClient.prompt()
+                    .system(systemPrompt)
+                    .messages(messages)
+                    .call()
+                    .chatResponse();
+            AiChatCompletion completion = toCompletion(chatResponse);
+            auditLogger.success(
+                    ChatResponseAuditMapper.applyResult(baseEvent, chatResponse, elapsedMillis(startNanos)));
+            return completion;
+        } catch (RuntimeException error) {
+            logUnexpectedError(error);
+            auditLogger.failure(
+                    ChatResponseAuditMapper.applyResult(baseEvent, null, elapsedMillis(startNanos)), error);
+            throw error;
+        }
+    }
+
+    private AiChatCompletion toCompletion(ChatResponse chatResponse) {
+        String text = Optional.ofNullable(chatResponse)
+                .map(ChatResponse::getResult)
+                .map(result -> result.getOutput())
+                .map(output -> output.getText())
+                .orElse("");
+        ChatResponseMetadata metadata = chatResponse == null ? null : chatResponse.getMetadata();
+        Usage usage = Optional.ofNullable(metadata).map(ChatResponseMetadata::getUsage).orElse(null);
+        return new AiChatCompletion(
+                text,
+                usage == null ? null : toIntOrNull(usage.getPromptTokens()),
+                usage == null ? null : toIntOrNull(usage.getCompletionTokens()),
+                usage == null ? null : toIntOrNull(usage.getTotalTokens()),
+                extractRateLimit(metadata)
+        );
+    }
+
+    // Task 6 에서 stream() 과 함께 삭제될 임시 브리지.
+    private AiChatChunk.RateLimitSnapshot toChunkSnapshot(AiChatCompletion.RateLimitSnapshot snapshot) {
+        return snapshot == null ? null : new AiChatChunk.RateLimitSnapshot(
+                snapshot.requestsLimit(), snapshot.requestsRemaining(), snapshot.requestsReset(),
+                snapshot.tokensLimit(), snapshot.tokensRemaining(), snapshot.tokensReset());
+    }
+
     private String conversationIdHash(Long conversationId) {
         return conversationId == null ? null : auditLogger.sha256(String.valueOf(conversationId));
     }
@@ -178,7 +245,7 @@ public class AiChatClientImpl implements AiChatClient {
                     toIntOrNull(usage.getPromptTokens()),
                     toIntOrNull(usage.getCompletionTokens()),
                     toIntOrNull(usage.getTotalTokens()),
-                    extractRateLimit(metadata)
+                    toChunkSnapshot(extractRateLimit(metadata))
             );
             log.info("[Stream Token Usage] Prompt tokens: {}, Completion tokens: {}, Total tokens: {}",
                     usage.getPromptTokens(), usage.getCompletionTokens(), usage.getTotalTokens());
@@ -189,7 +256,7 @@ public class AiChatClientImpl implements AiChatClient {
         return text.isEmpty() ? Flux.empty() : Flux.just(new AiChatChunk.Token(text));
     }
 
-    private AiChatChunk.RateLimitSnapshot extractRateLimit(ChatResponseMetadata metadata) {
+    private AiChatCompletion.RateLimitSnapshot extractRateLimit(ChatResponseMetadata metadata) {
         if (metadata == null) {
             return null;
         }
@@ -200,7 +267,7 @@ public class AiChatClientImpl implements AiChatClient {
             if (rateLimit == null) {
                 return null;
             }
-            return new AiChatChunk.RateLimitSnapshot(
+            return new AiChatCompletion.RateLimitSnapshot(
                     rateLimit.getRequestsLimit(),
                     rateLimit.getRequestsRemaining(),
                     rateLimit.getRequestsReset(),
