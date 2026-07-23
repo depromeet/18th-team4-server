@@ -20,6 +20,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
+import org.springframework.core.retry.RetryPolicy;
+import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
@@ -72,9 +74,15 @@ public class OpenAiConfig {
                 .webClientBuilder(WebClient.builder()) // OpenAiApi 빌더 필수 인자 — call 경로에서는 사용되지 않음
                 .responseErrorHandler(openAiResponseErrorHandler)
                 .build();
+        // 자체 재시도를 두지 않는다(모더레이션 빈과 동일 정책). 빌더 기본 재시도(10회·지수 백오프)는
+        // read 타임아웃(ResourceAccessException)까지 재시도 대상에 포함해, 최악의 경우 SseEmitter 상한(120초)을
+        // 한참 지난 뒤까지 보이지 않는 과금 호출을 반복한다(#103 교훈: 재시도는 증폭기).
+        // 실패는 즉시 error 이벤트로 표면화하고, 재전송 여부는 사용자가 정한다.
+        RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
         OpenAiChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(openAiApi)
                 .defaultOptions(OpenAiChatOptions.builder().model(chatModelName).build())
+                .retryTemplate(new RetryTemplate(noRetry))
                 .build();
 
         List<Advisor> advisors = new ArrayList<>();

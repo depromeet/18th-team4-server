@@ -16,11 +16,8 @@ spring:
     virtual:
       enabled: true
   ai:
-    chat:
-      observations:
-        log-prompt: false
-        log-completion: false
-        include-error-logging: true
+    # chat.observations 블록은 두지 않는다 — 채팅·제목·요약 ChatClient 전부 수동 구성이라
+    # 자동 구성의 관측(observation) 연결이 적용되지 않는다. 토큰/지연/실패 관측은 AiPromptAuditLogger 가 담당.
     # 모델·옵션은 환경 무관(코드 동작). api-key 만 환경변수. (프로파일별로 다르지 않다)
     openai:
       api-key: ${OPENAI_API_KEY}
