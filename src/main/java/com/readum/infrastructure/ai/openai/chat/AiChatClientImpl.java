@@ -292,6 +292,6 @@ public class AiChatClientImpl implements AiChatClient {
         if (error instanceof BusinessException) {
             return;
         }
-        log.error("[Stream] OpenAI API 호출 실패", error);
+        log.error("[AI Chat] OpenAI API 호출 실패", error);
     }
 }
