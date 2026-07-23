@@ -112,16 +112,23 @@ public class AiChatClientImpl implements AiChatClient {
     }
 
     @Override
-    public AiChatCompletion generate(AiChatStreamCommand command) {
+    public void acquireRateLimitPermit(AiChatStreamCommand command) {
         String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
-
-        // 전역 게이트: 호출 전 동기 검사. 여기서 던지면 SSE 시작 전에 429 JSON 으로 변환된다 (stream 시절과 동일 위치).
+        // 분당 예산에서 "요청 1 + 추정 토큰" 확보. 사전 단계(요청 스레드)에서 호출되어
+        // 거절은 GlobalExceptionHandler 가 429 JSON 으로 변환한다.
+        // 계상은 실제 전송량 전체(시스템 프롬프트 + 이력 + 예약 출력) — 사용자 예산과 달리 오버헤드 포함.
         int payloadTokens = tokenCounter.count(systemPrompt);
         for (HistoryMessage historyMessage : command.history()) {
             payloadTokens += tokenCounter.count(historyMessage.content());
         }
         int estimatedTokens = payloadTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
         rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
+    }
+
+    /** 호출 전 acquireRateLimitPermit() 이 선행되어야 한다 — 전역 게이트 검사는 여기서 하지 않는다. */
+    @Override
+    public AiChatCompletion generate(AiChatStreamCommand command) {
+        String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
 
         List<Message> messages = command.history().stream()
                 .map(this::toSpringMessage)

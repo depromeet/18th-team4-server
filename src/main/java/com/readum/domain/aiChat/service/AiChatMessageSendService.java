@@ -1,7 +1,6 @@
 package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
-import com.readum.domain.aiChat.dto.AiChatChunk;
 import com.readum.domain.aiChat.dto.AiChatCompletion;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
@@ -18,6 +17,7 @@ import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.TooManyRequestsException;
+import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.userBook.repository.UserBookRepository;
@@ -27,15 +27,12 @@ import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.core.publisher.SignalType;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 @Slf4j
@@ -55,22 +52,41 @@ public class AiChatMessageSendService {
     private final ChatTokenBudget chatTokenBudget;
     private final TokenCounter tokenCounter;
 
+    /** 사전 단계 결과 — 생성 단계(generateAndPersist)에 필요한 모든 문맥. */
+    public record PreparedChatTurn(
+            Long sessionId,
+            Long userId,
+            String normalizedContent,
+            AiChatStreamCommand.BookContext bookContext,
+            String contextSummary,
+            List<HistoryMessage> historyWithCurrent,
+            ChatTokenBudget.Result.Granted reservation,
+            int estimatedMessageInputTokens
+    ) {}
+
+    /** Task 4 에서 컨트롤러가 SseEmitter 로 전환되면 제거되는 임시 어댑터. */
+    @Deprecated
     public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
+        PreparedChatTurn prepared = prepare(command);
+        return Flux.defer(() -> Flux.fromIterable(generateAndPersist(prepared))
+                .subscribeOn(Schedulers.boundedElastic()));
+    }
+
+    /**
+     * 사전 단계(요청 스레드, 동기): rate limit → 이력 조회 → 입력 모더레이션 → 예산 예약 → USER 저장 → 전역 게이트.
+     * 여기서 던진 예외는 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 변환한다.
+     */
+    public PreparedChatTurn prepare(SendMessageCommand command) {
         String normalizedContent = validateAndStripContent(command.content());
         Long sessionId = command.sessionId();
         Long userId = command.userId();
 
-        // 사전 단계: rate-limit 검사 / 이력 조회 / 입력 moderation / USER 메시지 영속화는 모두 SSE 시작 전에 끝난다.
-        // 여기서 던진 예외는 SSE 이전에 GlobalExceptionHandler 가 처리해 4XX/5XX JSON 응답으로 나간다.
         verifyUserMessageRateLimit(userId);
 
-        // 이력만 조회(USER 미저장). 세션 검증은 여기서 끝난다.
         AiChatMessagePersistService.MessageLoadResult loaded =
                 aiChatMessagePersistService.loadHistory(sessionId, userId);
-
         AiChatStreamCommand.BookContext bookContext = resolveBookContext(loaded.userBookId());
 
-        // 입력 가드레일: SSE 시작 전 동기 실행. 거부 응답이 일반 토큰으로 흘러 저장 트리거를 발동하는 문제를 근본 차단.
         InputModerationResult moderation = inputModerationClient.check(normalizedContent, bookContext);
         switch (moderation.status()) {
             case BLOCKED -> {
@@ -79,18 +95,10 @@ public class AiChatMessageSendService {
                         sessionId, userId, moderation.flaggedCategories());
                 throw new BadRequestException(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);
             }
-            case UNAVAILABLE -> {
-                // 외부 Moderation API 장애(fail-closed). USER 메시지를 저장하지 않고 503.
-                throw new ServiceUnavailableException(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE);
-            }
-            case PASSED -> {
-                // 통과: COMPLETED 저장 후 스트림 시작.
-            }
+            case UNAVAILABLE -> throw new ServiceUnavailableException(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE);
+            case PASSED -> { }
         }
 
-        // 토큰 예산 선불 예약: moderation 통과 후 · USER 저장 전. 거절이면 아무것도 저장하지 않고 429.
-        // 사용자 예산은 사용자가 보낸 메시지 입력 + 받은 출력만 계상한다(시스템 프롬프트·재전송 이력·요약 미포함).
-        // (moderation 은 별도 모델·무과금이라 예산 검사 앞에 둬도 비용 문제가 없다)
         int estimatedMessageInputTokens = tokenCounter.count(normalizedContent);
         int reservedTokens = estimatedMessageInputTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
         ChatTokenBudget.Result reservationResult = chatTokenBudget.reserve(userId, reservedTokens);
@@ -100,59 +108,84 @@ public class AiChatMessageSendService {
         ChatTokenBudget.Result.Granted reservation =
                 (reservationResult instanceof ChatTokenBudget.Result.Granted granted) ? granted : null;
 
-        // 통과한 경우에만 USER 메시지를 COMPLETED 로 저장(턴 카운트 포함).
         aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
         List<HistoryMessage> withCurrent = new ArrayList<>(loaded.notSummarizedChatRaws().size() + 1);
         withCurrent.addAll(loaded.notSummarizedChatRaws());
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
 
-        StringBuilder contentBuffer = new StringBuilder();
-        AtomicReference<AiChatChunk.Completion> completionRef = new AtomicReference<>();
+        PreparedChatTurn prepared = new PreparedChatTurn(sessionId, userId, normalizedContent, bookContext,
+                loaded.contextSummary(), withCurrent, reservation, estimatedMessageInputTokens);
 
-        return aiChatClient.stream(new AiChatStreamCommand(sessionId, withCurrent, bookContext, loaded.contextSummary()))
-                .concatMap(chunk -> bufferAndConvertChunk(chunk, contentBuffer, completionRef))
-                // doOnCancel 위치 주의: concatMap 직후, concatWith 앞.
-                // Phase 1 (LLM 스트리밍 중) 에 클라이언트가 끊기면 여기로 cancel 이 전파돼 fire.
-                // Phase 2 (concatWith 의 saveAssistantSuccess JDBC 중) 에 cancel 이 들어와도
-                // concatMap 이 이미 onComplete 된 이후라 cancel 이 이 위치까지 올라오지 않는다.
-                // 즉 success path 와 cancel path 가 동시에 영속화하는 케이스가 구조적으로 차단된다.
-                .doOnCancel(() -> persistOnClientCancel(sessionId, contentBuffer.toString(), completionRef.get()))
-                .concatWith(Mono.defer(() -> persistAssistantMessageAndEmitDone(sessionId, contentBuffer.toString(), completionRef.get())))
-                .onErrorResume(error -> persistFailedAssistantMessageAndEmitError(sessionId, contentBuffer.toString(), completionRef.get(), error))
-                // 예산 보정 한 지점 — 정상 완료·클라이언트 취소·에러가 모두 여기로 모인다. 블로킹 없이 별도 스레드에서.
-                .doFinally(signalType -> Mono.fromRunnable(() ->
-                                settleTokenBudget(userId, reservation, completionRef.get(),
-                                        estimatedMessageInputTokens, contentBuffer.toString(), signalType))
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .subscribe());
+        // 전역 게이트: 옛 코드처럼 SSE 시작 전에 확보한다. 거절이 예산 예약 뒤에 나므로
+        // 예약을 전액 환불하고 던진다 — 옛 코드의 예약 누수(스펙 §5-5)를 고치는 의도된 개선.
+        try {
+            aiChatClient.acquireRateLimitPermit(new AiChatStreamCommand(
+                    sessionId, withCurrent, bookContext, loaded.contextSummary()));
+        } catch (RuntimeException gateRejection) {
+            refundReservation(prepared);
+            throw gateRejection;
+        }
+
+        return prepared;
     }
 
     /**
-     * 스트림 종료 시 예산 보정 — 사용자 예산은 메시지 입력 + 출력만 계상한다. 종료 형태로 나뉜다:
-     * - 정상 완료(실측 usage 수신): 메시지 입력 + 실측 출력(completion.outputTokens) 계상.
-     * - 클라이언트 취소(탭 닫힘·연결 끊김): 요청은 이미 OpenAI 로 가 서버가 생성분을 소비했으므로,
-     *   실측을 못 받았어도 그때까지 스트리밍된 문자 수로 출력을 추정해 계상한다.
-     * - 에러(OpenAI·네트워크 실패): 사용자 과실이 아니므로 예약을 전액 환불한다(입력·출력 모두 차감 취소).
-     * reservation 이 null 이면 Redis 장애로 우회(Bypassed)한 호출 — 보정할 예약이 없다.
-     * (onErrorResume 이 에러를 정상 신호로 바꾸므로, 취소만 SignalType.CANCEL 이고 에러는 completion 이 없는 ON_COMPLETE 로 온다.)
+     * 생성 단계(VT executor, 동기 순차): OpenAI 호출(출력 검증은 advisor 가 동기 수행) → 저장 → 예산 보정.
+     * 예외를 밖으로 던지지 않고 error 이벤트로 변환한다 — SSE 는 이미 200 으로 시작된 상태라
+     * 실패는 스트림 내 error 이벤트가 유일한 전달 수단이다 (기존 onErrorResume 과 동일한 계약).
+     * 클라이언트가 도중에 이탈해도 끝까지 생성·저장한다(스펙 §5-1 의도된 동작 변화).
      */
-    private void settleTokenBudget(Long userId, ChatTokenBudget.Result.Granted reservation,
-            AiChatChunk.Completion completion, int estimatedMessageInputTokens, String streamedText,
-            SignalType signalType) {
-        if (reservation == null) {
+    public List<MessageStreamEvent> generateAndPersist(PreparedChatTurn turn) {
+        try {
+            AiChatCompletion completion = aiChatClient.generate(new AiChatStreamCommand(
+                    turn.sessionId(), turn.historyWithCurrent(), turn.bookContext(), turn.contextSummary()));
+
+            AiChatMessage saved = aiChatMessagePersistService.saveAssistantSuccess(
+                    turn.sessionId(), completion.content(), completion);
+
+            settleOnSuccess(turn, completion);
+
+            return List.of(
+                    new MessageStreamEvent.Token(completion.content()),
+                    new MessageStreamEvent.Done(
+                            new MessageStreamEvent.TokenCount(
+                                    saved.getInputTokens(), saved.getOutputTokens(), saved.getTotalTokens()),
+                            saved.getCreatedAt()));
+        } catch (RuntimeException error) {
+            log.error("AI 응답 생성 실패 sessionId={} error={}", turn.sessionId(), error.toString());
+            persistFailedQuietly(turn.sessionId());
+            refundReservation(turn);
+            return List.of(buildErrorEvent(error));
+        }
+    }
+
+    /** 성공: 사용자 예산은 메시지 입력 추정 + 실측 출력만 계상 (기존 정책 동일). */
+    private void settleOnSuccess(PreparedChatTurn turn, AiChatCompletion completion) {
+        if (turn.reservation() == null) {
+            return; // Redis 장애 우회(Bypassed) 호출 — 보정할 예약 없음
+        }
+        int outputTokens = completion.outputTokens() != null
+                ? completion.outputTokens()
+                : tokenCounter.count(completion.content());
+        chatTokenBudget.settle(turn.userId(), turn.reservation(),
+                turn.estimatedMessageInputTokens() + outputTokens);
+    }
+
+    /** 실패·게이트 거절: 사용자 과실이 아니므로 예약 전액 환불 (기존 정책 동일). */
+    private void refundReservation(PreparedChatTurn turn) {
+        if (turn.reservation() == null) {
             return;
         }
-        if (completion != null && completion.outputTokens() != null) {
-            // 정상 수신(완료, 또는 완료 후 취소) → 실측 출력
-            chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + completion.outputTokens());
-        } else if (signalType == SignalType.CANCEL) {
-            // 클라이언트 취소로 실측 미수신 → 그때까지 스트리밍된 텍스트를 jtokkit 으로 세어 출력 추정
-            int estimatedOutputTokens = tokenCounter.count(streamedText);
-            chatTokenBudget.settle(userId, reservation, estimatedMessageInputTokens + estimatedOutputTokens);
-        } else {
-            // 에러로 실측 미수신 → 사용자 과실이 아니므로 예약 전액 환불(actualTotal=0 → 예약분 그대로 차감)
-            chatTokenBudget.settle(userId, reservation, 0);
+        chatTokenBudget.settle(turn.userId(), turn.reservation(), 0);
+    }
+
+    /** 실패 저장이 또 실패해도 error 이벤트 전달을 막지 않는다. */
+    private void persistFailedQuietly(Long sessionId) {
+        try {
+            aiChatMessagePersistService.saveAssistantFailed(sessionId, "", null);
+        } catch (RuntimeException persistError) {
+            log.error("AI FAILED 메시지 영속화 실패 sessionId={}", sessionId, persistError);
         }
     }
 
@@ -161,103 +194,6 @@ public class AiChatMessageSendService {
         RateLimitInfo info = new RateLimitInfo(
                 retryAfter, null, (long) budget.tokensPerWindow(), null, 0L, null, retryAfter);
         return new TooManyRequestsException(AiChatErrorCode.USER_TOKEN_BUDGET_EXCEEDED, info);
-    }
-
-    private Flux<MessageStreamEvent> bufferAndConvertChunk(
-            AiChatChunk chunk,
-            StringBuilder contentBuffer,
-            AtomicReference<AiChatChunk.Completion> completionRef
-    ) {
-        return switch (chunk) {
-            case AiChatChunk.Token token -> {
-                // 누적된 응답 텍스트는 종료 후 영속화에 쓰고, delta 는 외부에 즉시 흘려 보낸다.
-                contentBuffer.append(token.delta());
-                yield Flux.just(new MessageStreamEvent.Token(token.delta()));
-            }
-            case AiChatChunk.Completion completion -> {
-                // Done 이벤트는 ASSISTANT 영속화 후 createdAt·tokenCount 까지 채워서 만들어야 하므로
-                // 여기서는 메타만 잡아두고 외부로는 emit 하지 않는다 (concatWith 의 finalize 단계에서 발행).
-                completionRef.set(completion);
-                yield Flux.empty();
-            }
-        };
-    }
-
-    private Mono<MessageStreamEvent> persistAssistantMessageAndEmitDone(
-            Long sessionId, String content, AiChatChunk.Completion completion
-    ) {
-        return Mono.fromCallable(() -> aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, toCompletionMeta(completion)))
-                .subscribeOn(Schedulers.boundedElastic())
-                .map(saved -> new MessageStreamEvent.Done(
-                        new MessageStreamEvent.TokenCount(
-                                saved.getInputTokens(),
-                                saved.getOutputTokens(),
-                                saved.getTotalTokens()
-                        ),
-                        saved.getCreatedAt()
-                ));
-    }
-
-    private Flux<MessageStreamEvent> persistFailedAssistantMessageAndEmitError(
-            Long sessionId, String content, AiChatChunk.Completion completion, Throwable error
-    ) {
-        log.error("AI 스트림 비정상 종료 sessionId={} error={}", sessionId, error.toString());
-        // 클라이언트에 error 이벤트를 먼저 보내고, FAILED 영속화는 별도 스레드에서 결과를 기다리지 않고 실행.
-        // 영속화 완료를 기다린 뒤 emit 하면(`.thenMany`) DB JDBC 가 느릴수록 사용자가 더 오래
-        // "응답 없음" 으로 보이게 된다. 영속화가 실패해도 클라이언트에 영향이 가지 않도록
-        // 예외는 잡아서 로그만 남기고 외부로 다시 던지지 않는다.
-        // 같은 파일의 persistOnClientCancel 과 동일한 비동기 패턴.
-        Mono.fromRunnable(() -> {
-                    try {
-                        aiChatMessagePersistService.saveAssistantFailed(sessionId, content, toCompletionMeta(completion));
-                    } catch (RuntimeException ex) {
-                        log.error("AI FAILED 메시지 영속화 실패 sessionId={}", sessionId, ex);
-                    }
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .subscribe();
-
-        return Flux.just(buildErrorEvent(error));
-    }
-
-    /**
-     * 클라이언트 disconnect (탭 닫힘 / 네트워크 끊김) 로 SSE writer 가 cancel 을 보낸 경우의 영속화.
-     * 분기 정책:
-     * - completion != null            : LLM 응답이 끝까지 도착했고 토큰 메타도 받았다.
-     *                                   Done 이벤트만 전송 못 했을 뿐 의미상 정상 종료라 COMPLETED 저장.
-     * - completion == null && content != "" : LLM 응답 도중 끊김. 부분 응답을 FAILED 로 보존
-     *                                          (컨텍스트 윈도우에서 자동 제외됨).
-     * - completion == null && content == "" : 첫 토큰도 받기 전 끊김. 저장할 의미 없으므로 skip.
-     *
-     * 클라이언트는 이미 떠났으므로 영속화 실패 시에도 던지지 않고 로그만 남긴다.
-     */
-    private void persistOnClientCancel(Long sessionId, String content, AiChatChunk.Completion completion) {
-        if (completion == null && content.isEmpty()) {
-            log.info("AI 클라이언트 disconnect (응답 0byte) - 영속화 skip sessionId={}", sessionId);
-            return;
-        }
-        Mono.fromRunnable(() -> {
-                    try {
-                        if (completion != null) {
-                            aiChatMessagePersistService.saveAssistantSuccess(sessionId, content, toCompletionMeta(completion));
-                        } else {
-                            aiChatMessagePersistService.saveAssistantFailed(sessionId, content, null);
-                        }
-                    } catch (RuntimeException ex) {
-                        log.error("AI 클라이언트 disconnect 후 ASSISTANT 메시지 영속화 실패 sessionId={}", sessionId, ex);
-                    }
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .subscribe();
-    }
-
-    // Task 3 에서 서비스 전환과 함께 제거되는 임시 브리지.
-    private AiChatCompletion toCompletionMeta(AiChatChunk.Completion completion) {
-        if (completion == null) {
-            return null;
-        }
-        return new AiChatCompletion(null,
-                completion.inputTokens(), completion.outputTokens(), completion.totalTokens(), null);
     }
 
     private MessageStreamEvent.Error buildErrorEvent(Throwable error) {
