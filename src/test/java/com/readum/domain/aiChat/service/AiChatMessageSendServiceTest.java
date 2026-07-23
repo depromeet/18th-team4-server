@@ -86,8 +86,7 @@ class AiChatMessageSendServiceTest {
             new AiChatProperties.Context(8000, 2000, 4000, 800),
             new AiChatProperties.MessageRule(1000),
             new AiChatProperties.RateLimit(10, 5),
-            new AiChatProperties.TokenBudget(4, 20000, 512),
-            new AiChatProperties.TitleGeneration(4, 2000)
+            new AiChatProperties.TokenBudget(4, 20000, 512)
     );
 
     private AiChatMessageSendService service;
