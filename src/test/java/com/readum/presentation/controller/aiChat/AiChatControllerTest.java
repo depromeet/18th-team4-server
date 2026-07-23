@@ -58,6 +58,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -401,6 +402,36 @@ class AiChatControllerTest {
                 .contains("data:{\"delta\":\" beta\"}")
                 .contains("event:done")
                 .contains("\"total\":370");
+    }
+
+    @Test
+    void SSE_전송_여부와_무관하게_생성과_저장_파이프라인이_실행된다() throws Exception {
+        // 스펙 §5-1: 클라이언트가 SSE 수신 도중 이탈하더라도 생성·저장 파이프라인은 완주해야 한다.
+        // 동기 경로에서는 generateAndPersist 가 SseEmitter 쓰기와 무관하게 먼저 완료되므로
+        // prepare → generateAndPersist 호출 순서 자체를 단언한다.
+        LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
+        AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
+                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
+        given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
+                new MessageStreamEvent.Token("응답"),
+                new MessageStreamEvent.Done(
+                        new MessageStreamEvent.TokenCount(10, 5, 15),
+                        createdAt)
+        ));
+
+        MvcResult initial = mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(initial))
+                .andExpect(status().isOk());
+
+        // SSE 전달 성공 여부와 무관하게 생성·저장 파이프라인이 실제로 호출됐음을 단언
+        verify(aiChatMessageSendService).generateAndPersist(preparedTurn);
     }
 
     @Test

@@ -534,6 +534,23 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
+    void 생성_타임아웃_등_미분류_IO_예외는_AI_STREAM_INTERRUPTED_error_이벤트가_된다() {
+        Long sessionId = 7L;
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+
+        givenLoadHistory(sessionId, List.of(), 100L);
+        // RestClient I/O 실패(읽기 타임아웃 포함)는 ResourceAccessException 으로 올라온다.
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willThrow(new org.springframework.web.client.ResourceAccessException("read timeout"));
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        assertThat(events).hasSize(1);
+        MessageStreamEvent.Error error = (MessageStreamEvent.Error) events.get(0);
+        assertThat(error.code()).isEqualTo(AiChatErrorCode.AI_STREAM_INTERRUPTED.name());
+    }
+
+    @Test
     void 정산이_실패해도_성공_이벤트는_그대로_반환된다() {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
