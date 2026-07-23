@@ -26,8 +26,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
-import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -62,14 +60,6 @@ public class AiChatMessageSendService {
         public Long sessionId() {
             return streamCommand.conversationId();
         }
-    }
-
-    /** Task 4 에서 컨트롤러가 SseEmitter 로 전환되면 제거되는 임시 어댑터. */
-    @Deprecated
-    public Flux<MessageStreamEvent> execute(SendMessageCommand command) {
-        PreparedChatTurn prepared = prepare(command);
-        return Flux.defer(() -> Flux.fromIterable(generateAndPersist(prepared))
-                .subscribeOn(Schedulers.boundedElastic()));
     }
 
     /**

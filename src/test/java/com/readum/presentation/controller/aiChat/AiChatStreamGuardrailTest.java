@@ -1,6 +1,6 @@
 package com.readum.presentation.controller.aiChat;
 
-import com.readum.domain.aiChat.dto.AiChatChunk;
+import com.readum.domain.aiChat.dto.AiChatCompletion;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.AiChatClient;
@@ -25,6 +25,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -32,12 +35,12 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -66,6 +69,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AiChatStreamGuardrailTest {
 
     private static final String REJECT_MESSAGE = "요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요.";
+
+    // 테스트에서는 생성 단계를 같은 스레드에서 즉시 실행해 저장 완료 시점을 결정적으로 만든다.
+    // (SseEmitter 는 초기화 전 send 를 버퍼링했다가 초기화 시 재생하므로 MockMvc 와 동작이 맞는다.)
+    @TestConfiguration
+    static class DirectExecutorConfig {
+        @Bean
+        @Primary
+        Executor directAiChatVirtualThreadExecutor() {
+            return Runnable::run;
+        }
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -182,10 +196,8 @@ class AiChatStreamGuardrailTest {
     @Test
     void 통과하면_async_스트림이_시작되고_USER_메시지가_COMPLETED_로_저장된다() throws Exception {
         given(inputModerationClient.check(any(), any())).willReturn(InputModerationResult.passed());
-        given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
-                new AiChatChunk.Token("이 책은"),
-                new AiChatChunk.Completion(10, 5, 15, null)
-        ));
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willReturn(new AiChatCompletion("이 책은", 10, 5, 15, null));
 
         send("이 책의 줄거리를 요약해줘")
                 .andExpect(request().asyncStarted())
@@ -200,9 +212,8 @@ class AiChatStreamGuardrailTest {
                 .willReturn(InputModerationResult.blocked(java.util.List.of("self-harm")));
         given(inputModerationClient.check(eq("정상 질문"), any()))
                 .willReturn(InputModerationResult.passed());
-        given(aiChatClient.stream(any(AiChatStreamCommand.class))).willReturn(Flux.just(
-                new AiChatChunk.Completion(10, 5, 15, null)
-        ));
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willReturn(new AiChatCompletion("정상 응답", 10, 5, 15, null));
 
         send("차단 질문").andExpect(status().isBadRequest());
         send("정상 질문")

@@ -4,6 +4,7 @@ import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
+import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SummaryDraftCommand;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
@@ -37,9 +38,9 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -48,8 +49,13 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import reactor.core.publisher.Flux;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.Executor;
+
+@Slf4j
 @Tag(name = "AI 채팅", description = "AI 와 책 한 권에 대해 대화하는 채팅 세션 및 메시지 관리")
 @RestController
 @RequestMapping("/api/v1/ai-chat")
@@ -66,6 +72,10 @@ public class AiChatController {
     private final SummaryDraftSearchService summaryDraftSearchService;
     private final BookChatSessionSearchService bookChatSessionSearchService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
+    private final Executor aiChatVirtualThreadExecutor;
+
+    // 생성(최대 read 90초) + 여유. 컨테이너 기본 async 타임아웃이 생성보다 짧으면 도중에 닫히므로 명시한다.
+    private static final long SSE_EMITTER_TIMEOUT_MILLIS = 120_000L;
 
     @Operation(
             summary = "AI 채팅 세션 생성",
@@ -203,15 +213,30 @@ public class AiChatController {
             )
     })
     @PostMapping(value = "/sessions/{sessionId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public ResponseEntity<Flux<ServerSentEvent<String>>> sendMessage(
+    public SseEmitter sendMessage(
             @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
-        Flux<ServerSentEvent<String>> stream = aiChatMessageSendService
-                .execute(request.toCommand(userId, sessionId))
-                .map(messageStreamSseSerializer::toServerSentEvent);
-        return ResponseEntity.ok(stream);
+        // 사전 단계는 요청 스레드에서 동기 실행 — 예외는 SSE 시작 전 4xx/5xx JSON 으로 나간다.
+        AiChatMessageSendService.PreparedChatTurn prepared =
+                aiChatMessageSendService.prepare(request.toCommand(userId, sessionId));
+
+        SseEmitter emitter = new SseEmitter(SSE_EMITTER_TIMEOUT_MILLIS);
+        aiChatVirtualThreadExecutor.execute(() -> {
+            List<MessageStreamEvent> events = aiChatMessageSendService.generateAndPersist(prepared);
+            try {
+                for (MessageStreamEvent event : events) {
+                    emitter.send(messageStreamSseSerializer.toSseEvent(event));
+                }
+                emitter.complete();
+            } catch (IOException | IllegalStateException sendError) {
+                // 클라이언트 이탈. 응답은 이미 저장·정산됐으므로 전달 실패만 기록한다 (스펙 §5-1).
+                log.info("SSE 전송 실패(클라이언트 이탈 추정) sessionId={} cause={}", sessionId, sendError.toString());
+                emitter.completeWithError(sendError);
+            }
+        });
+        return emitter;
     }
 
     @Operation(
