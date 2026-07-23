@@ -144,10 +144,11 @@ public class AiChatController {
     @Operation(
             summary = "메시지 전송 (SSE 스트리밍 응답)",
             description = """
-                    사용자 메시지를 즉시 영속화한 뒤 AI 응답을 SSE 로 스트리밍한다.
+                    사용자 메시지를 즉시 영속화한 뒤 AI 응답을 SSE 로 전달한다.
+                    응답은 완성 후 검증(출력 moderation)을 거쳐 한 번에 내려온다.
 
                     SSE 이벤트 종류:
-                    - **token**: 실시간 텍스트 청크. payload `{"delta": "..."}`
+                    - **token**: 응답 텍스트. 완성 응답이 delta 1건으로 내려온다. payload `{"delta": "..."}`
                     - **done**: 스트림 정상 종료. payload `{"tokenCount": {...}, "createdAt": "..."}`
                     - **error**: 스트림 비정상 종료. payload `{"code": "...", "message": "...", "rateLimit": {...}?}`
 
