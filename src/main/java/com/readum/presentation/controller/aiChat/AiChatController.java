@@ -224,8 +224,8 @@ public class AiChatController {
 
         SseEmitter emitter = new SseEmitter(SSE_EMITTER_TIMEOUT_MILLIS);
         aiChatVirtualThreadExecutor.execute(() -> {
-            List<MessageStreamEvent> events = aiChatMessageSendService.generateAndPersist(prepared);
             try {
+                List<MessageStreamEvent> events = aiChatMessageSendService.generateAndPersist(prepared);
                 for (MessageStreamEvent event : events) {
                     emitter.send(messageStreamSseSerializer.toSseEvent(event));
                 }
@@ -234,6 +234,11 @@ public class AiChatController {
                 // 클라이언트 이탈. 응답은 이미 저장·정산됐으므로 전달 실패만 기록한다 (스펙 §5-1).
                 log.info("SSE 전송 실패(클라이언트 이탈 추정) sessionId={} cause={}", sessionId, sendError.toString());
                 emitter.completeWithError(sendError);
+            } catch (RuntimeException unexpectedError) {
+                // generateAndPersist 는 던지지 않는 계약이지만, 계약이 깨져도 클라이언트가
+                // emitter 타임아웃(120초)까지 매달리지 않도록 즉시 종료한다.
+                log.error("AI 채팅 SSE 처리 중 예기치 못한 실패 sessionId={}", sessionId, unexpectedError);
+                emitter.completeWithError(unexpectedError);
             }
         });
         return emitter;
