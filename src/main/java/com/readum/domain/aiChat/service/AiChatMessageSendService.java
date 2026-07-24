@@ -63,7 +63,7 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 사전 단계(요청 스레드, 동기): rate limit → 이력 조회 → 입력 모더레이션 → 예산 예약 → USER 저장 → 전역 게이트.
+     * 사전 단계(요청 스레드, 동기): rate limit → 이력 조회 → 입력 모더레이션 → 예산 예약 → 전역 게이트 → USER 저장.
      * 여기서 던진 예외는 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 변환한다.
      */
     public PreparedChatTurn prepare(SendMessageCommand command) {
@@ -98,8 +98,6 @@ public class AiChatMessageSendService {
         ChatTokenBudget.Result.Granted reservation =
                 (reservationResult instanceof ChatTokenBudget.Result.Granted granted) ? granted : null;
 
-        aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
-
         List<HistoryMessage> withCurrent = new ArrayList<>(loaded.notSummarizedChatRaws().size() + 1);
         withCurrent.addAll(loaded.notSummarizedChatRaws());
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
@@ -108,14 +106,17 @@ public class AiChatMessageSendService {
                 sessionId, withCurrent, bookContext, loaded.contextSummary());
         PreparedChatTurn prepared = new PreparedChatTurn(userId, streamCommand, reservation, estimatedMessageInputTokens);
 
-        // 전역 게이트: 옛 코드처럼 SSE 시작 전에 확보한다. 거절이 예산 예약 뒤에 나므로
-        // 예약을 전액 환불하고 던진다 — 옛 코드의 예약 누수(스펙 §5-5)를 고치는 의도된 개선.
+        // 전역 게이트: 옛 코드처럼 SSE 시작 전에 확보한다. USER 저장보다 먼저 확인해
+        // 거절(429) 시 응답 없는 USER 메시지가 대화 이력에 남지 않게 한다.
+        // 거절이 예산 예약 뒤에 나므로 예약을 전액 환불하고 던진다 — 옛 코드의 예약 누수(스펙 §5-5)를 고치는 의도된 개선.
         try {
             aiChatClient.acquireRateLimitPermit(streamCommand);
         } catch (RuntimeException gateRejection) {
             refundReservation(prepared);
             throw gateRejection;
         }
+
+        aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
         return prepared;
     }

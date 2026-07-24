@@ -63,8 +63,9 @@
    (Redis, 선불 예약 + 실측 보정). 초과 시 429 + Retry-After, 아무것도 저장하지 않는다.
    예산은 **사용자가 보낸 메시지 입력 + 받은 응답 출력만** 계상한다(시스템 프롬프트·재전송 이력·
    요약 등 서비스 오버헤드는 미계상 — 공정성 한도). Redis 장애 시 허용(fail-open).
-6. USER 메시지 `COMPLETED` 저장 → **OpenAI 전역 게이트 확보**(`acquireRateLimitPermit`).
-   게이트 거절이면 예약을 전액 환불하고 429 — SSE 시작 전이라 HTTP JSON 으로 나간다.
+6. **OpenAI 전역 게이트 확보**(`acquireRateLimitPermit`) → USER 메시지 `COMPLETED` 저장.
+   게이트 거절이면 예약을 전액 환불하고 429 — SSE 시작 전이라 HTTP JSON 으로 나가고,
+   USER 저장 전이라 응답 없는 USER 메시지가 대화 이력에 남지 않는다.
 
 생성 단계: LLM 을 **비스트리밍 동기 호출**(`ChatClient.call()`, JDK HttpClient,
 read 타임아웃 90초·자체 재시도 없음)로 부르고, 완성 응답을 token 이벤트 1건 + done 으로

@@ -293,6 +293,8 @@ class AiChatMessageSendServiceTest {
 
         verify(chatTokenBudget).settle(eq(USER_ID), eq(GRANTED), eq(0));
         verify(aiChatClient, never()).generate(any(AiChatStreamCommand.class));
+        // 게이트 거절은 USER 저장 전이어야 한다 — 응답 없는 USER 메시지가 이력에 남지 않는다.
+        verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
     }
 
     @Test
