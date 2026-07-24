@@ -5,69 +5,30 @@ import org.springframework.ai.moderation.ModerationModel;
 import org.springframework.ai.openai.OpenAiModerationModel;
 import org.springframework.ai.openai.api.OpenAiModerationApi;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.webclient.WebClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
-import reactor.netty.http.HttpProtocol;
-import reactor.netty.http.client.HttpClient;
-import reactor.netty.resources.ConnectionProvider;
 
 import java.time.Duration;
 
 /**
- * OpenAI 호출의 두 게이트 경로를 성격에 맞는 클라이언트로 나눈다.
- *  - 채팅 스트리밍: reactor(WebClient) — 진짜 스트리밍이라 논블로킹이 맞다. H2 + idle-evict 적용, 전용 풀.
- *  - 입력 moderation: 단순 요청/응답이라 리액티브가 불필요 → 블로킹 JDK HttpClient 로 구성하고 가상 스레드에서 블로킹한다.
- *    (리액티브로 감싸면 동기 호출이 reactor boundedElastic 스케줄러(기본 10×CPU)로 offload 되어 그 캡에 직렬화된다 — 측정 확인.)
- *
- * 채팅 풀 공통 설정: idle-evict(OpenAI 가 닫기 전에 우리가 먼저 idle 연결 버림 → stale 재사용 차단),
- *           protocol(H2, HTTP11) ALPN 협상(OpenAI=H2, 미지원 서버=HTTP11 fallback).
+ * 입력 moderation 클라이언트 구성.
+ * 단순 요청/응답이라 리액티브가 불필요 → 블로킹 JDK HttpClient 로 구성하고 가상 스레드에서 블로킹한다.
+ * (리액티브로 감싸면 동기 호출이 reactor boundedElastic 스케줄러(기본 10×CPU)로 offload 되어 그 캡에 직렬화된다 — 측정 확인.)
  */
 @Slf4j
 @Configuration
-@EnableConfigurationProperties(OpenAiHttpClientProperties.class)
 public class OpenAiHttpClientConfig {
-
-    private HttpClient build(String poolName, OpenAiHttpClientProperties props) {
-        ConnectionProvider provider = ConnectionProvider.builder(poolName)
-                .maxConnections(props.maxConnections())
-                .maxIdleTime(props.maxIdleTime())
-                .maxLifeTime(props.maxLifeTime())
-                .pendingAcquireTimeout(props.pendingAcquireTimeout())
-                .evictInBackground(props.maxIdleTime())
-                .build();
-        HttpClient client = HttpClient.create(provider);
-        if (props.http2()) {
-            client = client.protocol(HttpProtocol.H2, HttpProtocol.HTTP11);
-        }
-        return client;
-    }
-
-    /** 채팅 스트리밍 전용 H2 풀. */
-    @Bean
-    public HttpClient openAiChatHttpClient(OpenAiHttpClientProperties props) {
-        log.info("[OpenAI HTTP] chat pool: http2={}, maxConnections={}, maxIdleTime={}, maxLifeTime={}",
-                props.http2(), props.maxConnections(), props.maxIdleTime(), props.maxLifeTime());
-        return build("openai-chat", props);
-    }
-
-    @Bean
-    public WebClientCustomizer openAiWebClientConnectionCustomizer(HttpClient openAiChatHttpClient) {
-        return builder -> builder.clientConnector(new ReactorClientHttpConnector(openAiChatHttpClient));
-    }
 
     /**
      * moderation ModerationModel 을 블로킹 JDK HttpClient(HTTP/1.1) 로 구성 (auto-config 대체).
      * reactor 클라이언트로 감싸지 않으므로 boundedElastic offload·그 캡(10×CPU)이 없다 — 가상 스레드에서 그냥 블로킹.
-     * 단순 1회성 호출이라 H2 멀티플렉싱 이점이 없어 HTTP/1.1 로 고정(H2 스택 배제). JDK 자체 연결 풀이라 채팅 reactor 풀과 자연히 분리된다.
+     * 단순 1회성 호출이라 H2 멀티플렉싱 이점이 없어 HTTP/1.1 로 고정(H2 스택 배제). JDK 자체 연결 풀을 그대로 쓴다.
      */
     @Bean
     @Primary

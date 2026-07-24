@@ -46,7 +46,10 @@
 
 ## 주요 시나리오
 
-**메시지 전송 (SSE 스트리밍)** — `AiChatMessageSendService`. 순서가 중요하다:
+**메시지 전송 (SSE 응답)** — `AiChatMessageSendService`. 두 단계로 나뉜다:
+사전 단계 `prepare()`(요청 스레드, 동기 — 예외는 HTTP 4xx/5xx JSON)와
+생성 단계 `generateAndPersist()`(가상 스레드, SSE 시작 후 — 실패는 SSE error 이벤트).
+사전 단계의 순서가 중요하다:
 
 1. 본문 검증 (빈 값·1,000자 초과 → 400)
 2. 상태 무관 USER 메시지 **10초/5건** 폭주 가드 (DB 카운트). 초과 시 429.
@@ -60,23 +63,30 @@
    (Redis, 선불 예약 + 실측 보정). 초과 시 429 + Retry-After, 아무것도 저장하지 않는다.
    예산은 **사용자가 보낸 메시지 입력 + 받은 응답 출력만** 계상한다(시스템 프롬프트·재전송 이력·
    요약 등 서비스 오버헤드는 미계상 — 공정성 한도). Redis 장애 시 허용(fail-open).
-6. USER 메시지 `COMPLETED` 저장 → LLM 스트리밍. 출력 쪽 가드레일(프롬프트
-   주입 패턴, 출력 moderation)은 도메인이 아니라 인프라의 Spring AI advisor
-   체인에 있다 (`infrastructure/ai/openai/advisor/`). advisor 가 차단해도
-   거부 문구가 정상 토큰으로 흘러오므로 메시지는 `COMPLETED` 로 저장된다.
-7. 스트림 에러·클라이언트 중단 시 부분 응답을 `FAILED` 로 저장한다 — 버리지
-   않는 이유는 관측(무엇이 어디까지 나갔는가) 때문이고, `FAILED` 는
-   컨텍스트에서 제외되므로 다음 턴을 오염시키지 않는다.
+6. **OpenAI 전역 게이트 확보**(`acquireRateLimitPermit`) → USER 메시지 `COMPLETED` 저장.
+   게이트 거절이면 예약을 전액 환불하고 429 — SSE 시작 전이라 HTTP JSON 으로 나가고,
+   USER 저장 전이라 응답 없는 USER 메시지가 대화 이력에 남지 않는다.
 
-영속화는 `AiChatMessagePersistService` 로 분리되어 있다. Reactor 콜백에서
-`@Transactional` 이 프록시를 타게 하기 위한 분리다 (같은 클래스 내부 호출은
-트랜잭션이 걸리지 않는 Spring 제약 회피).
+생성 단계: LLM 을 **비스트리밍 동기 호출**(`ChatClient.call()`, JDK HttpClient,
+read 타임아웃 90초·자체 재시도 없음)로 부르고, 완성 응답을 token 이벤트 1건 + done 으로
+SSE 방출한다. 출력 쪽 가드레일(프롬프트 주입 패턴, 출력 moderation)은 도메인이 아니라
+인프라의 Spring AI advisor 체인에 있고 호출 스레드에서 동기로 실행된다. advisor 가
+차단해도 거부 문구가 정상 응답으로 돌아오므로 메시지는 `COMPLETED` 로 저장된다.
+실패 처리: 생성 실패는 빈 본문 `FAILED` + error 이벤트, 저장 실패는 생성된 본문을
+보존한 `FAILED` + error 이벤트. 클라이언트가 도중에 이탈해도 끝까지 생성·저장(`COMPLETED`)
+하고 예산도 실측 계상한다 — 이탈을 감지할 스트림이 없고, 돌아온 사용자가 이력에서
+답을 볼 수 있는 편이 낫다. `FAILED` 는 컨텍스트에서 제외되므로 다음 턴을 오염시키지 않는다.
+
+영속화는 `AiChatMessagePersistService` 로 분리되어 있다. 생성 단계가 요청 트랜잭션
+밖(가상 스레드)에서 실행되므로 `@Transactional` 이 프록시를 타게 하기 위한 분리다
+(같은 클래스 내부 호출은 트랜잭션이 걸리지 않는 Spring 제약 회피).
 
 **세션 제목 생성 (비동기)** — 첫 ASSISTANT 응답 저장 커밋 후
-(`@TransactionalEventListener(AFTER_COMMIT)`) 전용 격벽 스케줄러로 넘겨
-LLM 으로 제목을 만든다. 채팅 저장과 분리한 이유: 제목 생성 LLM 호출의
-실패·지연이 채팅 본편을 롤백하거나 막아서는 안 되기 때문. 격벽 크기는
-thread 32 / thread 당 큐 64 (docs/record/0001 참조).
+(`@TransactionalEventListener(AFTER_COMMIT)`) 공용 가상 스레드 executor
+(`aiChatVirtualThreadExecutor`)로 넘겨 LLM 으로 제목을 만든다. 채팅 저장과 분리한 이유:
+제목 생성 LLM 호출의 실패·지연이 채팅 본편을 롤백하거나 막아서는 안 되기 때문.
+(과거의 전용 격벽 스케줄러는 가상 스레드 전환으로 제거 — 스레드가 희소 자원이 아니게
+되어 격벽의 전제가 사라졌다. 격벽 시절 배경은 docs/record/0001 참조.)
 
 **컨텍스트 요약 (비동기)** — 긴 대화의 호출당 입력 토큰을 유계로 만들기 위해
 과거 원문을 누적 요약으로 대체한다. ASSISTANT 응답 저장 커밋 후

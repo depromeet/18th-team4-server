@@ -3,11 +3,13 @@ package com.readum.presentation.controller.aiChat;
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionDisplayStatus;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
+import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.dto.AiChatSessionResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
 import com.readum.domain.aiChat.dto.MessageResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
+import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.dto.SummaryDraftCommand;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
@@ -44,7 +46,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -57,6 +58,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -114,7 +116,8 @@ class AiChatControllerTest {
                 summarySearchService,
                 summaryDraftSearchService,
                 bookChatSessionSearchService,
-                new MessageStreamSseSerializer(objectMapper)
+                new MessageStreamSseSerializer(objectMapper),
+                Runnable::run // 테스트에서는 같은 스레드에서 즉시 방출
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -341,9 +344,10 @@ class AiChatControllerTest {
                 .andExpect(jsonPath("$.error.message", containsString("4000자")));
     }
 
+    // 사전 단계(prepare) 예외는 SSE 시작 전이므로 GlobalExceptionHandler 의 4xx JSON 으로 나간다.
     @Test
     void 메시지_전송_세션_없으면_404() throws Exception {
-        given(aiChatMessageSendService.execute(any()))
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
                 .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
@@ -355,7 +359,7 @@ class AiChatControllerTest {
 
     @Test
     void 메시지_전송_잠긴_세션이면_400() throws Exception {
-        given(aiChatMessageSendService.execute(any()))
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
                 .willThrow(new BadRequestException(AiChatErrorCode.SESSION_LOCKED));
 
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
@@ -368,7 +372,10 @@ class AiChatControllerTest {
     @Test
     void 메시지_전송_정상_스트림이면_token_과_done_이벤트가_방출된다() throws Exception {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
-        given(aiChatMessageSendService.execute(any())).willReturn(Flux.just(
+        AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
+                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
+        given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
                 new MessageStreamEvent.Token("alpha"),
                 new MessageStreamEvent.Token(" beta"),
                 new MessageStreamEvent.Done(
@@ -398,8 +405,41 @@ class AiChatControllerTest {
     }
 
     @Test
+    void SSE_전송_여부와_무관하게_생성과_저장_파이프라인이_실행된다() throws Exception {
+        // 스펙 §5-1: 클라이언트가 SSE 수신 도중 이탈하더라도 생성·저장 파이프라인은 완주해야 한다.
+        // 동기 경로에서는 generateAndPersist 가 SseEmitter 쓰기와 무관하게 먼저 완료되므로
+        // prepare → generateAndPersist 호출 순서 자체를 단언한다.
+        LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
+        AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
+                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
+        given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
+                new MessageStreamEvent.Token("응답"),
+                new MessageStreamEvent.Done(
+                        new MessageStreamEvent.TokenCount(10, 5, 15),
+                        createdAt)
+        ));
+
+        MvcResult initial = mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(initial))
+                .andExpect(status().isOk());
+
+        // SSE 전달 성공 여부와 무관하게 생성·저장 파이프라인이 실제로 호출됐음을 단언
+        verify(aiChatMessageSendService).generateAndPersist(preparedTurn);
+    }
+
+    @Test
     void 메시지_전송_스트림_에러_이벤트도_정상_방출된다() throws Exception {
-        given(aiChatMessageSendService.execute(any())).willReturn(Flux.just(
+        AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
+                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
+        given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
                 new MessageStreamEvent.Token("부분"),
                 MessageStreamEvent.Error.of(
                         AiChatErrorCode.AI_STREAM_INTERRUPTED.name(),

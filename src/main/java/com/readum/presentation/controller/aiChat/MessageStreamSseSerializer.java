@@ -5,8 +5,8 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.exception.RateLimitInfo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -26,7 +26,7 @@ public class MessageStreamSseSerializer {
 
     private final ObjectMapper objectMapper;
 
-    public ServerSentEvent<String> toServerSentEvent(MessageStreamEvent event) {
+    public SseEmitter.SseEventBuilder toSseEvent(MessageStreamEvent event) {
         return switch (event) {
             case MessageStreamEvent.Token token -> sse("token", new TokenPayload(token.delta()));
             case MessageStreamEvent.Done done -> sse("done", toDonePayload(done));
@@ -34,11 +34,8 @@ public class MessageStreamSseSerializer {
         };
     }
 
-    private ServerSentEvent<String> sse(String eventName, Object payload) {
-        return ServerSentEvent.<String>builder()
-                .event(eventName)
-                .data(toJson(payload))
-                .build();
+    private SseEmitter.SseEventBuilder sse(String eventName, Object payload) {
+        return SseEmitter.event().name(eventName).data(toJson(payload));
     }
 
     private DonePayload toDonePayload(MessageStreamEvent.Done done) {

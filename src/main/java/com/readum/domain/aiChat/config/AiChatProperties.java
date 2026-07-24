@@ -13,8 +13,7 @@ public record AiChatProperties(
         @Valid Context context,
         @Valid MessageRule message,
         @Valid RateLimit rateLimit,
-        @Valid TokenBudget tokenBudget,
-        @Valid TitleGeneration titleGeneration
+        @Valid TokenBudget tokenBudget
 ) {
 
     /**
@@ -62,16 +61,4 @@ public record AiChatProperties(
     ) {
     }
 
-    /**
-     * 제목 생성 전용 스케줄러 크기.
-     * 제목 생성은 사용자 응답 경로 밖에서 도는 백그라운드 작업이라 latency 가 중요하지 않다.
-     * 영속화(Done 이벤트 직전의 짧은 JDBC)가 쓰는 전역 boundedElastic 과 같은 풀을 쓰면,
-     * 첫 메시지가 몰릴 때 느린 제목 생성 LLM 호출이 스레드를 다 점유해 영속화가 큐에서 밀린다(격벽 부재).
-     * 그래서 전용 풀로 분리한다:
-     * - threadCap : 동시 제목 생성 수의 상한(동시에 빌려 쓰는 OpenAI 연결·DB 커넥션 수도 함께 제한). 저빈도라 작게 둬도 충분.
-     * - queueCap  : reactor 의 newBoundedElastic 에서 이 값은 backing thread 1개당 큐 한도(per-thread)다.
-     *               따라서 전역 backlog 상한 = threadCap × queueCap 이므로, 둘의 곱이 의도한 한도가 되도록 잡는다.
-     */
-    public record TitleGeneration(@Positive int threadCap, @Positive int queueCap) {
-    }
 }

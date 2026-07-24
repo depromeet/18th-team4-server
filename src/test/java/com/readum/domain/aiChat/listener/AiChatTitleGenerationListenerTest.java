@@ -6,7 +6,8 @@ import com.readum.domain.aiChat.service.AiChatSessionTitleService;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import reactor.core.scheduler.Schedulers;
+
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -18,9 +19,10 @@ import static org.mockito.Mockito.verify;
 class AiChatTitleGenerationListenerTest {
 
     private final AiChatSessionTitleService aiChatSessionTitleService = mock(AiChatSessionTitleService.class);
-    // 즉시 실행 스케줄러로 offload 를 동기화해 검증을 단순화한다(운영에선 제목 생성 전용 boundedElastic).
+    // 즉시 실행 executor 로 offload 를 동기화해 검증을 단순화한다(운영에선 가상 스레드 executor).
+    private final Executor aiChatVirtualThreadExecutor = Runnable::run;
     private final AiChatTitleGenerationListener listener =
-            new AiChatTitleGenerationListener(aiChatSessionTitleService, Schedulers.immediate());
+            new AiChatTitleGenerationListener(aiChatSessionTitleService, aiChatVirtualThreadExecutor);
 
     @Test
     void 이벤트를_받으면_유저_첫_질문으로_제목_생성을_실행한다() {

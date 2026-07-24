@@ -45,9 +45,6 @@ ai-chat:
     window-hours: 4
     tokens-per-window: 20000
     estimated-output-tokens: 512
-  title-generation:
-    thread-cap: 32
-    queue-cap: 64
 
 aladin:
   ttb-key: test-ttb-key
