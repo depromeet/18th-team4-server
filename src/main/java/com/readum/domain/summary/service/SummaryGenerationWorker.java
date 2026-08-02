@@ -9,6 +9,7 @@ import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.domain.summary.exception.SummaryErrorCode;
 import com.readum.domain.summary.out.AiQuotaCooldown;
+import com.readum.domain.summary.out.ShutdownSignal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -23,6 +24,7 @@ import java.util.UUID;
  * 그 사이(트랜잭션 밖)에서 외부 AI(OpenAI)를 부른다. 분당 예산·quota 쿨다운은 모두 전역 게이트가
  * AiSummaryClientImpl 안에서 검사한다 — 포화 시 burst 429, quota 소진 시 쿨다운(Redis)으로 던져진다.
  * 워커는 쿨다운 중엔 job 을 선점하지 않아(헛선점·attempt 소진 방지), 계정 전역 백오프가 전 경로 공통이다.
+ * 종료 중에도 같은 이유로 선점하지 않는다 — 마칠 시간이 없는 작업을 집으면 벌점을 안고 재시도되기 때문(ShutdownSignal).
  *
  * 실패 분류:
  * - 세션 과대(추정 토큰 > maxRequestTokens) → 호출 전 즉시 FAILED (fail-fast)
@@ -42,10 +44,11 @@ public class SummaryGenerationWorker {
     private final SummaryJobLifecycleService lifecycleService;
     private final AiSummaryClient aiSummaryClient;
     private final AiQuotaCooldown quotaCooldown;
+    private final ShutdownSignal shutdownSignal;
     private final SummaryTokenEstimator tokenEstimator;
     private final SummaryJobProperties properties;
 
-    /** 처리할 SYNC 작업이 없을 때까지(또는 전역 차단 전까지) 계속 선점·처리한다. */
+    /** 처리할 SYNC 작업이 없을 때까지(또는 전역 차단·종료 전까지) 계속 선점·처리한다. */
     public void processUntilEmpty() {
         while (processOne()) {
             // 처리할 게 있는 동안 계속
@@ -54,6 +57,11 @@ public class SummaryGenerationWorker {
 
     /** SYNC 작업 하나를 시도. 처리했으면 true, 없거나 차단 중이면 false. */
     public boolean processOne() {
+        if (shutdownSignal.isShuttingDown()) {
+            // 종료 중 — 새 작업을 집지 않는다. 지금 집으면 마칠 시간이 없어 벌점을 안고 재시도되거나
+            // 점유 상태로 남는다. 이미 손에 든 작업은 이 검사를 지났으므로 끝까지 마친다.
+            return false;
+        }
         if (quotaCooldown.isCoolingDown()) {
             // 계정 quota 쿨다운 중 — job 을 선점하지 않는다(헛선점·attempt 소진 방지). 다음 dispatch 때 재확인.
             return false;
