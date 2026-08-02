@@ -10,6 +10,11 @@ package com.readum.domain.summary.out;
  *
  * <p>구현은 Spring 컨테이너의 종료 이벤트를 받는다. 워커(domain)가 infrastructure 를 직접 쓰지 못하는
  * 계층 규칙 때문에 Port 로 둔다 — 같은 이유로 존재하는 {@link AiQuotaCooldown} 과 같은 자리다.
+ *
+ * <p>쓰는 곳이 감상문 워커만은 아니다. 채팅 컨텍스트 요약 워커(domain/aiChat 의 ContextSummaryWorker)도
+ * 같은 골격이라 같은 검사를 한다. 특정 기능에 매인 신호가 아니라 앱 전체의 상태를 묻는 것이므로,
+ * 두 워커가 공유하는 것이 정상이다 — 바로 옆의 {@link AiQuotaCooldown} 이 이미 같은 모양으로
+ * 두 워커에 공유되고 있어 그 배치를 따랐다.
  */
 public interface ShutdownSignal {
 
