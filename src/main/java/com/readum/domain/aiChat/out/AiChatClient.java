@@ -14,7 +14,7 @@ public interface AiChatClient {
         record Counted(String model, long epochMinute, int estimatedTokens) implements RateLimitPermit {
         }
 
-        /** 계상 없는 통과(게이트 fail-open) — release 는 아무것도 하지 않는다. */
+        /** 게이트가 검사 없이 통과시킨 경우 — 계상된 것이 없으므로 release 는 아무것도 하지 않는다. */
         record Uncounted() implements RateLimitPermit {
         }
     }
@@ -29,7 +29,7 @@ public interface AiChatClient {
     /**
      * 확보했던 게이트 계상을 보상 차감한다 — 생성이 실패했거나 시작되지 않아
      * OpenAI 가 실제로 토큰을 소모하지 않은 경우에만 호출한다.
-     * 계상 없는 permit(fail-open 통과)이면 아무것도 하지 않는다.
+     * 게이트가 검사 없이 통과시켜 계상이 없는 permit 이면 아무것도 하지 않는다.
      */
     void releaseRateLimitPermit(RateLimitPermit permit);
 

@@ -28,9 +28,6 @@ class AiChatClientImplTest {
     @Mock
     private OpenAiRateLimitGuard rateLimitGuard;
 
-    @Mock
-    private OpenAiRequestGate requestGate;
-
     private final TokenCounter tokenCounter = text -> 0;
 
     private final AiChatProperties aiChatProperties = new AiChatProperties(
@@ -45,15 +42,20 @@ class AiChatClientImplTest {
     @BeforeEach
     void setUp() {
         aiChatClient = new AiChatClientImpl(
-                chatClient, auditLogger, rateLimitGuard, requestGate, aiChatProperties, tokenCounter);
+                chatClient, auditLogger, rateLimitGuard, aiChatProperties, tokenCounter);
     }
+
+    // 확보 쪽 번역(가드의 Optional → Counted/Uncounted)은 여기서 직접 단언하지 않는다 — 의도된 공백이다.
+    // acquireRateLimitPermit 은 @Value 로 주입되는 모델 이름·시스템 프롬프트 파일에 기대므로
+    // 그 두 필드를 채우지 않고는 단위 수준으로 구성할 수 없다 (리플렉션으로 주입하지는 않는다).
+    // 확보 쪽은 OpenAiRateLimitGuardTest(Optional 반환)와 AiChatStreamGuardrailTest(통합)가 받친다.
 
     @Test
     void 계상된_permit_의_release_는_확보_시점의_분_키_내역으로_게이트_보상_차감을_호출한다() {
         aiChatClient.releaseRateLimitPermit(
                 new AiChatClient.RateLimitPermit.Counted("gpt-4o-mini", 29_000_000L, 4500));
 
-        verify(requestGate).compensate(
+        verify(rateLimitGuard).compensate(
                 new OpenAiRequestGate.GateReservation("gpt-4o-mini", 29_000_000L, 4500));
     }
 
@@ -61,6 +63,6 @@ class AiChatClientImplTest {
     void 계상_없는_permit_의_release_는_게이트에_접근하지_않는다() {
         aiChatClient.releaseRateLimitPermit(new AiChatClient.RateLimitPermit.Uncounted());
 
-        verifyNoInteractions(requestGate);
+        verifyNoInteractions(rateLimitGuard);
     }
 }

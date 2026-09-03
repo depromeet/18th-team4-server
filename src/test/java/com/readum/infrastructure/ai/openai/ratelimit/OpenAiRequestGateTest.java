@@ -3,6 +3,7 @@ package com.readum.infrastructure.ai.openai.ratelimit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.QueryTimeoutException;
@@ -11,6 +12,7 @@ import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -23,6 +25,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -159,13 +162,24 @@ class OpenAiRequestGateTest {
     }
 
     @Test
-    void 보상_차감은_예약이_담고_있는_분_키에서_요청_1과_추정_토큰을_되돌린다() {
-        long reservedMinute = 29_000_000L;
+    void 확보가_쓴_분_키에_그대로_보상_차감해_순증분이_0_이_된다() {
+        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(10L);
+        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(5000L);
 
-        gate.compensate(new OpenAiRequestGate.GateReservation(MODEL, reservedMinute, 5000));
+        OpenAiRequestGate.Decision decision = gate.tryAcquire(MODEL, 5000);
+        gate.compensate(((OpenAiRequestGate.Decision.Permitted) decision).reservation());
 
-        verify(valueOperations).increment("ai:global:" + MODEL + ":rpm:" + reservedMinute, -1L);
-        verify(valueOperations).increment("ai:global:" + MODEL + ":tpm:" + reservedMinute, -5000L);
+        // 확보(rpm, tpm) → 보상(rpm, tpm) 네 번의 INCRBY 를 잡아, 보상이 확보와 같은 키를 쓰고
+        // 증분의 합이 0 이 되는지 본다 — 분이 넘어가도 확보 당시의 창을 되돌린다는 계약.
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Long> deltaCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(valueOperations, times(4)).increment(keyCaptor.capture(), deltaCaptor.capture());
+        List<String> keys = keyCaptor.getAllValues();
+        List<Long> deltas = deltaCaptor.getAllValues();
+        assertThat(keys.get(2)).isEqualTo(keys.get(0));
+        assertThat(keys.get(3)).isEqualTo(keys.get(1));
+        assertThat(deltas.get(0) + deltas.get(2)).isZero();
+        assertThat(deltas.get(1) + deltas.get(3)).isZero();
     }
 
     @Test

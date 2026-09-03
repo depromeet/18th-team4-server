@@ -117,7 +117,7 @@ class AiChatStreamGuardrailTest {
     void setUp() {
         given(openAiRequestGate.tryAcquire(anyString(), anyInt()))
                 .willReturn(new OpenAiRequestGate.Decision.Permitted(
-                        new OpenAiRequestGate.GateReservation("gpt-4o-mini", 0L, 0)));
+                        new OpenAiRequestGate.GateReservation("gpt-4o-mini", 29_000_000L, 1000)));
 
         User user = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
         userId = user.getId();

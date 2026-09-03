@@ -51,7 +51,7 @@ public class AiChatMessageSendService {
 
     /**
      * 사전 단계 결과 — 생성 단계(generateAndPersist)에 필요한 모든 문맥. 예약(reservation)은 항상 존재한다.
-     * rateLimitPermit 은 전역 게이트 확보 결과로 항상 존재한다 (게이트 fail-open 통과면 계상 없는 permit).
+     * rateLimitPermit 은 전역 게이트 확보 결과로 항상 존재한다 (게이트가 검사 없이 통과시켰다면 계상 없는 permit).
      */
     public record PreparedChatTurn(
             Long userId,
@@ -162,7 +162,11 @@ public class AiChatMessageSendService {
             log.error("AI 응답 생성 실패 sessionId={} error={}", turn.sessionId(), generateError.toString());
             persistFailedQuietly(turn.sessionId(), "", null);
             refundReservation(turn);
-            // 생성 실패는 OpenAI 가 토큰을 소모하지 않았으므로 게이트 분당 계상도 보상 차감한다.
+            // 생성 실패면 게이트 분당 계상을 보상 차감한다. 실패의 대부분(연결 실패·4xx·429)은
+            // OpenAI 가 토큰을 소모하지 않아 보상이 실제와 맞지만, HTTP 200 을 받은 뒤 응답을 읽거나
+            // 변환하다 실패한 경우는 이미 과금된 뒤라 실제보다 많이 되돌리는 셈이 된다. 그래도 현재 분
+            // 예산이 부풀지는 않는다 — 보상은 확보 당시의 분 키를 되돌리므로, 분을 넘겨 도착한 실패
+            // (읽기 타임아웃 90초가 대표 사례)는 이미 지나간 창을 건드린다.
             // 반대로 생성 성공 후 저장 실패는 보상하지 않는다 — 토큰이 실제로 소모돼 계상이 맞다.
             releaseRateLimitPermitQuietly(turn.rateLimitPermit(), turn.sessionId());
             return List.of(buildErrorEvent(generateError));

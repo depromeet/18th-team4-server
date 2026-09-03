@@ -45,7 +45,6 @@ public class AiChatClientImpl implements AiChatClient {
     private final ChatClient chatClient;
     private final AiPromptAuditLogger auditLogger;
     private final OpenAiRateLimitGuard rateLimitGuard;
-    private final OpenAiRequestGate requestGate;
     private final AiChatProperties aiChatProperties;
     private final TokenCounter tokenCounter;
 
@@ -86,7 +85,7 @@ public class AiChatClientImpl implements AiChatClient {
     @Override
     public void releaseRateLimitPermit(RateLimitPermit permit) {
         if (permit instanceof RateLimitPermit.Counted counted) {
-            requestGate.compensate(new OpenAiRequestGate.GateReservation(
+            rateLimitGuard.compensate(new OpenAiRequestGate.GateReservation(
                     counted.model(), counted.epochMinute(), counted.estimatedTokens()));
         }
     }

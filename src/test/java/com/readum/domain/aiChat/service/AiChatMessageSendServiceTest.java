@@ -297,7 +297,7 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 생성_실패면_게이트_계상을_보상_차감한다() {
+    void 생성_에러면_게이트_계상을_보상_차감한다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generate(any(AiChatStreamCommand.class)))
@@ -531,7 +531,7 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 생성_도중_에러가_나면_FAILED_가_저장되고_Error_이벤트가_반환된다() {
+    void 생성_에러면_FAILED_가_저장되고_Error_이벤트가_반환된다() {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
 
