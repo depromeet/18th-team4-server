@@ -345,6 +345,9 @@ class AiChatMessageSendServiceTest {
                 .asInstanceOf(InstanceOfAssertFactories.type(NotFoundException.class))
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
+
+        // 예약 이후의 실패는 명시된 거절 경로(moderation·게이트)가 아니어도 전액 환불된다 — 공통 환불 경로의 계약.
+        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
     }
 
     @Test

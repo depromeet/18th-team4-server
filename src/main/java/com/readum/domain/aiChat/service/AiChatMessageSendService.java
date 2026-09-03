@@ -200,14 +200,18 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 실패·게이트 거절: 사용자 과실이 아니므로 예약 전액 환불 (기존 정책 동일).
-     * 환불 실패는 삼킨다 — 게이트 거절 경로에서 던지면 429 가 500 으로 둔갑하고,
-     * 생성 실패 경로에서 던지면 error 이벤트 전달이 막힌다.
+     * 생성·저장 실패: 사용자 과실이 아니므로 예약 전액 환불 (기존 정책 동일).
+     * 사전 단계의 거절(게이트 거절·moderation 차단 등)은 여기가 아니라
+     * prepare() 의 공통 환불 경로가 담당한다.
      */
     private void refundReservation(PreparedChatTurn turn) {
         refundQuietly(turn.userId(), turn.reservation(), turn.sessionId());
     }
 
+    /**
+     * 환불 실패는 삼킨다 — 사전 단계 거절 경로에서 던지면 원래의 4xx 가 500 으로 둔갑하고,
+     * 생성·저장 실패 경로에서 던지면 error 이벤트 전달이 막힌다.
+     */
     private void refundQuietly(Long userId, UserTokenBudgetWriter.ReserveResult.Granted reservation, Long sessionId) {
         try {
             userTokenBudgetWriter.refund(userId, reservation.periodKey(), reservation.reservedTokens());

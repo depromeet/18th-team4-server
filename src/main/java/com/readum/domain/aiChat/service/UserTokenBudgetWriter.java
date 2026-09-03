@@ -5,6 +5,7 @@ import com.readum.model.aiChat.entity.AiChatTokenSettlement;
 import com.readum.model.aiChat.repository.AiChatTokenSettlementRepository;
 import com.readum.model.aiChat.repository.UserTokenBudgetRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,7 +20,10 @@ import java.time.ZoneId;
  * (transaction.md — 외부 호출이 섞인 서비스 흐름에서 DB 쓰기만 분리).
  * 원장은 DB 가 정본이라 우회(fail-open) 경로가 없다 — DB 예외는 그대로 전파한다
  * (DB 장애면 채팅 요청 자체가 어차피 실패한다).
+ * 시간 출처: period_key 와 행 타임스탬프 모두 KST 로 통일한다 — 호스트 시간대가 UTC 여도
+ * 감사용 원장 한 행 안에서 period_key(KST 날짜)와 created_at 이 어긋나지 않게 한다.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 class UserTokenBudgetWriter {
@@ -48,7 +52,7 @@ class UserTokenBudgetWriter {
     @Transactional
     public ReserveResult reserve(Long userId, int estimatedTokens) {
         TokenBudgetPeriod period = TokenBudgetPeriod.current(Clock.system(ZONE_KST));
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZONE_KST);
         userTokenBudgetRepository.upsertLedgerRow(
                 userId, period.periodKey(), aiChatProperties.tokenBudget().dailyTokens(), now);
         int reservedRowCount = userTokenBudgetRepository.reserveIfWithinBudget(
@@ -69,14 +73,21 @@ class UserTokenBudgetWriter {
     public void settle(Long userId, int periodKey, Long messageId, int reservedTokens, int actualTotalTokens) {
         aiChatTokenSettlementRepository.saveAndFlush(
                 AiChatTokenSettlement.create(userId, messageId, actualTotalTokens));
-        userTokenBudgetRepository.applyUsedTokenDelta(
-                userId, periodKey, (long) actualTotalTokens - reservedTokens, LocalDateTime.now());
+        int adjustedRowCount = userTokenBudgetRepository.applyUsedTokenDelta(
+                userId, periodKey, (long) actualTotalTokens - reservedTokens, LocalDateTime.now(ZONE_KST));
+        if (adjustedRowCount == 0) {
+            log.warn("토큰 예산 보정 대상 원장 행 없음 — 보정 미반영 userId={} periodKey={} messageId={}",
+                    userId, periodKey, messageId);
+        }
     }
 
     /** 환불: 예약분 전액 차감 — moderation 차단/불능, 게이트 거절, 생성·저장 실패 경로에서 호출된다. */
     @Transactional
     public void refund(Long userId, int periodKey, int reservedTokens) {
-        userTokenBudgetRepository.applyUsedTokenDelta(
-                userId, periodKey, -((long) reservedTokens), LocalDateTime.now());
+        int adjustedRowCount = userTokenBudgetRepository.applyUsedTokenDelta(
+                userId, periodKey, -((long) reservedTokens), LocalDateTime.now(ZONE_KST));
+        if (adjustedRowCount == 0) {
+            log.warn("토큰 예산 환불 대상 원장 행 없음 — 환불 미반영 userId={} periodKey={}", userId, periodKey);
+        }
     }
 }

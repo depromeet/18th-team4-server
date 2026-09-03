@@ -62,5 +62,6 @@ public interface UserTokenBudgetRepository extends JpaRepository<UserTokenBudget
             @Param("usedTokenDelta") long usedTokenDelta,
             @Param("now") LocalDateTime now);
 
+    /** 현재 운영 경로에서는 미사용 — 통합 테스트가 커밋 경계 밖에서 원장 상태를 단언하는 용도. */
     Optional<UserTokenBudget> findByUserIdAndPeriodKey(Long userId, int periodKey);
 }
