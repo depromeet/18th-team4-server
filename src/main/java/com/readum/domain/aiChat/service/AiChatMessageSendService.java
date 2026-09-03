@@ -269,9 +269,11 @@ public class AiChatMessageSendService {
      */
     private void verifyUserMessageRateLimit(Long userId) {
         AiChatProperties.RateLimit limit = aiChatProperties.rateLimit();
-        UserMessageRateLimiter.Result rateLimitResult = userMessageRateLimiter.tryConsume(userId);
-        if (rateLimitResult instanceof UserMessageRateLimiter.Result.Denied) {
-            throw rateLimitExceeded(limit.countPeriodSeconds(), limit.maxMessageCount());
+        switch (userMessageRateLimiter.tryConsume(userId)) {
+            case UserMessageRateLimiter.Result.Denied() ->
+                    throw rateLimitExceeded(limit.countPeriodSeconds(), limit.maxMessageCount());
+            case UserMessageRateLimiter.Result.Allowed() -> { }
+            case UserMessageRateLimiter.Result.Bypassed() -> { }
         }
     }
 

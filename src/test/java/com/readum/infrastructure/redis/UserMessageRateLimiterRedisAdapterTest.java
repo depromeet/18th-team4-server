@@ -109,6 +109,27 @@ class UserMessageRateLimiterRedisAdapterTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void 스크립트_본문은_창밖_제거_건수_검사_기록_만료를_수행하고_한도_비교는_미만_이다() {
+        givenScriptReturns(1L);
+
+        adapter.tryConsume(USER_ID);
+
+        ArgumentCaptor<RedisScript<Long>> scriptCaptor = ArgumentCaptor.forClass(RedisScript.class);
+        verify(stringRedisTemplate).execute(scriptCaptor.capture(), anyList(), any(), any(), any(), any());
+        // 본문이 여기서 읽히면 리소스 파일을 초기화 시점에 즉시 읽었다는 것도 함께 검증된다
+        // (지연 평가로 돌아가면 파일 누락이 첫 요청 500 으로 샌다 — 실동작 판정은 redis-cli EVAL 로 실검증).
+        String scriptText = scriptCaptor.getValue().getScriptAsString();
+        assertThat(scriptText)
+                .contains("ZREMRANGEBYSCORE")
+                .contains("ZCARD")
+                .contains("ZADD")
+                .contains("PEXPIRE")
+                .contains("countInWindow < maxCount") // 5건째까지 허용, 6건째 거절 — <= 로 바뀌면 한도보다 한 건 더 허용된다
+                .doesNotContain("<=");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void Redis_장애면_Bypassed_로_허용한다() {
         given(stringRedisTemplate.execute(
                 any(RedisScript.class), anyList(), any(), any(), any(), any()))

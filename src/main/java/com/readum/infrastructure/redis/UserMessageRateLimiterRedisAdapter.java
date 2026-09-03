@@ -8,9 +8,11 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.scripting.support.ResourceScriptSource;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
@@ -60,11 +62,20 @@ public class UserMessageRateLimiterRedisAdapter implements UserMessageRateLimite
         }
     }
 
+    /**
+     * 스크립트 본문을 초기화 시점에 즉시 읽는다 — 지연 평가(ResourceScriptSource)면 파일 누락이
+     * 기동은 통과하고 첫 요청에서 ScriptingException(DataAccessException 아님)으로 터져
+     * fail-open 을 비켜가 전면 500 이 된다. 즉시 읽으면 누락이 앱 기동 실패로 당겨진다.
+     */
     private static DefaultRedisScript<Long> loadScript() {
-        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
-        script.setScriptSource(new ResourceScriptSource(
-                new ClassPathResource("redis/user-message-rate-limit.lua")));
-        script.setResultType(Long.class);
-        return script;
+        ClassPathResource scriptResource = new ClassPathResource("redis/user-message-rate-limit.lua");
+        String scriptText;
+        try (InputStream scriptStream = scriptResource.getInputStream()) {
+            scriptText = new String(scriptStream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "메시지 rate limit Lua 스크립트 로드 실패: " + scriptResource.getPath(), e);
+        }
+        return new DefaultRedisScript<>(scriptText, Long.class);
     }
 }

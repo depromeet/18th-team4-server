@@ -48,6 +48,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class AiChatMessageSendServiceTest {
@@ -191,8 +192,9 @@ class AiChatMessageSendServiceTest {
                 .extracting(TooManyRequestsException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED);
 
-        verify(persistService, never()).loadHistory(anyLong(), anyLong());
-        verify(aiChatClient, never()).generate(any(AiChatStreamCommand.class));
+        // rate limit 이 첫 관문이므로 이후 협력자는 하나도 호출되지 않아야 한다.
+        verifyNoInteractions(persistService, aiChatClient, inputModerationClient,
+                chatTokenBudget, userBookRepository, bookRepository);
     }
 
     @Test

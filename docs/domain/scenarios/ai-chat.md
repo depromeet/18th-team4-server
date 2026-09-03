@@ -60,7 +60,7 @@ flowchart TD
     A["POST /api/v1/ai-chat/sessions/{sessionId}/messages"] --> B{"AiChatRateLimitInterceptor — userId 키, 분당 20 · 일 200 (dev, infrastructure)"}
     B -->|한도 초과| C["429 + 에러 JSON — SSE 시작 전"]
     B -->|통과| D["AiChatMessageSendService.execute"]
-    D --> E{"본문 검증 — 공백 정규화 후 빈 값 또는 4,000자 초과"}
+    D --> E{"본문 검증 — 공백 정규화 후 빈 값 또는 1,000자 초과"}
     E -->|위반| F["400 MESSAGE_CONTENT_BLANK / MESSAGE_CONTENT_TOO_LONG"]
     E -->|통과| G{"Redis ZSET 폭주 가드 — 10초 내 전송 시도 5건 (Lua 로 검사·기록 원자 수행)"}
     G -->|초과| H["429 USER_RATE_LIMIT_EXCEEDED + Retry-After 헤더"]
