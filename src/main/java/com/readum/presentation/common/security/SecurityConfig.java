@@ -4,6 +4,7 @@ import com.readum.domain.auth.service.SessionAuthenticationService;
 import com.readum.domain.auth.service.TokenAuthenticationService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -21,14 +22,16 @@ public class SecurityConfig {
             TokenAuthenticationService tokenAuthenticationService,
             SessionAuthenticationService sessionAuthenticationService,
             JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint,
-            JwtAccessDeniedHandler jwtAccessDeniedHandler
+            JwtAccessDeniedHandler jwtAccessDeniedHandler,
+            Environment environment
     ) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .httpBasic(httpBasic -> httpBasic.disable())
                 .formLogin(formLogin -> formLogin.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
+                .authorizeHttpRequests(auth -> {
+                        auth
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                         // 쿠키 발급(가입)은 익명 접근이 필요한 유일한 사용자 엔드포인트
@@ -48,11 +51,16 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**"
-                        ).permitAll()
+                        ).permitAll();
+                        // bench-bridge 프로파일 전용 실험 엔드포인트(BenchModerationController).
+                        // 프로파일이 꺼져 있으면 이 규칙 자체가 등록되지 않아 보안 동작이 평소와 완전히 같다.
+                        if (environment.matchesProfiles("bench-bridge")) {
+                            auth.requestMatchers("/bench/**").permitAll();
+                        }
                         // 신원 해석은 인증 필터(JWT/세션 쿠키)가, 인증 강제는 여기가 담당한다.
                         // 미인증 요청은 JwtAuthenticationEntryPoint 가 401 로 응답한다.
-                        .anyRequest().authenticated()
-                )
+                        auth.anyRequest().authenticated();
+                })
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(jwtAuthenticationEntryPoint)
                         .accessDeniedHandler(jwtAccessDeniedHandler)
