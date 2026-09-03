@@ -66,7 +66,7 @@ public class BenchModerationController {
                         .subscribeOn(Schedulers.boundedElastic())
                         .block();
                 case "current" -> inputModerationClient.check(request.content(), null);
-                default -> null;
+                case null, default -> null;
             };
             long elapsedMs = elapsedMs(startNanos);
             if (result == null) {

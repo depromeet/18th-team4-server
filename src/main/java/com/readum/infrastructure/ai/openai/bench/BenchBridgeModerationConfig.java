@@ -3,6 +3,7 @@ package com.readum.infrastructure.ai.openai.bench;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import com.readum.infrastructure.ai.openai.moderation.OpenAiInputModerationClientImpl;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.openai.OpenAiModerationModel;
 import org.springframework.ai.openai.api.OpenAiModerationApi;
@@ -36,6 +37,30 @@ public class BenchBridgeModerationConfig {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(30);
+    private static final String REAL_OPENAI_HOST = "api.openai.com";
+
+    @Value("${spring.ai.openai.base-url:https://api.openai.com}")
+    private String openAiBaseUrl;
+
+    /**
+     * bench-bridge 프로파일로 기동할 때 실제 OpenAI 서버(api.openai.com)로 요청이 새는 것을 막는다.
+     * bench-bridge 는 로컬 브리지 서버(bench.bridge.base-url)를 대상으로 부하 재현을 하기 위한 구성인데,
+     * spring.ai.openai.base-url 이 미설정 상태로 남아 있으면 mode="current" 요청이 실제 OpenAI 로 나가면서도
+     * 겉으로는 정상 응답처럼 보인다(과금·실 서비스 영향이 발생해도 증상이 드러나지 않는다).
+     * 그래서 기동 시점에 base-url 을 검사해, 실제 OpenAI 를 가리키면 애초에 기동을 실패시킨다.
+     */
+    @PostConstruct
+    public void verifyNotPointingRealOpenAi() {
+        if (openAiBaseUrl != null && openAiBaseUrl.contains(REAL_OPENAI_HOST)) {
+            throw new IllegalStateException(
+                    "bench-bridge 프로파일이 실제 OpenAI 서버(%s)를 가리키고 있습니다 (spring.ai.openai.base-url=%s). "
+                            .formatted(REAL_OPENAI_HOST, openAiBaseUrl)
+                            + "bench-bridge 는 로컬 브리지 서버를 대상으로 부하를 재현하는 실험 프로파일이므로, "
+                            + "application-bench-bridge.yml 또는 환경변수로 spring.ai.openai.base-url 을 로컬 브리지 주소로 명시적으로 설정하라."
+            );
+        }
+        log.info("[bench-bridge] mode=current 대상 spring.ai.openai.base-url={}", openAiBaseUrl);
+    }
 
     @Bean(defaultCandidate = false)
     public InputModerationClient benchBridgeInputModerationClient(
