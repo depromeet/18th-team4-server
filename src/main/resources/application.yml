@@ -73,8 +73,7 @@ ai-chat:
     count-period-seconds: 10 # 메시지 전송 시도 카운트 기간 (초). Redis ZSET 슬라이딩 윈도우 길이.
     max-message-count: 5     # 기간 안에 허용되는 전송 시도 수. 초과 시 HTTP 429.
   token-budget:
-    window-hours: 4              # KST 자정 앵커 창 크기 (00·04·08·12·16·20시 시작)
-    tokens-per-window: 20000     # 창당 토큰 예산 (사용자 메시지 입력 + 받은 출력만 계상, 채팅 스트림만)
+    daily-tokens: 120000         # 일일(KST 자정 리셋) 토큰 예산. 잠정값: 기존 4시간/20,000 의 산술 등가(6창 × 20,000). 재산정 예정.
     estimated-output-tokens: 512 # 예약 시 더하는 출력 추정값 (실측 도착 시 보정)
 
 # 입출력 가드레일 — 환경 무관 비즈니스 룰. moderation 카테고리 정본은 OpenAiInputModerationClientImpl 레지스트리.

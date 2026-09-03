@@ -42,8 +42,7 @@ ai-chat:
     count-period-seconds: 10
     max-message-count: 5
   token-budget:
-    window-hours: 4
-    tokens-per-window: 20000
+    daily-tokens: 120000
     estimated-output-tokens: 512
 
 aladin:

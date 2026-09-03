@@ -9,7 +9,6 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
-import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.aiChat.out.UserMessageRateLimiter;
@@ -29,6 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.Duration;
 import java.util.List;
@@ -54,7 +54,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 class AiChatMessageSendServiceTest {
 
     private static final Long USER_ID = 1L;
-    private static final ChatTokenBudget.Result.Granted GRANTED = new ChatTokenBudget.Result.Granted(0L, 100);
+    private static final UserTokenBudgetWriter.ReserveResult.Granted GRANTED =
+            new UserTokenBudgetWriter.ReserveResult.Granted(20260904, 100);
 
     @Mock
     private AiChatMessagePersistService persistService;
@@ -75,7 +76,7 @@ class AiChatMessageSendServiceTest {
     private InputModerationClient inputModerationClient;
 
     @Mock
-    private ChatTokenBudget chatTokenBudget;
+    private UserTokenBudgetWriter userTokenBudgetWriter;
 
     // 결정적 test double: settle 산술 배선만 검증한다(실제 jtokkit 정확도는 JtokkitTokenCounterTest 담당).
     // 기존 단언값 유지를 위해 구 추정과 동일한 문자÷2.5 로 센다.
@@ -86,7 +87,7 @@ class AiChatMessageSendServiceTest {
             new AiChatProperties.Context(8000, 2000, 4000, 800),
             new AiChatProperties.MessageRule(1000),
             new AiChatProperties.RateLimit(10, 5),
-            new AiChatProperties.TokenBudget(4, 20000, 512)
+            new AiChatProperties.TokenBudget(120000, 512)
     );
 
     private AiChatMessageSendService service;
@@ -96,8 +97,8 @@ class AiChatMessageSendServiceTest {
         // 입력 가드레일 기본값: 통과. 차단/장애 케이스는 각 테스트에서 override.
         lenient().when(inputModerationClient.check(anyString(), any()))
                 .thenReturn(InputModerationResult.passed());
-        // 토큰 예산 기본값: 예약 허용. 거절/우회 케이스는 각 테스트에서 override.
-        lenient().when(chatTokenBudget.reserve(anyLong(), anyInt()))
+        // 토큰 예산 기본값: 예약 허용. 거절 케이스는 각 테스트에서 override.
+        lenient().when(userTokenBudgetWriter.reserve(anyLong(), anyInt()))
                 .thenReturn(GRANTED);
         // rate limit 기본값: 통과(Allowed). 거절/우회 케이스는 각 테스트에서 override.
         lenient().when(userMessageRateLimiter.tryConsume(anyLong()))
@@ -105,7 +106,7 @@ class AiChatMessageSendServiceTest {
         service = new AiChatMessageSendService(
                 persistService, aiChatClient, aiChatProperties,
                 userMessageRateLimiter, userBookRepository, bookRepository, inputModerationClient,
-                chatTokenBudget, tokenCounter
+                userTokenBudgetWriter, tokenCounter
         );
     }
 
@@ -194,7 +195,7 @@ class AiChatMessageSendServiceTest {
 
         // rate limit 이 첫 관문이므로 이후 협력자는 하나도 호출되지 않아야 한다.
         verifyNoInteractions(persistService, aiChatClient, inputModerationClient,
-                chatTokenBudget, userBookRepository, bookRepository);
+                userTokenBudgetWriter, userBookRepository, bookRepository);
     }
 
     @Test
@@ -233,36 +234,48 @@ class AiChatMessageSendServiceTest {
     @Test
     void 예산이_소진되면_429_USER_TOKEN_BUDGET_EXCEEDED_와_RetryAfter() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        givenLoadHistory(7L, List.of(), 100L);
-        given(chatTokenBudget.reserve(anyLong(), anyInt()))
-                .willReturn(new ChatTokenBudget.Result.Denied(Duration.ofMinutes(90)));
+        given(userTokenBudgetWriter.reserve(anyLong(), anyInt()))
+                .willReturn(new UserTokenBudgetWriter.ReserveResult.Denied(Duration.ofMinutes(90)));
 
         assertThatThrownBy(() -> service.prepare(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
                 .satisfies(ex -> {
                     assertThat(ex.getErrorCode()).isEqualTo(AiChatErrorCode.USER_TOKEN_BUDGET_EXCEEDED);
                     assertThat(ex.getRateLimitInfo().retryAfter()).isEqualTo(Duration.ofMinutes(90));
-                    assertThat(ex.getRateLimitInfo().limitTokens()).isEqualTo(20000L);
+                    assertThat(ex.getRateLimitInfo().limitTokens()).isEqualTo(120000L);
                     assertThat(ex.getRateLimitInfo().remainingTokens()).isZero();
                 });
-        // 거절이면 USER 메시지를 저장하지 않고 생성도 시작하지 않는다.
-        verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
-        verify(aiChatClient, never()).generate(any(AiChatStreamCommand.class));
+        // 예약이 이력 조회·moderation 앞 관문이므로, 거절이면 이후 단계가 하나도 진행되지 않는다.
+        verifyNoInteractions(persistService, inputModerationClient, aiChatClient);
     }
 
     @Test
-    void 생성_정상_완료시_실측_출력_토큰으로_보정한다() {
+    void 예산_거절_이후에는_환불을_호출하지_않는다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        given(userTokenBudgetWriter.reserve(anyLong(), anyInt()))
+                .willReturn(new UserTokenBudgetWriter.ReserveResult.Denied(Duration.ofMinutes(90)));
+
+        assertThatThrownBy(() -> service.prepare(command))
+                .isInstanceOf(TooManyRequestsException.class);
+
+        // 예약된 것이 없으므로 환불 대상도 없다.
+        verify(userTokenBudgetWriter, never()).refund(anyLong(), anyInt(), anyInt());
+    }
+
+    @Test
+    void 생성_정상_완료시_저장된_ASSISTANT_메시지_id_를_멱등_키로_실측_정산한다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문"); // 2자 → 입력 추정 1
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generate(any(AiChatStreamCommand.class)))
                 .willReturn(completion("응답", 10, 5, 15)); // 실측 출력 5
         given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
-                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, 7L, "응답", null, 10, 5, 15));
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(42L, 7L, "응답", null, 10, 5, 15));
 
         executeTurn(command);
 
-        // 사용자 계상 = 메시지 입력 추정(1) + 실측 출력(5) = 6
-        verify(chatTokenBudget).settle(eq(USER_ID), eq(GRANTED), eq(6));
+        // 사용자 계상 = 메시지 입력 추정(1) + 실측 출력(5) = 6, 멱등 키 = 저장된 메시지 id(42)
+        verify(userTokenBudgetWriter).settle(
+                eq(USER_ID), eq(GRANTED.periodKey()), eq(42L), eq(GRANTED.reservedTokens()), eq(6));
     }
 
     @Test
@@ -274,8 +287,34 @@ class AiChatMessageSendServiceTest {
 
         executeTurn(command); // 예외를 던지지 않고 error 이벤트로 변환
 
-        // 에러는 사용자 과실이 아니므로 예약 전액 환불 → actualTotal=0 (예약분 그대로 차감)
-        verify(chatTokenBudget).settle(eq(USER_ID), eq(GRANTED), eq(0));
+        // 에러는 사용자 과실이 아니므로 예약 전액 환불
+        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+    }
+
+    @Test
+    void 입력_가드레일_차단_시_예약을_전액_환불한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "차단 대상");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(inputModerationClient.check(eq("차단 대상"), any()))
+                .willReturn(InputModerationResult.blocked(List.of("self-harm")));
+
+        assertThatThrownBy(() -> service.prepare(command))
+                .isInstanceOf(BadRequestException.class);
+
+        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+    }
+
+    @Test
+    void Moderation_불능_UNAVAILABLE_시_예약을_전액_환불한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(inputModerationClient.check(eq("질문"), any()))
+                .willReturn(InputModerationResult.serviceUnavailable("OpenAI Moderation 502"));
+
+        assertThatThrownBy(() -> service.prepare(command))
+                .isInstanceOf(ServiceUnavailableException.class);
+
+        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
     }
 
     @Test
@@ -290,27 +329,10 @@ class AiChatMessageSendServiceTest {
                 .extracting(TooManyRequestsException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.AI_RATE_LIMIT_BURST);
 
-        verify(chatTokenBudget).settle(eq(USER_ID), eq(GRANTED), eq(0));
+        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
         verify(aiChatClient, never()).generate(any(AiChatStreamCommand.class));
         // 게이트 거절은 USER 저장 전이어야 한다 — 응답 없는 USER 메시지가 이력에 남지 않는다.
         verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
-    }
-
-    @Test
-    void Redis_우회시_채팅은_진행되고_보정은_생략된다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(chatTokenBudget.reserve(anyLong(), anyInt()))
-                .willReturn(new ChatTokenBudget.Result.Bypassed());
-        givenLoadHistory(7L, List.of(), 100L);
-        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
-                .willReturn(completion("응답", 10, 5, 15));
-        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
-                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, 7L, "응답", null, 10, 5, 15));
-
-        executeTurn(command);
-
-        // Bypassed(예약 없음) → 보정할 예약이 없어 settle 미호출
-        verify(chatTokenBudget, never()).settle(anyLong(), any(), anyInt());
     }
 
     @Test
@@ -561,8 +583,8 @@ class AiChatMessageSendServiceTest {
                 .willReturn(completion("응답", 10, 5, 15));
         given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
                 .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, sessionId, "응답", null, 10, 5, 15));
-        willThrow(new RuntimeException("redis down"))
-                .given(chatTokenBudget).settle(anyLong(), any(), anyInt());
+        willThrow(new RuntimeException("db down"))
+                .given(userTokenBudgetWriter).settle(anyLong(), anyInt(), anyLong(), anyInt(), anyInt());
 
         List<MessageStreamEvent> events = executeTurn(command);
 
@@ -571,5 +593,24 @@ class AiChatMessageSendServiceTest {
                 .asInstanceOf(InstanceOfAssertFactories.type(MessageStreamEvent.Token.class))
                 .extracting(MessageStreamEvent.Token::delta)
                 .isEqualTo("응답");
+    }
+
+    @Test
+    void 이미_정산된_메시지의_중복_정산은_무시되고_성공_이벤트는_그대로_반환된다() {
+        Long sessionId = 7L;
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+
+        givenLoadHistory(sessionId, List.of(), 100L);
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willReturn(completion("응답", 10, 5, 15));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, sessionId, "응답", null, 10, 5, 15));
+        willThrow(new DataIntegrityViolationException("uk_ai_chat_token_settlement_message 위반"))
+                .given(userTokenBudgetWriter).settle(anyLong(), anyInt(), anyLong(), anyInt(), anyInt());
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        assertThat(events).hasSize(2);
+        assertThat(events.get(1)).isInstanceOf(MessageStreamEvent.Done.class);
     }
 }

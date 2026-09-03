@@ -200,7 +200,7 @@ void REUSE_DETECTED_결과면_REFRESH_TOKEN_REUSE_DETECTED_예외가_발생한�
 
 사용자별 한도 초과도 같은 429 로 매핑한다:
 - `USER_RATE_LIMIT_EXCEEDED` — 상태 무관 USER 메시지 10초/5건 폭주 가드. Retry-After = 카운트 기간.
-- `USER_TOKEN_BUDGET_EXCEEDED` — 사용자 토큰 예산(KST 4시간 창) 소진. Retry-After = 다음 창까지. `RateLimitInfo` 에 `limitTokens`·`remainingTokens(0)` 운반.
+- `USER_TOKEN_BUDGET_EXCEEDED` — 사용자 토큰 예산(KST 일 단위 원장) 소진. Retry-After = 다음 KST 자정까지. `RateLimitInfo` 에 `limitTokens`·`remainingTokens(0)` 운반.
 
 ### 5xx (서버/외부 시스템 실패)
 

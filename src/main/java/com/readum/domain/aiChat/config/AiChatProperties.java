@@ -49,15 +49,14 @@ public record AiChatProperties(
     }
 
     /**
-     * 사용자별 토큰 예산 — KST 자정 앵커 windowHours 창마다 tokensPerWindow 씩.
+     * 사용자별 토큰 예산 — KST 달력 하루(자정 리셋)당 dailyTokens 씩.
      * 사용자가 보낸 메시지 입력 + 받은 응답 출력만 계상한다(시스템 프롬프트·재전송 이력·요약 등
      * 서비스 오버헤드는 미계상 — 공정성 한도). 선불 예약(메시지 추정 + estimatedOutputTokens) 후
-     * 출력을 실측으로 보정한다. 저장은 Redis (ChatTokenBudget Port).
+     * 출력을 실측으로 보정한다. 저장은 DB 원장 user_token_budget (UserTokenBudgetWriter).
      * estimatedOutputTokens 는 회계용 출력 추정값이다 — 프롬프트 길이 지시·수신 제한이 아니다.
      */
     public record TokenBudget(
-            @Positive int windowHours,
-            @Positive int tokensPerWindow,
+            @Positive int dailyTokens,
             @Positive int estimatedOutputTokens
     ) {
     }

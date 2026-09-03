@@ -9,7 +9,6 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
-import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.aiChat.out.UserMessageRateLimiter;
@@ -25,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -46,14 +46,14 @@ public class AiChatMessageSendService {
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
     private final InputModerationClient inputModerationClient;
-    private final ChatTokenBudget chatTokenBudget;
+    private final UserTokenBudgetWriter userTokenBudgetWriter;
     private final TokenCounter tokenCounter;
 
-    /** 사전 단계 결과 — 생성 단계(generateAndPersist)에 필요한 모든 문맥. */
+    /** 사전 단계 결과 — 생성 단계(generateAndPersist)에 필요한 모든 문맥. 예약(reservation)은 항상 존재한다. */
     public record PreparedChatTurn(
             Long userId,
             AiChatStreamCommand streamCommand,
-            ChatTokenBudget.Result.Granted reservation,
+            UserTokenBudgetWriter.ReserveResult.Granted reservation,
             int estimatedMessageInputTokens
     ) {
         public Long sessionId() {
@@ -62,8 +62,11 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 사전 단계(요청 스레드, 동기): rate limit → 이력 조회 → 입력 모더레이션 → 예산 예약 → 전역 게이트 → USER 저장.
+     * 사전 단계(요청 스레드, 동기): rate limit → 예산 예약 → 이력 조회 → 입력 모더레이션 → 전역 게이트 → USER 저장.
      * 여기서 던진 예외는 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 변환한다.
+     * 예산 예약을 moderation 앞에 두는 이유: 예산이 소진된 사용자가 공짜 moderation 호출
+     * (제공자 RPM 자원)을 소모하지 못하게 한다 — 토큰 추정(tokenCounter)은 로컬 계산이라
+     * 예약을 앞으로 당겨도 외부 비용이 없다.
      */
     public PreparedChatTurn prepare(SendMessageCommand command) {
         String normalizedContent = validateAndStripContent(command.content());
@@ -72,6 +75,34 @@ public class AiChatMessageSendService {
 
         verifyUserMessageRateLimit(userId);
 
+        int estimatedMessageInputTokens = tokenCounter.count(normalizedContent);
+        int reservedTokens = estimatedMessageInputTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
+        // DB 원장이 정본이라 우회(fail-open) 경로가 없다 — reserve 의 DB 예외는 그대로 전파한다(500).
+        UserTokenBudgetWriter.ReserveResult reserveResult = userTokenBudgetWriter.reserve(userId, reservedTokens);
+        if (reserveResult instanceof UserTokenBudgetWriter.ReserveResult.Denied denied) {
+            throw tokenBudgetExceeded(denied.retryAfter());
+        }
+        UserTokenBudgetWriter.ReserveResult.Granted reservation =
+                (UserTokenBudgetWriter.ReserveResult.Granted) reserveResult;
+
+        // 예약 이후의 모든 거절·실패(이력 조회 실패, moderation 차단/불능, 게이트 거절, USER 저장 실패)는
+        // 생성이 시작되지 않은 경우라 예약을 전액 환불하고 원래 예외를 그대로 던진다.
+        try {
+            return prepareAfterReservation(
+                    sessionId, userId, normalizedContent, reservation, estimatedMessageInputTokens);
+        } catch (RuntimeException prepareRejection) {
+            refundQuietly(userId, reservation, sessionId);
+            throw prepareRejection;
+        }
+    }
+
+    private PreparedChatTurn prepareAfterReservation(
+            Long sessionId,
+            Long userId,
+            String normalizedContent,
+            UserTokenBudgetWriter.ReserveResult.Granted reservation,
+            int estimatedMessageInputTokens
+    ) {
         AiChatMessagePersistService.MessageLoadResult loaded =
                 aiChatMessagePersistService.loadHistory(sessionId, userId);
         AiChatStreamCommand.BookContext bookContext = resolveBookContext(loaded.userBookId());
@@ -88,15 +119,6 @@ public class AiChatMessageSendService {
             case PASSED -> { }
         }
 
-        int estimatedMessageInputTokens = tokenCounter.count(normalizedContent);
-        int reservedTokens = estimatedMessageInputTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
-        ChatTokenBudget.Result reservationResult = chatTokenBudget.reserve(userId, reservedTokens);
-        if (reservationResult instanceof ChatTokenBudget.Result.Denied denied) {
-            throw tokenBudgetExceeded(denied.retryAfter());
-        }
-        ChatTokenBudget.Result.Granted reservation =
-                (reservationResult instanceof ChatTokenBudget.Result.Granted granted) ? granted : null;
-
         List<HistoryMessage> withCurrent = new ArrayList<>(loaded.notSummarizedChatRaws().size() + 1);
         withCurrent.addAll(loaded.notSummarizedChatRaws());
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
@@ -107,13 +129,8 @@ public class AiChatMessageSendService {
 
         // 전역 게이트: 옛 코드처럼 SSE 시작 전에 확보한다. USER 저장보다 먼저 확인해
         // 거절(429) 시 응답 없는 USER 메시지가 대화 이력에 남지 않게 한다.
-        // 거절이 예산 예약 뒤에 나므로 예약을 전액 환불하고 던진다 — 옛 코드의 예약 누수(스펙 §5-5)를 고치는 의도된 개선.
-        try {
-            aiChatClient.acquireRateLimitPermit(streamCommand);
-        } catch (RuntimeException gateRejection) {
-            refundReservation(prepared);
-            throw gateRejection;
-        }
+        // 거절 시 예약 환불은 prepare() 의 공통 환불 경로가 담당한다.
+        aiChatClient.acquireRateLimitPermit(streamCommand);
 
         aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
@@ -140,7 +157,7 @@ public class AiChatMessageSendService {
         try {
             AiChatMessage saved = aiChatMessagePersistService.saveAssistantSuccess(
                     turn.sessionId(), completion.content(), completion);
-            settleOnSuccess(turn, completion);
+            settleOnSuccess(turn, completion, saved);
             return List.of(
                     new MessageStreamEvent.Token(completion.content()),
                     new MessageStreamEvent.Done(
@@ -158,21 +175,27 @@ public class AiChatMessageSendService {
 
     /**
      * 성공: 사용자 예산은 메시지 입력 추정 + 실측 출력만 계상 (기존 정책 동일).
-     * 보정 실패는 삼킨다 — 응답은 이미 저장·전달 대상이므로, 여기서 던지면 정상 완료된 턴이
+     * 멱등 키는 저장된 ASSISTANT 메시지 id — 같은 메시지의 이중 정산은 정산 기록의
+     * UNIQUE 위반(트랜잭션 전체 롤백)으로 차단되므로 "이미 정산됨" 으로 로그 후 무시한다.
+     * 그 밖의 정산 실패도 삼킨다 — 응답은 이미 저장·전달 대상이므로, 여기서 던지면 정상 완료된 턴이
      * 실패 경로(FAILED 중복 저장 + 이중 정산)로 뒤집힌다. 옛 코드도 보정을 fire-and-forget 으로 돌렸다.
      */
-    private void settleOnSuccess(PreparedChatTurn turn, AiChatCompletion completion) {
-        if (turn.reservation() == null) {
-            return; // Redis 장애 우회(Bypassed) 호출 — 보정할 예약 없음
-        }
+    private void settleOnSuccess(PreparedChatTurn turn, AiChatCompletion completion, AiChatMessage savedAssistantMessage) {
         try {
             int outputTokens = completion.outputTokens() != null
                     ? completion.outputTokens()
                     : tokenCounter.count(completion.content());
-            chatTokenBudget.settle(turn.userId(), turn.reservation(),
+            userTokenBudgetWriter.settle(
+                    turn.userId(),
+                    turn.reservation().periodKey(),
+                    savedAssistantMessage.getId(),
+                    turn.reservation().reservedTokens(),
                     turn.estimatedMessageInputTokens() + outputTokens);
+        } catch (DataIntegrityViolationException alreadySettled) {
+            log.warn("토큰 예산 정산 생략 — 이미 정산된 메시지 userId={} messageId={}",
+                    turn.userId(), savedAssistantMessage.getId());
         } catch (RuntimeException settleError) {
-            log.error("토큰 예산 보정 실패(성공 응답은 유지) userId={} sessionId={}", turn.userId(), turn.sessionId(), settleError);
+            log.error("토큰 예산 정산 실패(성공 응답은 유지) userId={} sessionId={}", turn.userId(), turn.sessionId(), settleError);
         }
     }
 
@@ -182,13 +205,14 @@ public class AiChatMessageSendService {
      * 생성 실패 경로에서 던지면 error 이벤트 전달이 막힌다.
      */
     private void refundReservation(PreparedChatTurn turn) {
-        if (turn.reservation() == null) {
-            return;
-        }
+        refundQuietly(turn.userId(), turn.reservation(), turn.sessionId());
+    }
+
+    private void refundQuietly(Long userId, UserTokenBudgetWriter.ReserveResult.Granted reservation, Long sessionId) {
         try {
-            chatTokenBudget.settle(turn.userId(), turn.reservation(), 0);
+            userTokenBudgetWriter.refund(userId, reservation.periodKey(), reservation.reservedTokens());
         } catch (RuntimeException refundError) {
-            log.error("토큰 예산 환불 실패 userId={} sessionId={}", turn.userId(), turn.sessionId(), refundError);
+            log.error("토큰 예산 환불 실패 userId={} sessionId={}", userId, sessionId, refundError);
         }
     }
 
@@ -204,7 +228,7 @@ public class AiChatMessageSendService {
     private TooManyRequestsException tokenBudgetExceeded(Duration retryAfter) {
         AiChatProperties.TokenBudget budget = aiChatProperties.tokenBudget();
         RateLimitInfo info = new RateLimitInfo(
-                retryAfter, null, (long) budget.tokensPerWindow(), null, 0L, null, retryAfter);
+                retryAfter, null, (long) budget.dailyTokens(), null, 0L, null, retryAfter);
         return new TooManyRequestsException(AiChatErrorCode.USER_TOKEN_BUDGET_EXCEEDED, info);
     }
 
@@ -260,7 +284,7 @@ public class AiChatMessageSendService {
 
     /**
      * 사용자별 폭주 차단 — 10초 안에 5건 이상은 정상 사용이 아니라고 보고 거절한다.
-     * 비용 방어의 본체는 토큰 예산(chatTokenBudget)이고, 이 가드는 초 단위 폭주만 막는다.
+     * 비용 방어의 본체는 토큰 예산(userTokenBudgetWriter)이고, 이 가드는 초 단위 폭주만 막는다.
      * Redis ZSET + Lua 로 검사와 기록을 원자로 수행한다 — 구 DB 카운트 방식은 검사와
      * USER 저장 사이 간격 때문에 동시 요청이 전부 통과했다.
      * 슬롯은 검사 시점에 즉시 소모되고, 뒤 단계(모더레이션 차단·예산 거절 등)에서

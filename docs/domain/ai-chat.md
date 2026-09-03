@@ -57,15 +57,20 @@
    뒤 단계(모더레이션 차단·예산 거절 등)에서 거절돼도 반환하지 않는다 — 시도 자체를 센다.
    Redis 장애 시 검사 없이 허용(fail-open).
    초 단위 폭주(무한 retry·키 유출)만 막고, 비용 방어의 본체는 아래 토큰 예산이다.
-3. 소유권·잠금 확인 — `LOCKED` 면 400(이미 감상문 확정), 활성 summary_job 이
+3. **토큰 예산 선불 예약** — KST 달력 하루당 120,000 토큰 (DB 원장 `user_token_budget`,
+   사용자·일 1행, "사용량 + 예약량 ≤ 한도" 조건부 원자 UPDATE 한 문장으로 예약과 한도
+   검사를 동시에). 초과 시 429 + Retry-After(다음 KST 자정까지), 아무것도 저장하지 않는다.
+   예약을 moderation 앞에 두는 이유: 예산이 소진된 사용자가 공짜 moderation 호출
+   (제공자 RPM 자원)을 소모하지 못하게 한다.
+   예산은 **사용자가 보낸 메시지 입력 + 받은 응답 출력만** 계상한다(시스템 프롬프트·재전송 이력·
+   요약 등 서비스 오버헤드는 미계상 — 공정성 한도). DB 가 원장 정본이라 우회(fail-open)가
+   없다 — DB 장애면 채팅 요청 자체가 실패한다. 예약 이후 단계에서 거절·실패하면
+   (잠금·moderation 차단/불능·게이트 거절·저장 실패) 예약을 전액 환불한다.
+4. 소유권·잠금 확인 — `LOCKED` 면 400(이미 감상문 확정), 활성 summary_job 이
    있으면 400(생성 중). 이 시점까지 USER 메시지는 저장되지 않는다.
-4. 입력 moderation (`InputModerationClient`, SSE 시작 전 동기 호출) —
+5. 입력 moderation (`InputModerationClient`, SSE 시작 전 동기 호출) —
    차단이면 `REJECTED` 로 저장 후 400, moderation API 자체가 죽어 있으면
    저장 없이 503 (판정 불가 시 통과가 아니라 차단을 선택하는 정책).
-5. **토큰 예산 선불 예약** (moderation 통과 후·USER 저장 전) — KST 4시간 창당 20,000 토큰
-   (Redis, 선불 예약 + 실측 보정). 초과 시 429 + Retry-After, 아무것도 저장하지 않는다.
-   예산은 **사용자가 보낸 메시지 입력 + 받은 응답 출력만** 계상한다(시스템 프롬프트·재전송 이력·
-   요약 등 서비스 오버헤드는 미계상 — 공정성 한도). Redis 장애 시 허용(fail-open).
 6. **OpenAI 전역 게이트 확보**(`acquireRateLimitPermit`) → USER 메시지 `COMPLETED` 저장.
    게이트 거절이면 예약을 전액 환불하고 429 — SSE 시작 전이라 HTTP JSON 으로 나가고,
    USER 저장 전이라 응답 없는 USER 메시지가 대화 이력에 남지 않는다.
@@ -79,6 +84,8 @@ SSE 방출한다. 출력 쪽 가드레일(프롬프트 주입 패턴, 출력 mod
 보존한 `FAILED` + error 이벤트. 클라이언트가 도중에 이탈해도 끝까지 생성·저장(`COMPLETED`)
 하고 예산도 실측 계상한다 — 이탈을 감지할 스트림이 없고, 돌아온 사용자가 이력에서
 답을 볼 수 있는 편이 낫다. `FAILED` 는 컨텍스트에서 제외되므로 다음 턴을 오염시키지 않는다.
+성공 정산은 저장된 ASSISTANT 메시지 id 를 멱등 키로 1회만 기록된다
+(`ai_chat_token_settlement` 의 UNIQUE 가 이중 정산을 구조적으로 차단).
 
 영속화는 `AiChatMessagePersistService` 로 분리되어 있다. 생성 단계가 요청 트랜잭션
 밖(가상 스레드)에서 실행되므로 `@Transactional` 이 프록시를 타게 하기 위한 분리다
@@ -132,7 +139,7 @@ aiChat 의 `SummaryEditService` 가 담당한다 (LLM 무관, 사용자 직접 �
 | 토큰 계산 | jtokkit(o200k_base) 로컬 계산. `ai_chat_message.token_count` = USER 로컬 계산 · ASSISTANT 실측 출력 |
 | 메시지 최대 길이 | 1,000자 |
 | 폭주 가드 (Redis ZSET + Lua) | 10초/5건 — 메시지 전송 시도, 검사 시점에 슬롯 소모 |
-| 토큰 예산 (Redis) | KST 4시간 창당 20,000 토큰, 예약 출력 512. 사용자 메시지 입력 + 받은 출력만 계상, 채팅 스트림만 |
+| 토큰 예산 (DB 원장) | KST 달력 하루당 120,000 토큰(잠정 — 기존 4시간/20,000 의 산술 등가, 재산정 예정), 예약 출력 512. `user_token_budget` 에 선불 예약(조건부 원자 UPDATE) + 실측 정산, 정산은 `ai_chat_token_settlement` 로 메시지당 1회 멱등. 사용자 메시지 입력 + 받은 출력만 계상, 채팅 스트림만 |
 | 전역 게이트 (Redis) | 모델별 분당 예산 — gpt-4o-mini RPM 9,000 / TPM 180,000 (계정 한도의 90%). 채팅·제목·감상문 공통, 포화 시 채팅 429 / 제목 생략 / 감상문 재큐. quota 소진 시 쿨다운(기본 300초) 열어 전 경로 차단 |
 | 감상문 생성 자격 | 누적 토큰 500 이상 (`SummaryDraftPolicy` 상수, 정책 확정 전 임시값) |
 
@@ -166,10 +173,11 @@ aiChat 의 `SummaryEditService` 가 담당한다 (LLM 무관, 사용자 직접 �
 - `domain/aiChat/` — service(컨텍스트 요약 워커·생명주기·적재 포함) · service/policy ·
   out(포트: `AiChatClient` · `AiSummaryClient` · `TokenCounter` · `AiContextSummaryClient` 등) ·
   event · listener(제목 생성 · 컨텍스트 요약 트리거) · config · dto
-- `model/aiChat/` — AiChatSession, AiChatMessage, AiChatContextSummary, AiChatContextSummaryJob
+- `model/aiChat/` — AiChatSession, AiChatMessage, AiChatContextSummary, AiChatContextSummaryJob,
+  UserTokenBudget(토큰 예산 일 단위 원장), AiChatTokenSettlement(정산 멱등 기록)
 - `infrastructure/ai/openai/` — 포트 구현체, 기능별 하위 패키지(chat · title · summary ·
   contextsummary · guardrail · moderation · ratelimit) + 공용 배관은 루트
-- `infrastructure/redis/` — 토큰 예산 어댑터(`ChatTokenBudgetRedisAdapter`), 창 계산기
+- `infrastructure/redis/` — 폭주 가드 어댑터(`UserMessageRateLimiterRedisAdapter`)
 - `infrastructure/aiChat/scheduler/` — 감상문 작업 적재 스케줄러 + 컨텍스트 요약 디스패처·reaper·풀
 - `presentation/controller/aiChat/`
 
