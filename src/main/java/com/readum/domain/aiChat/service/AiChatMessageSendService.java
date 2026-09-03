@@ -12,13 +12,13 @@ import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.aiChat.out.TokenCounter;
+import com.readum.domain.aiChat.out.UserMessageRateLimiter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.model.aiChat.entity.AiChatMessage;
-import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.userBook.repository.UserBookRepository;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +28,6 @@ import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -43,7 +42,7 @@ public class AiChatMessageSendService {
     private final AiChatMessagePersistService aiChatMessagePersistService;
     private final AiChatClient aiChatClient;
     private final AiChatProperties aiChatProperties;
-    private final AiChatMessageRepository aiChatMessageRepository;
+    private final UserMessageRateLimiter userMessageRateLimiter;
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
     private final InputModerationClient inputModerationClient;
@@ -260,16 +259,18 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 사용자별 폭주 차단 — 상태 무관 단일 카운터.
-     * 10초 안에 USER 메시지 5건 이상은 상태와 무관하게 정상 사용이 아니라고 보고 거절한다.
-     * 비용 방어의 본체는 토큰 예산(reserveTokenBudget)이고, 이 가드는 초 단위 폭주만 막는다.
+     * 사용자별 폭주 차단 — 10초 안에 5건 이상은 정상 사용이 아니라고 보고 거절한다.
+     * 비용 방어의 본체는 토큰 예산(chatTokenBudget)이고, 이 가드는 초 단위 폭주만 막는다.
+     * Redis ZSET + Lua 로 검사와 기록을 원자로 수행한다 — 구 DB 카운트 방식은 검사와
+     * USER 저장 사이 간격 때문에 동시 요청이 전부 통과했다.
+     * 슬롯은 검사 시점에 즉시 소모되고, 뒤 단계(모더레이션 차단·예산 거절 등)에서
+     * 거절돼도 반환하지 않는다 — 폭주 차단이라는 목적상 시도 자체를 세는 것이 맞다.
      * retryAfter 는 카운트 기간을 그대로 돌려 보낸다 (보수적 추정).
      */
     private void verifyUserMessageRateLimit(Long userId) {
         AiChatProperties.RateLimit limit = aiChatProperties.rateLimit();
-        LocalDateTime since = LocalDateTime.now().minusSeconds(limit.countPeriodSeconds());
-        long recentCount = aiChatMessageRepository.countRecentUserMessagesByOwner(userId, since);
-        if (recentCount >= limit.maxMessageCount()) {
+        UserMessageRateLimiter.Result rateLimitResult = userMessageRateLimiter.tryConsume(userId);
+        if (rateLimitResult instanceof UserMessageRateLimiter.Result.Denied) {
             throw rateLimitExceeded(limit.countPeriodSeconds(), limit.maxMessageCount());
         }
     }

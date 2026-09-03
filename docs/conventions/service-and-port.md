@@ -23,3 +23,4 @@
   - O `AiQuotaCooldown` — domain 의 `SummaryGenerationWorker` 가 호출(읽기 전용). Redis 어댑터가 전역 게이트의 quota 쿨다운 키를 공유(구 `SummaryCallBreaker` 인메모리 브레이커 대체, 2026-07). 워커가 infrastructure 게이트를 직접 못 쓰는 계층 규칙 때문에 Port 유지
   - X `RefreshTokenStore` — JPA Repository 를 단순 래핑하는 수준이라 Port 없이 Service 가 `RefreshTokenRepository` 를 직접 사용 (기준 2 불충족)
   - O `ChatTokenBudget` — 사용자별 토큰 예산이 도메인 규칙이 되면서 Port 승격 조건("rate limit 정책 판단이 도메인 규칙이 되는 시점")이 발동된 사례. Redis 어댑터 구현 (2026-07-06, 구 `AiChatRateLimiter` 인터셉터는 제거됨)
+  - O `UserMessageRateLimiter` — 사용자별 메시지 폭주 가드(10초/5건). domain 의 `AiChatMessageSendService` 가 호출 + Redis ZSET + Lua 어댑터 구현 (2026-09, 검사·기록 원자화를 위해 구 DB 카운트 방식 대체)

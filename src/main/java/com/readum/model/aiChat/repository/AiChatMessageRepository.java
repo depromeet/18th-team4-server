@@ -140,39 +140,6 @@ public interface AiChatMessageRepository extends JpaRepository<AiChatMessage, Lo
     long sumRecentMessageTokens(@Param("sessionId") Long sessionId, @Param("summarizedUpToMessageId") Long summarizedUpToMessageId);
 
     /**
-     * 사용자별 폭주(10초 창) 가드용 카운트 — 상태 무관.
-     * 10초에 5건 이상은 상태(COMPLETED/REJECTED/FAILED)와 무관하게 정상 사용이 아니라고 보고 하나의 가드로 센다.
-     * (2026-07-06: COMPLETED/REJECTED 분리 카운터를 단일 가드로 통합 — moderation 오탐 사용자를
-     * 1시간 잠그던 REJECTED 전용 카운터의 부작용 제거, 거부 메시지 도배도 같은 창에 잡힌다.)
-     * AiChatSessionRepository.findByIdAndOwner 와 동일한 패턴으로 EXISTS 서브쿼리를 거쳐
-     * AiChatMessage → AiChatSession → UserBook → user_id 매핑을 수행한다.
-     */
-    @Query("""
-            select count(aiChatMessage)
-              from AiChatMessage aiChatMessage
-             where aiChatMessage.role = :role
-               and aiChatMessage.createdAt >= :since
-               and exists (
-                     select 1
-                       from AiChatSession aiChatSession
-                          , UserBook userBook
-                      where aiChatSession.id = aiChatMessage.sessionId
-                        and userBook.id = aiChatSession.userBookId
-                        and userBook.userId = :userId
-                   )
-            """)
-    long countRecentMessagesByRoleAndOwner(
-            @Param("role") AiChatMessage.Role role,
-            @Param("userId") Long userId,
-            @Param("since") LocalDateTime since
-    );
-
-    /** 최근 USER 메시지 수 — 상태 무관 10초 창 가드용. */
-    default long countRecentUserMessagesByOwner(Long userId, LocalDateTime since) {
-        return countRecentMessagesByRoleAndOwner(AiChatMessage.Role.USER, userId, since);
-    }
-
-    /**
      * 등록 도서(UserBook) 삭제 cascade 용 — 그 도서의 모든 세션에 속한 메시지를 일괄 삭제한다.
      * AiChatMessage 는 userBookId 를 직접 갖지 않으므로 session_id 를 통해 세션을 거치는 서브쿼리로 좁힌다.
      * 삭제 대상 테이블(ai_chat_message) 과 서브쿼리 테이블(ai_chat_session) 이 달라 MySQL 8.4 의

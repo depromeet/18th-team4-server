@@ -38,7 +38,8 @@ public record AiChatProperties(
     }
 
     /**
-     * 사용자별 폭주 가드 — 상태 무관 USER 메시지 수. 10초에 5건 이상은 정상 사용이 아닌 것으로 본다.
+     * 사용자별 폭주 가드 — 창 내 메시지 전송 시도 수. 10초에 5건 이상은 정상 사용이 아닌 것으로 본다.
+     * 저장은 Redis ZSET 슬라이딩 윈도우 (UserMessageRateLimiter Port).
      * 비용 방어의 본체는 TokenBudget(토큰 예산)이고, 이 가드는 초 단위 폭주(무한 retry, 키 유출)만 막는다.
      */
     public record RateLimit(

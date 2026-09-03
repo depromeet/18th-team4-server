@@ -62,7 +62,7 @@ flowchart TD
     B -->|통과| D["AiChatMessageSendService.execute"]
     D --> E{"본문 검증 — 공백 정규화 후 빈 값 또는 4,000자 초과"}
     E -->|위반| F["400 MESSAGE_CONTENT_BLANK / MESSAGE_CONTENT_TOO_LONG"]
-    E -->|통과| G{"DB 카운트 한도 — 10초 내 COMPLETED USER 5건 / 1시간 내 REJECTED USER 20건"}
+    E -->|통과| G{"Redis ZSET 폭주 가드 — 10초 내 전송 시도 5건 (Lua 로 검사·기록 원자 수행)"}
     G -->|초과| H["429 USER_RATE_LIMIT_EXCEEDED + Retry-After 헤더"]
     G -->|통과| I["AiChatMessagePersistService.loadHistory — USER 메시지는 아직 저장하지 않음"]
     I --> J{"세션 소유 확인"}

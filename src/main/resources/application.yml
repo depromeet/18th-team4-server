@@ -70,8 +70,8 @@ ai-chat:
   message:
     max-content-length: 1000
   rate-limit:
-    count-period-seconds: 10 # 상태 무관 USER 메시지 카운트 기간 (초).
-    max-message-count: 5     # 기간 안에 허용되는 USER 메시지 수. 초과 시 HTTP 429.
+    count-period-seconds: 10 # 메시지 전송 시도 카운트 기간 (초). Redis ZSET 슬라이딩 윈도우 길이.
+    max-message-count: 5     # 기간 안에 허용되는 전송 시도 수. 초과 시 HTTP 429.
   token-budget:
     window-hours: 4              # KST 자정 앵커 창 크기 (00·04·08·12·16·20시 시작)
     tokens-per-window: 20000     # 창당 토큰 예산 (사용자 메시지 입력 + 받은 출력만 계상, 채팅 스트림만)

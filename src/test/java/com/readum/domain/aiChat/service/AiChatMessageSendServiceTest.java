@@ -12,6 +12,7 @@ import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.aiChat.out.TokenCounter;
+import com.readum.domain.aiChat.out.UserMessageRateLimiter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
@@ -19,7 +20,6 @@ import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatMessageFixture;
-import com.readum.model.aiChat.repository.AiChatMessageRepository;
 import com.readum.model.book.repository.BookRepository;
 import com.readum.model.userBook.repository.UserBookRepository;
 import org.assertj.core.api.InstanceOfAssertFactories;
@@ -31,7 +31,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,7 +62,7 @@ class AiChatMessageSendServiceTest {
     private AiChatClient aiChatClient;
 
     @Mock
-    private AiChatMessageRepository aiChatMessageRepository;
+    private UserMessageRateLimiter userMessageRateLimiter;
 
     @Mock
     private UserBookRepository userBookRepository;
@@ -99,9 +98,12 @@ class AiChatMessageSendServiceTest {
         // 토큰 예산 기본값: 예약 허용. 거절/우회 케이스는 각 테스트에서 override.
         lenient().when(chatTokenBudget.reserve(anyLong(), anyInt()))
                 .thenReturn(GRANTED);
+        // rate limit 기본값: 통과(Allowed). 거절/우회 케이스는 각 테스트에서 override.
+        lenient().when(userMessageRateLimiter.tryConsume(anyLong()))
+                .thenReturn(new UserMessageRateLimiter.Result.Allowed());
         service = new AiChatMessageSendService(
                 persistService, aiChatClient, aiChatProperties,
-                aiChatMessageRepository, userBookRepository, bookRepository, inputModerationClient,
+                userMessageRateLimiter, userBookRepository, bookRepository, inputModerationClient,
                 chatTokenBudget, tokenCounter
         );
     }
@@ -162,10 +164,10 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 최근_USER_메시지_카운트가_한도_미만이면_rate_limit_검사를_통과한다() {
+    void rate_limit_검사가_Allowed_면_통과해서_턴이_정상_진행된다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
-                .willReturn(4L);
+        given(userMessageRateLimiter.tryConsume(USER_ID))
+                .willReturn(new UserMessageRateLimiter.Result.Allowed());
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generate(any(AiChatStreamCommand.class)))
                 .willReturn(completion("응답", 1, 1, 2));
@@ -175,13 +177,14 @@ class AiChatMessageSendServiceTest {
                 ));
 
         assertThatCode(() -> executeTurn(command)).doesNotThrowAnyException();
+        verify(userMessageRateLimiter).tryConsume(USER_ID);
     }
 
     @Test
-    void 최근_USER_메시지_카운트가_한도_도달이면_TooManyRequestsException_을_던진다() {
+    void rate_limit_검사가_Denied_면_TooManyRequestsException_을_던지고_아무것도_진행하지_않는다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
-                .willReturn(5L);
+        given(userMessageRateLimiter.tryConsume(USER_ID))
+                .willReturn(new UserMessageRateLimiter.Result.Denied());
 
         assertThatThrownBy(() -> service.prepare(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
@@ -195,8 +198,8 @@ class AiChatMessageSendServiceTest {
     @Test
     void 한도_초과_시_RateLimitInfo_에_retryAfter_와_limit_정보가_담긴다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
-                .willReturn(7L);
+        given(userMessageRateLimiter.tryConsume(USER_ID))
+                .willReturn(new UserMessageRateLimiter.Result.Denied());
 
         assertThatThrownBy(() -> service.prepare(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
@@ -210,10 +213,10 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void rate_limit_카운트_쿼리는_count_period_초만큼_과거_시점부터_조회한다() {
+    void rate_limit_검사가_Bypassed_면_검사_없이_통과해서_턴이_정상_진행된다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(aiChatMessageRepository.countRecentUserMessagesByOwner(eq(1L), any(LocalDateTime.class)))
-                .willReturn(0L);
+        given(userMessageRateLimiter.tryConsume(USER_ID))
+                .willReturn(new UserMessageRateLimiter.Result.Bypassed());
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generate(any(AiChatStreamCommand.class)))
                 .willReturn(completion("응답", 1, 1, 2));
@@ -222,13 +225,7 @@ class AiChatMessageSendServiceTest {
                         1L, 7L, "응답", null, 1, 1, 2
                 ));
 
-        LocalDateTime before = LocalDateTime.now().minusSeconds(10);
-        executeTurn(command);
-        LocalDateTime after = LocalDateTime.now().minusSeconds(10);
-
-        ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
-        verify(aiChatMessageRepository).countRecentUserMessagesByOwner(eq(1L), captor.capture());
-        assertThat(captor.getValue()).isBetween(before, after);
+        assertThatCode(() -> executeTurn(command)).doesNotThrowAnyException();
     }
 
     @Test
