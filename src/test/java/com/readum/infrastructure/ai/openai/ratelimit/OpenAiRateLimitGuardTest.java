@@ -11,7 +11,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
@@ -32,12 +31,21 @@ class OpenAiRateLimitGuardTest {
     }
 
     @Test
-    void 게이트가_통과시키면_아무것도_던지지_않는다() {
+    void 게이트가_통과시키면_계상_내역을_반환한다() {
+        OpenAiRequestGate.GateReservation reservation =
+                new OpenAiRequestGate.GateReservation(MODEL, 29_000_000L, ESTIMATED_TOKENS);
         given(gate.tryAcquire(MODEL, ESTIMATED_TOKENS))
-                .willReturn(new OpenAiRequestGate.Decision.Permitted());
+                .willReturn(new OpenAiRequestGate.Decision.Permitted(reservation));
 
-        assertThatCode(() -> guard.acquireOrThrow(MODEL, ESTIMATED_TOKENS))
-                .doesNotThrowAnyException();
+        assertThat(guard.acquireOrThrow(MODEL, ESTIMATED_TOKENS)).contains(reservation);
+    }
+
+    @Test
+    void 계상_없는_통과면_빈_계상_내역을_반환하고_던지지_않는다() {
+        given(gate.tryAcquire(MODEL, ESTIMATED_TOKENS))
+                .willReturn(new OpenAiRequestGate.Decision.PermittedUncounted());
+
+        assertThat(guard.acquireOrThrow(MODEL, ESTIMATED_TOKENS)).isEmpty();
     }
 
     @Test

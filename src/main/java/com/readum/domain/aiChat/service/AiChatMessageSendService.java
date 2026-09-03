@@ -49,12 +49,16 @@ public class AiChatMessageSendService {
     private final UserTokenBudgetWriter userTokenBudgetWriter;
     private final TokenCounter tokenCounter;
 
-    /** 사전 단계 결과 — 생성 단계(generateAndPersist)에 필요한 모든 문맥. 예약(reservation)은 항상 존재한다. */
+    /**
+     * 사전 단계 결과 — 생성 단계(generateAndPersist)에 필요한 모든 문맥. 예약(reservation)은 항상 존재한다.
+     * rateLimitPermit 은 전역 게이트 확보 결과로 항상 존재한다 (게이트 fail-open 통과면 계상 없는 permit).
+     */
     public record PreparedChatTurn(
             Long userId,
             AiChatStreamCommand streamCommand,
             UserTokenBudgetWriter.ReserveResult.Granted reservation,
-            int estimatedMessageInputTokens
+            int estimatedMessageInputTokens,
+            AiChatClient.RateLimitPermit rateLimitPermit
     ) {
         public Long sessionId() {
             return streamCommand.conversationId();
@@ -125,16 +129,23 @@ public class AiChatMessageSendService {
 
         AiChatStreamCommand streamCommand = new AiChatStreamCommand(
                 sessionId, withCurrent, bookContext, loaded.contextSummary());
-        PreparedChatTurn prepared = new PreparedChatTurn(userId, streamCommand, reservation, estimatedMessageInputTokens);
 
         // 전역 게이트: 옛 코드처럼 SSE 시작 전에 확보한다. USER 저장보다 먼저 확인해
         // 거절(429) 시 응답 없는 USER 메시지가 대화 이력에 남지 않게 한다.
-        // 거절 시 예약 환불은 prepare() 의 공통 환불 경로가 담당한다.
-        aiChatClient.acquireRateLimitPermit(streamCommand);
+        // 거절 시 예약 환불은 prepare() 의 공통 환불 경로가 담당하고, 게이트 분당 계상은
+        // tryAcquire 가 거절하면서 스스로 되돌렸으므로 여기서 또 보상하면 이중 차감이다.
+        AiChatClient.RateLimitPermit rateLimitPermit = aiChatClient.acquireRateLimitPermit(streamCommand);
 
-        aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
+        try {
+            aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
+        } catch (RuntimeException userMessagePersistError) {
+            // 게이트 확보 이후·생성 이전의 실패 — 생성이 일어나지 않아 OpenAI 토큰 소모가 없으므로
+            // 분당 계상을 보상 차감한다. 예약 환불은 prepare() 의 공통 환불 경로가 담당한다.
+            releaseRateLimitPermitQuietly(rateLimitPermit, sessionId);
+            throw userMessagePersistError;
+        }
 
-        return prepared;
+        return new PreparedChatTurn(userId, streamCommand, reservation, estimatedMessageInputTokens, rateLimitPermit);
     }
 
     /**
@@ -151,6 +162,9 @@ public class AiChatMessageSendService {
             log.error("AI 응답 생성 실패 sessionId={} error={}", turn.sessionId(), generateError.toString());
             persistFailedQuietly(turn.sessionId(), "", null);
             refundReservation(turn);
+            // 생성 실패는 OpenAI 가 토큰을 소모하지 않았으므로 게이트 분당 계상도 보상 차감한다.
+            // 반대로 생성 성공 후 저장 실패는 보상하지 않는다 — 토큰이 실제로 소모돼 계상이 맞다.
+            releaseRateLimitPermitQuietly(turn.rateLimitPermit(), turn.sessionId());
             return List.of(buildErrorEvent(generateError));
         }
 
@@ -217,6 +231,18 @@ public class AiChatMessageSendService {
             userTokenBudgetWriter.refund(userId, reservation.periodKey(), reservation.reservedTokens());
         } catch (RuntimeException refundError) {
             log.error("토큰 예산 환불 실패 userId={} sessionId={}", userId, sessionId, refundError);
+        }
+    }
+
+    /**
+     * 게이트 보상 차감 실패는 삼킨다 — 분 창 만료(최대 60초)가 안전망이라 실패가
+     * 응답 경로(사전 단계의 원래 예외 전파·생성 단계의 error 이벤트 전달)를 막을 이유가 없다.
+     */
+    private void releaseRateLimitPermitQuietly(AiChatClient.RateLimitPermit rateLimitPermit, Long sessionId) {
+        try {
+            aiChatClient.releaseRateLimitPermit(rateLimitPermit);
+        } catch (RuntimeException releaseError) {
+            log.error("전역 게이트 보상 차감 실패 sessionId={}", sessionId, releaseError);
         }
     }
 

@@ -15,6 +15,7 @@ import com.readum.domain.aiChat.dto.SummaryDraftEligibility.IneligibleReason;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.aiChat.out.AiChatClient;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
 import com.readum.domain.aiChat.service.AiChatMessageSendService;
 import com.readum.domain.aiChat.service.AiChatSessionCreateService;
@@ -373,7 +374,8 @@ class AiChatControllerTest {
     void 메시지_전송_정상_스트림이면_token_과_done_이벤트가_방출된다() throws Exception {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
         AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
-                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
+                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0,
+                new AiChatClient.RateLimitPermit.Uncounted());
         given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
         given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
                 new MessageStreamEvent.Token("alpha"),
@@ -411,7 +413,8 @@ class AiChatControllerTest {
         // prepare → generateAndPersist 호출 순서 자체를 단언한다.
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
         AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
-                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
+                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0,
+                new AiChatClient.RateLimitPermit.Uncounted());
         given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
         given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
                 new MessageStreamEvent.Token("응답"),
@@ -437,7 +440,8 @@ class AiChatControllerTest {
     @Test
     void 메시지_전송_스트림_에러_이벤트도_정상_방출된다() throws Exception {
         AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
-                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
+                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0,
+                new AiChatClient.RateLimitPermit.Uncounted());
         given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
         given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
                 new MessageStreamEvent.Token("부분"),

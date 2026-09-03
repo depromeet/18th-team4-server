@@ -10,6 +10,7 @@ import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.domain.aiChat.out.TokenCounter;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +45,7 @@ public class AiChatClientImpl implements AiChatClient {
     private final ChatClient chatClient;
     private final AiPromptAuditLogger auditLogger;
     private final OpenAiRateLimitGuard rateLimitGuard;
+    private final OpenAiRequestGate requestGate;
     private final AiChatProperties aiChatProperties;
     private final TokenCounter tokenCounter;
 
@@ -63,7 +65,7 @@ public class AiChatClientImpl implements AiChatClient {
     }
 
     @Override
-    public void acquireRateLimitPermit(AiChatStreamCommand command) {
+    public RateLimitPermit acquireRateLimitPermit(AiChatStreamCommand command) {
         String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
         // 분당 예산에서 "요청 1 + 추정 토큰" 확보. 사전 단계(요청 스레드)에서 호출되어
         // 거절은 GlobalExceptionHandler 가 429 JSON 으로 변환한다.
@@ -73,7 +75,20 @@ public class AiChatClientImpl implements AiChatClient {
             payloadTokens += tokenCounter.count(historyMessage.content());
         }
         int estimatedTokens = payloadTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
-        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
+        // 게이트 계상 내역을 도메인이 들고 다닐 permit 으로 변환한다 — 도메인이 인프라 타입을
+        // 모르게 하는 경계 번역. fail-open 통과(계상 없음)는 release 가 no-op 인 Uncounted.
+        return rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens)
+                .<RateLimitPermit>map(reservation -> new RateLimitPermit.Counted(
+                        reservation.model(), reservation.epochMinute(), reservation.estimatedTokens()))
+                .orElseGet(RateLimitPermit.Uncounted::new);
+    }
+
+    @Override
+    public void releaseRateLimitPermit(RateLimitPermit permit) {
+        if (permit instanceof RateLimitPermit.Counted counted) {
+            requestGate.compensate(new OpenAiRequestGate.GateReservation(
+                    counted.model(), counted.epochMinute(), counted.estimatedTokens()));
+        }
     }
 
     /** 호출 전 acquireRateLimitPermit() 이 선행되어야 한다 — 전역 게이트 검사는 여기서 하지 않는다. */

@@ -56,6 +56,8 @@ class AiChatMessageSendServiceTest {
     private static final Long USER_ID = 1L;
     private static final UserTokenBudgetWriter.ReserveResult.Granted GRANTED =
             new UserTokenBudgetWriter.ReserveResult.Granted(20260904, 100);
+    private static final AiChatClient.RateLimitPermit GATE_PERMIT =
+            new AiChatClient.RateLimitPermit.Counted("gpt-4o-mini", 29_000_000L, 1000);
 
     @Mock
     private AiChatMessagePersistService persistService;
@@ -103,6 +105,9 @@ class AiChatMessageSendServiceTest {
         // rate limit 기본값: 통과(Allowed). 거절/우회 케이스는 각 테스트에서 override.
         lenient().when(userMessageRateLimiter.tryConsume(anyLong()))
                 .thenReturn(new UserMessageRateLimiter.Result.Allowed());
+        // 전역 게이트 기본값: 계상된 permit 확보. 거절 케이스는 각 테스트에서 override.
+        lenient().when(aiChatClient.acquireRateLimitPermit(any(AiChatStreamCommand.class)))
+                .thenReturn(GATE_PERMIT);
         service = new AiChatMessageSendService(
                 persistService, aiChatClient, aiChatProperties,
                 userMessageRateLimiter, userBookRepository, bookRepository, inputModerationClient,
@@ -292,6 +297,64 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
+    void 생성_실패면_게이트_계상을_보상_차감한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willThrow(new RuntimeException("boom"));
+
+        executeTurn(command);
+
+        // OpenAI 가 토큰을 소모하지 않았으므로 확보했던 분당 계상을 되돌린다.
+        verify(aiChatClient).releaseRateLimitPermit(GATE_PERMIT);
+    }
+
+    @Test
+    void 게이트_보상_차감이_실패해도_error_이벤트는_그대로_반환된다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willThrow(new RuntimeException("boom"));
+        willThrow(new RuntimeException("redis down"))
+                .given(aiChatClient).releaseRateLimitPermit(GATE_PERMIT);
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0)).isInstanceOf(MessageStreamEvent.Error.class);
+    }
+
+    @Test
+    void 생성_성공_후_저장_실패면_게이트_계상을_보상_차감하지_않는다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willReturn(completion("응답", 10, 5, 15));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willThrow(new RuntimeException("db down"));
+
+        executeTurn(command);
+
+        // 생성이 성공해 OpenAI 가 실제로 토큰을 소모했으므로 분당 계상은 그대로가 맞다. 예약 환불만 수행한다.
+        verify(aiChatClient, never()).releaseRateLimitPermit(any());
+        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+    }
+
+    @Test
+    void 정상_완주면_게이트_계상을_보상_차감하지_않는다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
+                .willReturn(completion("응답", 10, 5, 15));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, 7L, "응답", null, 10, 5, 15));
+
+        executeTurn(command);
+
+        verify(aiChatClient, never()).releaseRateLimitPermit(any());
+    }
+
+    @Test
     void 입력_가드레일_차단_시_예약을_전액_환불한다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "차단 대상");
         givenLoadHistory(7L, List.of(), 100L);
@@ -333,6 +396,25 @@ class AiChatMessageSendServiceTest {
         verify(aiChatClient, never()).generate(any(AiChatStreamCommand.class));
         // 게이트 거절은 USER 저장 전이어야 한다 — 응답 없는 USER 메시지가 이력에 남지 않는다.
         verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
+        // 거절은 tryAcquire 가 스스로 계상을 되돌렸으므로 여기서 또 보상하면 이중 차감이다.
+        verify(aiChatClient, never()).releaseRateLimitPermit(any());
+    }
+
+    @Test
+    void USER_저장이_실패하면_게이트_계상을_보상_차감하고_예외를_그대로_전파한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        willThrow(new RuntimeException("db down"))
+                .given(persistService).recordUserMessage(anyLong(), anyLong(), anyString());
+
+        assertThatThrownBy(() -> service.prepare(command))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("db down");
+
+        // 생성이 일어나지 않았으므로 게이트 계상 보상 + 예약 전액 환불 둘 다 수행된다.
+        verify(aiChatClient).releaseRateLimitPermit(GATE_PERMIT);
+        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+        verify(aiChatClient, never()).generate(any(AiChatStreamCommand.class));
     }
 
     @Test
