@@ -26,8 +26,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -79,11 +77,7 @@ public class AiChatMessageSendService {
                 aiChatMessagePersistService.loadHistory(sessionId, userId);
         AiChatStreamCommand.BookContext bookContext = resolveBookContext(loaded.userBookId());
 
-        // [측정용 임시] 문제 구조 재현 브리지 — 측정 후 revert
-        InputModerationResult moderation = Mono.fromCallable(
-                        () -> inputModerationClient.check(normalizedContent, bookContext))
-                .subscribeOn(Schedulers.boundedElastic())
-                .block();
+        InputModerationResult moderation = inputModerationClient.check(normalizedContent, bookContext);
         switch (moderation.status()) {
             case BLOCKED -> {
                 aiChatMessagePersistService.recordRejectedUserMessage(sessionId, normalizedContent);
