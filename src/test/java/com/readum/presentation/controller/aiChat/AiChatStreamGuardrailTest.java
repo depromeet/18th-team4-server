@@ -1,6 +1,6 @@
 package com.readum.presentation.controller.aiChat;
 
-import com.readum.domain.aiChat.dto.AiChatCompletion;
+import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.AiChatClient;
@@ -34,6 +34,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -49,6 +51,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -68,8 +71,9 @@ class AiChatStreamGuardrailTest {
 
     private static final String REJECT_MESSAGE = "요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요.";
 
-    // 테스트에서는 생성 단계를 같은 스레드에서 즉시 실행해 저장 완료 시점을 결정적으로 만든다.
-    // (SseEmitter 는 초기화 전 send 를 버퍼링했다가 초기화 시 재생하므로 MockMvc 와 동작이 맞는다.)
+    // 커밋 후 리스너(제목 생성 등)를 같은 스레드에서 실행해 테스트 실행 시점을 결정적으로 만든다.
+    // 메시지 전송 경로 자체는 [측정용 임시 — 조건 A] 구조라 이 executor 를 쓰지 않는다
+    // (리액티브 체인이 공유 boundedElastic 위에서 돌고, 완료는 async dispatch 로 기다린다).
     @TestConfiguration
     static class DirectExecutorConfig {
         @Bean
@@ -118,6 +122,9 @@ class AiChatStreamGuardrailTest {
         given(openAiRequestGate.tryAcquire(anyString(), anyInt()))
                 .willReturn(new OpenAiRequestGate.Decision.Permitted(
                         new OpenAiRequestGate.GateReservation("gpt-4o-mini", 29_000_000L, 1000)));
+        // AiChatClient 자체가 mock 이므로 게이트 확보도 여기서 직접 통과시킨다 (계상 없는 permit).
+        given(aiChatClient.acquireRateLimitPermit(any(AiChatStreamCommand.class)))
+                .willReturn(new AiChatClient.RateLimitPermit.Uncounted());
 
         User user = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
         userId = user.getId();
@@ -139,16 +146,35 @@ class AiChatStreamGuardrailTest {
         return count == null ? 0 : count;
     }
 
+    /**
+     * 요청을 보내고, 비동기로 시작됐으면 async dispatch 까지 태워 최종 응답을 돌려준다.
+     * 조건 A 구조에서는 관문 거절도 체인 위에서 일어나므로, 거절의 4xx/5xx JSON 은 async dispatch 뒤에 나온다.
+     * (Bean Validation 거절은 컨트롤러 진입 전이라 그대로 동기 응답이다.)
+     */
     private org.springframework.test.web.servlet.ResultActions send(String content) throws Exception {
         // Accept 헤더를 지정하지 않는다(= accept all). 통과 시 produces=text/event-stream 매칭이 되고,
         // 거부/장애 시 JSON 에러 본문도 content negotiation 으로 정상 반환된다.
         // (Accept: text/event-stream 만 보내면 JSON 에러 본문이 협상에 실패해 ServletException 으로 샌다.)
         SendMessageRequest body = new SendMessageRequest(content);
-        return mockMvc.perform(post("/api/v1/ai-chat/sessions/" + sessionId + "/messages")
-                .with(authentication(new UsernamePasswordAuthenticationToken(
-                        userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER")))))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(body)));
+        org.springframework.test.web.servlet.ResultActions actions =
+                mockMvc.perform(post("/api/v1/ai-chat/sessions/" + sessionId + "/messages")
+                        .with(authentication(new UsernamePasswordAuthenticationToken(
+                                userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER")))))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)));
+        MvcResult started = actions.andReturn();
+        if (started.getRequest().isAsyncStarted()) {
+            return mockMvc.perform(asyncDispatch(started));
+        }
+        return actions;
+    }
+
+    /** 실제 스트리밍 응답과 같은 모양: 본문 조각 1건 + 실측 사용량이 실린 마지막 조각. */
+    private void givenGeneratedStream(String content) {
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(Flux.just(
+                        AiChatStreamChunk.ofDelta(content),
+                        new AiChatStreamChunk("", 10, 5, 15)));
     }
 
     @Test
@@ -188,13 +214,11 @@ class AiChatStreamGuardrailTest {
     }
 
     @Test
-    void 통과하면_async_스트림이_시작되고_USER_메시지가_COMPLETED_로_저장된다() throws Exception {
+    void 통과하면_스트림이_완주하고_USER_메시지가_COMPLETED_로_저장된다() throws Exception {
         given(inputModerationClient.check(any(), any())).willReturn(InputModerationResult.passed());
-        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
-                .willReturn(new AiChatCompletion("이 책은", 10, 5, 15, null));
+        givenGeneratedStream("이 책은");
 
         send("이 책의 줄거리를 요약해줘")
-                .andExpect(request().asyncStarted())
                 .andExpect(status().isOk());
 
         assertThat(countByStatus("COMPLETED")).isGreaterThanOrEqualTo(1L);
@@ -206,12 +230,10 @@ class AiChatStreamGuardrailTest {
                 .willReturn(InputModerationResult.blocked(java.util.List.of("self-harm")));
         given(inputModerationClient.check(eq("정상 질문"), any()))
                 .willReturn(InputModerationResult.passed());
-        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
-                .willReturn(new AiChatCompletion("정상 응답", 10, 5, 15, null));
+        givenGeneratedStream("정상 응답");
 
         send("차단 질문").andExpect(status().isBadRequest());
         send("정상 질문")
-                .andExpect(request().asyncStarted())
                 .andExpect(status().isOk());
 
         assertThat(countByStatus("REJECTED")).isEqualTo(1L);

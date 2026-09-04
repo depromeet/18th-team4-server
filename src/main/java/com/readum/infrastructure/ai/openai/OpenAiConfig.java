@@ -85,6 +85,78 @@ public class OpenAiConfig {
                 .retryTemplate(new RetryTemplate(noRetry))
                 .build();
 
+        List<Advisor> advisors = inputAdvisors(guardrailProperties);
+
+        // 3) OpenAI Moderation API 기반 출력 advisor
+        advisors.add(new ModerationOutputAdvisor(
+                requireModerationModel(moderationModelProvider),
+                guardrailProperties.output().failureResponse(),
+                ORDER_MODERATION_OUTPUT
+        ));
+
+        ChatClient.Builder chatClientBuilder = ChatClient.builder(chatModel).defaultSystem(systemPrompt);
+        if (!advisors.isEmpty()) {
+            chatClientBuilder = chatClientBuilder.defaultAdvisors(advisors);
+        }
+        return chatClientBuilder.build();
+    }
+
+    /**
+     * [측정용 임시 — 조건 A] 채팅 응답 스트리밍 전용 ChatClient. 측정 후 처리 별도 결정, dev 머지 금지.
+     *
+     * 조건 A 의 세계는 "입력 검사 → 스트리밍" 이라 출력 검증 advisor 가 없다
+     * ({@link ModerationOutputAdvisor} 는 스트림 경로에서 청크를 전부 모은 뒤 검사하므로 스트리밍이 성립하지 않는다).
+     * 입력 advisor(정규식 패턴 · 금칙어)는 로컬 검사라 그대로 둔다.
+     * 전송은 WebClient(reactor-netty) 이고, {@code streamUsage} 를 켜서 마지막 청크로 실측 usage 를 받는다
+     * (OpenAI 의 {@code stream_options.include_usage}).
+     */
+    @Bean
+    public ChatClient streamingChatClient(
+            GuardrailProperties guardrailProperties,
+            ResponseErrorHandler openAiResponseErrorHandler,
+            @Value("${spring.ai.openai.api-key}") String apiKey,
+            @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
+            @Value("${spring.ai.openai.chat.options.model}") String chatModelName,
+            @Value("classpath:prompts/reading-assistant-system.st") Resource systemPromptResource
+    ) throws IOException {
+        String systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
+
+        // 스트리밍은 RestClient 가 아니라 WebClient 경로를 탄다. RestClient 는 OpenAiApi 빌더의
+        // 필수 인자라 채팅용과 동일한 JDK 기반 구성을 넘겨두지만 스트림 호출에서는 쓰이지 않는다.
+        java.net.http.HttpClient jdkHttpClient = java.net.http.HttpClient.newBuilder()
+                .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                .connectTimeout(CHAT_CONNECT_TIMEOUT)
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(jdkHttpClient);
+        requestFactory.setReadTimeout(CHAT_READ_TIMEOUT);
+
+        OpenAiApi openAiApi = OpenAiApi.builder()
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .restClientBuilder(RestClient.builder().requestFactory(requestFactory))
+                .webClientBuilder(WebClient.builder())
+                .responseErrorHandler(openAiResponseErrorHandler)
+                .build();
+        RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
+        OpenAiChatModel chatModel = OpenAiChatModel.builder()
+                .openAiApi(openAiApi)
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(chatModelName)
+                        .streamUsage(true)
+                        .build())
+                .retryTemplate(new RetryTemplate(noRetry))
+                .build();
+
+        List<Advisor> advisors = inputAdvisors(guardrailProperties);
+        ChatClient.Builder chatClientBuilder = ChatClient.builder(chatModel).defaultSystem(systemPrompt);
+        if (!advisors.isEmpty()) {
+            chatClientBuilder = chatClientBuilder.defaultAdvisors(advisors);
+        }
+        return chatClientBuilder.build();
+    }
+
+    /** 로컬 입력 검사 advisor 목록 (정규식 prompt-injection 차단 · 금칙어). 호출자가 뒤에 출력 advisor 를 덧붙일 수 있게 가변 목록을 준다. */
+    private List<Advisor> inputAdvisors(GuardrailProperties guardrailProperties) {
         List<Advisor> advisors = new ArrayList<>();
 
         // 1) 정규식 기반 prompt-injection / jailbreak 패턴 차단 (로컬, 무료)
@@ -104,19 +176,7 @@ public class OpenAiConfig {
                     .order(ORDER_SAFE_GUARD)
                     .build());
         }
-
-        // 3) OpenAI Moderation API 기반 출력 advisor
-        advisors.add(new ModerationOutputAdvisor(
-                requireModerationModel(moderationModelProvider),
-                guardrailProperties.output().failureResponse(),
-                ORDER_MODERATION_OUTPUT
-        ));
-
-        ChatClient.Builder chatClientBuilder = ChatClient.builder(chatModel).defaultSystem(systemPrompt);
-        if (!advisors.isEmpty()) {
-            chatClientBuilder = chatClientBuilder.defaultAdvisors(advisors);
-        }
-        return chatClientBuilder.build();
+        return advisors;
     }
 
     @Bean

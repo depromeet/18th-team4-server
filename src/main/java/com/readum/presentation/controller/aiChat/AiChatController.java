@@ -52,8 +52,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.List;
-import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Tag(name = "AI 채팅", description = "AI 와 책 한 권에 대해 대화하는 채팅 세션 및 메시지 관리")
@@ -72,7 +71,6 @@ public class AiChatController {
     private final SummaryDraftSearchService summaryDraftSearchService;
     private final BookChatSessionSearchService bookChatSessionSearchService;
     private final MessageStreamSseSerializer messageStreamSseSerializer;
-    private final Executor aiChatVirtualThreadExecutor;
 
     // 생성(최대 read 90초) + 여유. 컨테이너 기본 async 타임아웃이 생성보다 짧으면 도중에 닫히므로 명시한다.
     private static final long SSE_EMITTER_TIMEOUT_MILLIS = 120_000L;
@@ -145,10 +143,10 @@ public class AiChatController {
             summary = "메시지 전송 (SSE 응답)",
             description = """
                     사용자 메시지를 즉시 영속화한 뒤 AI 응답을 SSE 로 전달한다.
-                    응답은 완성 후 검증(출력 moderation)을 거쳐 한 번에 내려온다.
+                    응답은 생성되는 대로 조각 단위로 내려온다.
 
                     SSE 이벤트 종류:
-                    - **token**: 응답 텍스트. 완성 응답이 delta 1건으로 내려온다. payload `{"delta": "..."}`
+                    - **token**: 응답 텍스트 조각. payload `{"delta": "..."}`
                     - **done**: 스트림 정상 종료. payload `{"tokenCount": {...}, "createdAt": "..."}`
                     - **error**: 스트림 비정상 종료. payload `{"code": "...", "message": "...", "rateLimit": {...}?}`
 
@@ -213,36 +211,77 @@ public class AiChatController {
                     }
             )
     })
+    /**
+     * [측정용 임시 — 조건 A] 리액티브 체인이 요청 생애를 소유한다. 측정 후 처리 별도 결정, dev 머지 금지.
+     *
+     * 컨트롤러는 emitter 를 만들어 즉시 반환하고(요청 스레드 반납), 서버가 체인을 구독해 결과를 emitter 로 흘린다.
+     * 구독 해제를 SSE 연결에 묶지 않으므로 클라이언트 이탈이 생성을 취소하지 않는다 —
+     * 전송만 멈추고 소비·저장·정산은 끝까지 진행된다 (스펙 §5-1, A/B 공통 불변).
+     */
     @PostMapping(value = "/sessions/{sessionId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter sendMessage(
             @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
-        // 사전 단계는 요청 스레드에서 동기 실행 — 예외는 SSE 시작 전 4xx/5xx JSON 으로 나간다.
-        AiChatMessageSendService.PreparedChatTurn prepared =
-                aiChatMessageSendService.prepare(request.toCommand(userId, sessionId));
-
         SseEmitter emitter = new SseEmitter(SSE_EMITTER_TIMEOUT_MILLIS);
-        aiChatVirtualThreadExecutor.execute(() -> {
-            try {
-                List<MessageStreamEvent> events = aiChatMessageSendService.generateAndPersist(prepared);
-                for (MessageStreamEvent event : events) {
-                    emitter.send(messageStreamSseSerializer.toSseEvent(event));
-                }
-                emitter.complete();
-            } catch (IOException | IllegalStateException sendError) {
-                // 클라이언트 이탈. 응답은 이미 저장·정산됐으므로 전달 실패만 기록한다 (스펙 §5-1).
-                log.info("SSE 전송 실패(클라이언트 이탈 추정) sessionId={} cause={}", sessionId, sendError.toString());
-                emitter.completeWithError(sendError);
-            } catch (RuntimeException unexpectedError) {
-                // generateAndPersist 는 던지지 않는 계약이지만, 계약이 깨져도 클라이언트가
-                // emitter 타임아웃(120초)까지 매달리지 않도록 즉시 종료한다.
-                log.error("AI 채팅 SSE 처리 중 예기치 못한 실패 sessionId={}", sessionId, unexpectedError);
-                emitter.completeWithError(unexpectedError);
-            }
-        });
+        // 전송 실패(클라이언트 이탈) 이후에는 더 보내지 않는다. 소비는 계속한다.
+        AtomicBoolean deliveryStopped = new AtomicBoolean(false);
+        AtomicBoolean anythingDelivered = new AtomicBoolean(false);
+
+        aiChatMessageSendService.stream(request.toCommand(userId, sessionId))
+                .subscribe(
+                        event -> deliver(emitter, event, sessionId, deliveryStopped, anythingDelivered),
+                        error -> failStream(emitter, error, sessionId, anythingDelivered),
+                        () -> completeQuietly(emitter, sessionId));
         return emitter;
+    }
+
+    private void deliver(
+            SseEmitter emitter,
+            MessageStreamEvent event,
+            Long sessionId,
+            AtomicBoolean deliveryStopped,
+            AtomicBoolean anythingDelivered
+    ) {
+        if (deliveryStopped.get()) {
+            return;
+        }
+        try {
+            emitter.send(messageStreamSseSerializer.toSseEvent(event));
+            anythingDelivered.set(true);
+        } catch (IOException | IllegalStateException sendError) {
+            // 클라이언트 이탈 추정. 전송만 멈추고 생성·저장·정산은 그대로 진행된다 (스펙 §5-1).
+            deliveryStopped.set(true);
+            log.info("SSE 전송 실패(클라이언트 이탈 추정) sessionId={} cause={}", sessionId, sendError.toString());
+        } catch (RuntimeException unexpectedSendError) {
+            // 예상 밖의 전송 실패도 스트림 취소로 번지게 두지 않는다 — 취소되면 저장·정산이 통째로 건너뛰어진다.
+            deliveryStopped.set(true);
+            log.error("SSE 전송 중 예기치 못한 실패 sessionId={}", sessionId, unexpectedSendError);
+        }
+    }
+
+    /**
+     * 체인이 에러로 끝난 경우. 아직 아무것도 전송되지 않았다면 응답이 커밋 전이므로,
+     * 미전송 상태의 completeWithError 가 컨테이너 async dispatch 를 태워
+     * GlobalExceptionHandler 의 4xx/5xx JSON 이 나가게 한다.
+     */
+    private void failStream(SseEmitter emitter, Throwable error, Long sessionId, AtomicBoolean anythingDelivered) {
+        if (anythingDelivered.get()) {
+            // 생성 시작 이후의 실패는 서비스가 error 이벤트로 바꿔 주므로 여기 오면 계약이 깨진 것이다.
+            log.error("AI 채팅 SSE 처리 중 예기치 못한 실패 sessionId={}", sessionId, error);
+        } else {
+            log.info("AI 채팅 사전 관문 거절 sessionId={} cause={}", sessionId, error.toString());
+        }
+        emitter.completeWithError(error);
+    }
+
+    private void completeQuietly(SseEmitter emitter, Long sessionId) {
+        try {
+            emitter.complete();
+        } catch (IllegalStateException alreadyClosed) {
+            log.info("SSE 종료 처리 생략(이미 닫힘) sessionId={} cause={}", sessionId, alreadyClosed.toString());
+        }
     }
 
     @Operation(

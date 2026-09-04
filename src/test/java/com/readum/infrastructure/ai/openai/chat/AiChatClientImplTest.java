@@ -22,6 +22,10 @@ class AiChatClientImplTest {
     @Mock
     private ChatClient chatClient;
 
+    // [측정용 임시 — 조건 A] 스트리밍 전용 ChatClient. 이 테스트가 다루는 게이트 보상 경로에서는 쓰이지 않는다.
+    @Mock
+    private ChatClient streamingChatClient;
+
     @Mock
     private AiPromptAuditLogger auditLogger;
 
@@ -42,7 +46,7 @@ class AiChatClientImplTest {
     @BeforeEach
     void setUp() {
         aiChatClient = new AiChatClientImpl(
-                chatClient, auditLogger, rateLimitGuard, aiChatProperties, tokenCounter);
+                chatClient, streamingChatClient, auditLogger, rateLimitGuard, aiChatProperties, tokenCounter);
     }
 
     // 확보 쪽 번역(가드의 Optional → Counted/Uncounted)은 여기서 직접 단언하지 않는다 — 의도된 공백이다.

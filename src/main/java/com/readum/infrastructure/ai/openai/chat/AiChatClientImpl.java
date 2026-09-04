@@ -2,6 +2,7 @@ package com.readum.infrastructure.ai.openai.chat;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatCompletion;
+import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
 import com.readum.domain.aiChat.out.AiChatClient;
@@ -26,11 +27,13 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Component
@@ -43,6 +46,8 @@ public class AiChatClientImpl implements AiChatClient {
     private static final String PROMPT_TEMPLATE_VERSION = "v1";
 
     private final ChatClient chatClient;
+    // [측정용 임시 — 조건 A] 출력 검증 advisor 가 빠진 스트리밍 전용 ChatClient (OpenAiConfig#streamingChatClient).
+    private final ChatClient streamingChatClient;
     private final AiPromptAuditLogger auditLogger;
     private final OpenAiRateLimitGuard rateLimitGuard;
     private final AiChatProperties aiChatProperties;
@@ -123,6 +128,64 @@ public class AiChatClientImpl implements AiChatClient {
                     ChatResponseAuditMapper.applyResult(baseEvent, null, elapsedMillis(startNanos)), error);
             throw error;
         }
+    }
+
+    /**
+     * [측정용 임시 — 조건 A] 진짜 토큰 스트리밍. 호출 전 acquireRateLimitPermit() 이 선행되어야 한다.
+     * 감사 로그는 스트림이 끝날 때(성공/실패) 한 번 남긴다 — 마지막으로 본 응답(사용량이 실린 청크)을 결과로 쓴다.
+     */
+    @Override
+    public Flux<AiChatStreamChunk> generateStream(AiChatStreamCommand command) {
+        String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
+
+        List<Message> messages = command.history().stream()
+                .map(this::toSpringMessage)
+                .toList();
+
+        AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
+                conversationIdHash(command.conversationId()),
+                PROMPT_TEMPLATE_ID,
+                PROMPT_TEMPLATE_VERSION,
+                promptHash(command.history())
+        );
+        long startNanos = System.nanoTime();
+        AtomicReference<ChatResponse> lastResponseWithUsage = new AtomicReference<>();
+
+        return streamingChatClient.prompt()
+                .system(systemPrompt)
+                .messages(messages)
+                .stream()
+                .chatResponse()
+                .map(chatResponse -> {
+                    AiChatStreamChunk chunk = toStreamChunk(chatResponse);
+                    if (chunk.hasUsage()) {
+                        lastResponseWithUsage.set(chatResponse);
+                    }
+                    return chunk;
+                })
+                .doOnComplete(() -> auditLogger.success(ChatResponseAuditMapper.applyResult(
+                        baseEvent, lastResponseWithUsage.get(), elapsedMillis(startNanos))))
+                .doOnError(error -> {
+                    logUnexpectedError(error);
+                    auditLogger.failure(
+                            ChatResponseAuditMapper.applyResult(baseEvent, null, elapsedMillis(startNanos)), error);
+                });
+    }
+
+    private AiChatStreamChunk toStreamChunk(ChatResponse chatResponse) {
+        String delta = Optional.ofNullable(chatResponse)
+                .map(ChatResponse::getResult)
+                .map(result -> result.getOutput())
+                .map(output -> output.getText())
+                .orElse("");
+        ChatResponseMetadata metadata = chatResponse == null ? null : chatResponse.getMetadata();
+        Usage usage = Optional.ofNullable(metadata).map(ChatResponseMetadata::getUsage).orElse(null);
+        return new AiChatStreamChunk(
+                delta,
+                usage == null ? null : toIntOrNull(usage.getPromptTokens()),
+                usage == null ? null : toIntOrNull(usage.getCompletionTokens()),
+                usage == null ? null : toIntOrNull(usage.getTotalTokens())
+        );
     }
 
     private AiChatCompletion toCompletion(ChatResponse chatResponse) {

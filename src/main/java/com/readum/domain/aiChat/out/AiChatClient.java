@@ -1,7 +1,9 @@
 package com.readum.domain.aiChat.out;
 
 import com.readum.domain.aiChat.dto.AiChatCompletion;
+import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
+import reactor.core.publisher.Flux;
 
 public interface AiChatClient {
 
@@ -35,4 +37,11 @@ public interface AiChatClient {
 
     /** 비스트리밍 동기 호출. 완성 응답을 반환하고, 실패는 예외로 던진다. 호출 전 acquireRateLimitPermit() 이 선행되어야 한다. */
     AiChatCompletion generate(AiChatStreamCommand command);
+
+    /**
+     * [측정용 임시 — 조건 A] 스트리밍 호출. 본문 조각을 청크로 흘려보내고 마지막 청크에 실측 사용량을 싣는다.
+     * 실패는 스트림의 error 신호로 전달한다. 호출 전 acquireRateLimitPermit() 이 선행되어야 한다.
+     * 청크는 전송 계층(reactor-netty) 스레드에서 방출되므로, 구독자가 블로킹 처리를 하려면 스스로 오프로딩해야 한다.
+     */
+    Flux<AiChatStreamChunk> generateStream(AiChatStreamCommand command);
 }
