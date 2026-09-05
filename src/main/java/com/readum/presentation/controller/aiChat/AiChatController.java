@@ -152,6 +152,17 @@ public class AiChatController {
                     사용자 메시지를 즉시 영속화한 뒤 AI 응답을 SSE 로 전달한다.
                     응답은 생성되는 대로 조각 단위로 내려온다.
 
+                    **요청 식별자(requestId) 규약 — 클라이언트 필수 구현**:
+                    - 한 번의 메시지 전송마다 클라이언트가 식별자(UUID 권장)를 발급한다.
+                    - 응답이 끊겨 결과를 모를 때 **같은 요청을 다시 보낼 때는 같은 값을 그대로 유지**한다.
+                      서버는 (사용자, requestId) 조합의 유일성을 DB 에서 보장하므로, 재전송해도 답변을 새로 만들거나
+                      토큰을 다시 예약·과금하지 않는다.
+                    - 같은 값이 다시 오면 그 요청이 진행 중이든 이미 끝났든(성공·실패) **409** 로 거절한다.
+                      같은 값에 다른 본문을 실어 보내도 본문을 비교하지 않고 같은 요청으로 보아 409 로 거절한다.
+                    - 실패한 요청을 사용자가 다시 시도할 때는 **새 식별자**를 발급해 보낸다.
+                      서버가 매 재전송마다 식별자를 새로 발급해 주지 않는다.
+                    - 끊긴 요청의 결과는 메시지 이력 조회로 확인한다.
+
                     SSE 이벤트 종류:
                     - **token**: 응답 텍스트 조각. payload `{"delta": "..."}`
                     - **done**: 스트림 정상 종료. payload `{"tokenCount": {...}, "createdAt": "..."}`
@@ -187,6 +198,13 @@ public class AiChatController {
             @ApiResponse(responseCode = "400", description = "본문 검증 실패 / 감상문 생성 중(SESSION_LOCKED) 또는 완성·종료된(SESSION_ALREADY_SUMMARIZED) 세션"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
+            @ApiResponse(
+                    responseCode = "409",
+                    description = """
+                            이미 접수된 requestId (DUPLICATE_TURN_REQUEST). 진행 중·성공·실패 어느 상태든
+                            같은 식별자로는 답변을 새로 만들거나 토큰을 다시 예약·과금하지 않는다.
+                            재전송이라면 그대로 두고 이력 조회로 결과를 확인하고,
+                            사용자가 새 생성을 원한다면 새 식별자로 다시 요청한다."""),
             @ApiResponse(
                     responseCode = "429",
                     description = """
@@ -224,6 +242,8 @@ public class AiChatController {
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
+        // 진행 목록(메모리) 등록·신규 수락 차단은 별도 작업에서 이 앞에 붙는다 —
+        // 중복으로 판정된 요청은 생성하지 않고 그 호출의 등록만 정리한다.
         AiChatMessageSendService.PreparedChatTurn turn =
                 aiChatMessageSendService.prepare(request.toCommand(userId, sessionId));
 

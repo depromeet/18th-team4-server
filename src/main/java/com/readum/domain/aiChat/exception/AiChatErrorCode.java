@@ -10,6 +10,8 @@ public enum AiChatErrorCode implements ErrorCode {
     CHAT_VOLUME_NOT_ENOUGH("감상문 초안을 생성하기에 대화량이 부족합니다."),
     MESSAGE_CONTENT_BLANK("메시지 본문은 비어 있을 수 없습니다."),
     MESSAGE_CONTENT_TOO_LONG("메시지 본문은 1000자 이하여야 합니다."),
+    DUPLICATE_TURN_REQUEST("이미 접수된 요청입니다. 같은 요청 식별자로는 응답을 새로 만들지 않습니다."),
+    TURN_REQUEST_NOT_FOUND("요청 기록을 찾을 수 없습니다."),
     USER_RATE_LIMIT_EXCEEDED("메시지를 너무 자주 보내고 있습니다. 잠시 후 다시 시도해 주세요."),
     USER_TOKEN_BUDGET_EXCEEDED("대화 사용량이 많아 지금은 이용할 수 없습니다. 잠시 후 다시 시도해 주세요."),
     GUARDRAIL_BLOCKED_INPUT("요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요."),

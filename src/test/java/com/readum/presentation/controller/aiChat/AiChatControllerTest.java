@@ -82,6 +82,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AiChatControllerTest {
 
     private static final Long USER_ID = 1L;
+    private static final String REQUEST_ID = "0f2f1c9a-9f4d-4b2b-8f0d-6e0b0e7d5a11";
 
     @Mock
     private AiChatSessionCreateService aiChatSessionCreateService;
@@ -333,7 +334,7 @@ class AiChatControllerTest {
     void 메시지_전송_빈_본문이면_400() throws Exception {
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest(""))))
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, ""))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -341,7 +342,7 @@ class AiChatControllerTest {
     void 메시지_전송_whitespace_본문이면_400_변환된다() throws Exception {
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("   "))))
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, "   "))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -350,7 +351,7 @@ class AiChatControllerTest {
         String tooLong = "가".repeat(4001);
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest(tooLong))))
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, tooLong))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message", containsString("4000자")));
     }
@@ -363,14 +364,14 @@ class AiChatControllerTest {
     private ResultActions send(String content) throws Exception {
         return mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(new SendMessageRequest(content))));
+                .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, content))));
     }
 
     private MvcResult sendAndStartAsync(String content) throws Exception {
         return mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.TEXT_EVENT_STREAM)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest(content))))
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, content))))
                 .andExpect(request().asyncStarted())
                 .andReturn();
     }
@@ -464,7 +465,7 @@ class AiChatControllerTest {
                         .doOnCancel(() -> cancelled.set(true))
                         .doOnComplete(() -> consumedToEnd.set(true)));
 
-        SseEmitter emitter = controller.sendMessage(USER_ID, 7L, new SendMessageRequest("질문"));
+        SseEmitter emitter = controller.sendMessage(USER_ID, 7L, new SendMessageRequest(REQUEST_ID, "질문"));
 
         events.tryEmitNext(new MessageStreamEvent.Token("앞부분"));
         // 클라이언트 이탈 모사 — 이후 전송 시도는 IllegalStateException 으로 실패한다.

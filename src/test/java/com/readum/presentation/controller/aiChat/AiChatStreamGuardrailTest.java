@@ -155,7 +155,9 @@ class AiChatStreamGuardrailTest {
         // Accept 헤더를 지정하지 않는다(= accept all). 통과 시 produces=text/event-stream 매칭이 되고,
         // 거부/장애 시 JSON 에러 본문도 content negotiation 으로 정상 반환된다.
         // (Accept: text/event-stream 만 보내면 JSON 에러 본문이 협상에 실패해 ServletException 으로 샌다.)
-        SendMessageRequest body = new SendMessageRequest(content);
+        // 실제 서비스·H2 를 쓰는 슬라이스라 요청마다 새 식별자를 발급한다 —
+        // 같은 식별자를 재사용하면 두 번째 호출부터 중복 요청(409)으로 거절된다.
+        SendMessageRequest body = new SendMessageRequest(UUID.randomUUID().toString(), content);
         org.springframework.test.web.servlet.ResultActions actions =
                 mockMvc.perform(post("/api/v1/ai-chat/sessions/" + sessionId + "/messages")
                         .with(authentication(new UsernamePasswordAuthenticationToken(

@@ -13,6 +13,7 @@ import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.aiChat.out.UserMessageRateLimiter;
 import com.readum.domain.exception.BadRequestException;
+import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.ServiceUnavailableException;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -45,6 +47,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -55,6 +58,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 class AiChatMessageSendServiceTest {
 
     private static final Long USER_ID = 1L;
+    private static final String REQUEST_ID = "0f2f1c9a-9f4d-4b2b-8f0d-6e0b0e7d5a11";
+    private static final Long TURN_REQUEST_ID = 4242L;
     private static final UserTokenBudgetWriter.ReserveResult.Granted GRANTED =
             new UserTokenBudgetWriter.ReserveResult.Granted(20260904, 100);
     private static final AiChatClient.RateLimitPermit GATE_PERMIT =
@@ -81,6 +86,9 @@ class AiChatMessageSendServiceTest {
     @Mock
     private UserTokenBudgetWriter userTokenBudgetWriter;
 
+    @Mock
+    private AiChatTurnRequestWriter aiChatTurnRequestWriter;
+
     // 결정적 test double: settle 산술 배선만 검증한다(실제 jtokkit 정확도는 JtokkitTokenCounterTest 담당).
     // 기존 단언값 유지를 위해 구 추정과 동일한 문자÷2.5 로 센다.
     private final TokenCounter tokenCounter = text ->
@@ -101,8 +109,12 @@ class AiChatMessageSendServiceTest {
         // 입력 가드레일 기본값: 통과. 차단/장애 케이스는 각 테스트에서 override.
         lenient().when(inputModerationClient.check(anyString(), any()))
                 .thenReturn(InputModerationResult.passed());
+        // 요청 기록 기본값: 중복 아님(자리 확보 성공). 중복 케이스는 각 테스트에서 override.
+        lenient().when(aiChatTurnRequestWriter.claim(anyLong(), anyLong(), anyString(), any(Duration.class)))
+                .thenReturn(TURN_REQUEST_ID);
         // 토큰 예산 기본값: 예약 허용. 거절 케이스는 각 테스트에서 override.
-        lenient().when(userTokenBudgetWriter.reserve(anyLong(), anyInt()))
+        // 예약은 요청 기록의 예약 정보와 한 트랜잭션이라 AiChatTurnRequestWriter 를 거친다.
+        lenient().when(aiChatTurnRequestWriter.reserveWithRecord(anyLong(), anyLong(), anyInt()))
                 .thenReturn(GRANTED);
         // rate limit 기본값: 통과(Allowed). 거절/우회 케이스는 각 테스트에서 override.
         lenient().when(userMessageRateLimiter.tryConsume(anyLong()))
@@ -113,7 +125,7 @@ class AiChatMessageSendServiceTest {
         service = new AiChatMessageSendService(
                 persistService, aiChatClient, aiChatProperties,
                 userMessageRateLimiter, userBookRepository, bookRepository, inputModerationClient,
-                userTokenBudgetWriter, tokenCounter
+                userTokenBudgetWriter, aiChatTurnRequestWriter, tokenCounter
         );
     }
 
@@ -145,7 +157,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 빈_본문이면_BadRequest_MESSAGE_CONTENT_BLANK() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "   ");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "   ");
 
         assertThatThrownBy(() -> executeTurn(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -158,7 +170,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void NBSP_등_유니코드_공백만_있으면_BadRequest_MESSAGE_CONTENT_BLANK() {
         // U+00A0 NBSP, U+202F Narrow No-Break Space, U+2007 Figure Space 세 종류
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "   ");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "   ");
 
         assertThatThrownBy(() -> executeTurn(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -170,7 +182,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 본문이_1001자면_BadRequest_MESSAGE_CONTENT_TOO_LONG() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "가".repeat(1001));
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "가".repeat(1001));
 
         assertThatThrownBy(() -> executeTurn(command))
                 .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
@@ -181,8 +193,110 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
+    void 같은_요청_식별자로_다시_보내면_409_로_거절하고_어떤_부수_효과도_시작하지_않는다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        // 중복 판정은 조회가 아니라 (userId, requestId) UNIQUE 삽입이라, 중복은 유일 위반으로 드러난다.
+        given(aiChatTurnRequestWriter.claim(anyLong(), anyLong(), anyString(), any(Duration.class)))
+                .willThrow(new DataIntegrityViolationException("uk_ai_chat_turn_request_user_request"));
+
+        assertThatThrownBy(() -> executeTurn(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
+                .extracting(ConflictException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.DUPLICATE_TURN_REQUEST);
+
+        // 새 생성·예약·과금을 시작하지 않는다 — 폭주 가드 슬롯도 소모하지 않는다.
+        verifyNoInteractions(userMessageRateLimiter, persistService, inputModerationClient,
+                aiChatClient, userTokenBudgetWriter);
+        verify(aiChatTurnRequestWriter, never()).reserveWithRecord(anyLong(), anyLong(), anyInt());
+    }
+
+    @Test
+    void 중복으로_거절한_요청은_먼저_받은_요청을_실패로_끝내지_않는다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        given(aiChatTurnRequestWriter.claim(anyLong(), anyLong(), anyString(), any(Duration.class)))
+                .willThrow(new DataIntegrityViolationException("uk_ai_chat_turn_request_user_request"));
+
+        assertThatThrownBy(() -> executeTurn(command)).isInstanceOf(ConflictException.class);
+
+        // 먼저 받은 요청은 아직 진행 중일 수 있다 — 재전송이 그 요청의 상태를 건드리면 안 된다.
+        verify(aiChatTurnRequestWriter, never()).markFailed(anyLong(), anyString());
+    }
+
+    @Test
+    void 요청_중복_판정을_사용자_폭주_가드보다_먼저_수행한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 1, 1, 2));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(1L, 7L, "응답", null, 1, 1, 2));
+
+        executeTurn(command);
+
+        // 재전송이 폭주 슬롯을 갉아먹지 않으려면 중복 판정이 가드보다 앞서야 한다(슬롯은 반환하지 않는다).
+        InOrder gateOrder = inOrder(aiChatTurnRequestWriter, userMessageRateLimiter);
+        gateOrder.verify(aiChatTurnRequestWriter)
+                .claim(eq(USER_ID), eq(7L), eq(REQUEST_ID), any(Duration.class));
+        gateOrder.verify(userMessageRateLimiter).tryConsume(USER_ID);
+    }
+
+    @Test
+    void 예약_전_거절은_요청을_실패로_끝내고_환불하지_않는다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        given(userMessageRateLimiter.tryConsume(USER_ID))
+                .willReturn(new UserMessageRateLimiter.Result.Denied());
+
+        assertThatThrownBy(() -> executeTurn(command)).isInstanceOf(TooManyRequestsException.class);
+
+        verify(aiChatTurnRequestWriter).markFailed(
+                TURN_REQUEST_ID, AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED.name());
+        // 예약 전이라 되돌릴 예약이 없다.
+        verify(userTokenBudgetWriter, never()).refund(anyLong(), anyInt(), anyInt());
+    }
+
+    @Test
+    void 예약_후_거절은_예약을_환불하고_요청을_실패로_끝낸다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(inputModerationClient.check(anyString(), any()))
+                .willReturn(InputModerationResult.blocked(List.of("self-harm")));
+
+        assertThatThrownBy(() -> executeTurn(command)).isInstanceOf(BadRequestException.class);
+
+        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+        verify(aiChatTurnRequestWriter).markFailed(
+                TURN_REQUEST_ID, AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT.name());
+    }
+
+    @Test
+    void 요청_실패_기록이_실패해도_원래_거절_응답을_그대로_내보낸다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        given(userMessageRateLimiter.tryConsume(USER_ID))
+                .willReturn(new UserMessageRateLimiter.Result.Denied());
+        willThrow(new DataIntegrityViolationException("boom"))
+                .given(aiChatTurnRequestWriter).markFailed(anyLong(), anyString());
+
+        // 실패 기록이 안 되면 그 행은 미종료로 남아 만료 복구가 정리한다 — 응답을 500 으로 뒤집지 않는다.
+        assertThatThrownBy(() -> executeTurn(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
+                .extracting(TooManyRequestsException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED);
+    }
+
+    @Test
+    void 선행_처리를_통과하면_요청_기록_id_를_생성_단계로_넘긴다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+
+        AiChatMessageSendService.PreparedChatTurn turn = service.prepare(command);
+
+        // 생성 이후의 요청 종료(성공 확정·실패 기록·예약 반환)가 잠글 행을 가리킨다.
+        assertThat(turn.turnRequestId()).isEqualTo(TURN_REQUEST_ID);
+    }
+
+    @Test
     void rate_limit_검사가_Allowed_면_통과해서_턴이_정상_진행된다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         given(userMessageRateLimiter.tryConsume(USER_ID))
                 .willReturn(new UserMessageRateLimiter.Result.Allowed());
         givenLoadHistory(7L, List.of(), 100L);
@@ -199,7 +313,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void rate_limit_검사가_Denied_면_TooManyRequestsException_을_던지고_아무것도_진행하지_않는다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         given(userMessageRateLimiter.tryConsume(USER_ID))
                 .willReturn(new UserMessageRateLimiter.Result.Denied());
 
@@ -215,7 +329,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 한도_초과_시_RateLimitInfo_에_retryAfter_와_limit_정보가_담긴다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         given(userMessageRateLimiter.tryConsume(USER_ID))
                 .willReturn(new UserMessageRateLimiter.Result.Denied());
 
@@ -232,7 +346,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void rate_limit_검사가_Bypassed_면_검사_없이_통과해서_턴이_정상_진행된다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         given(userMessageRateLimiter.tryConsume(USER_ID))
                 .willReturn(new UserMessageRateLimiter.Result.Bypassed());
         givenLoadHistory(7L, List.of(), 100L);
@@ -248,8 +362,8 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 예산이_소진되면_429_USER_TOKEN_BUDGET_EXCEEDED_와_RetryAfter() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(userTokenBudgetWriter.reserve(anyLong(), anyInt()))
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        given(aiChatTurnRequestWriter.reserveWithRecord(anyLong(), anyLong(), anyInt()))
                 .willReturn(new UserTokenBudgetWriter.ReserveResult.Denied(Duration.ofMinutes(90)));
 
         assertThatThrownBy(() -> executeTurn(command))
@@ -266,8 +380,8 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 예산_거절_이후에는_환불을_호출하지_않는다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
-        given(userTokenBudgetWriter.reserve(anyLong(), anyInt()))
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        given(aiChatTurnRequestWriter.reserveWithRecord(anyLong(), anyLong(), anyInt()))
                 .willReturn(new UserTokenBudgetWriter.ReserveResult.Denied(Duration.ofMinutes(90)));
 
         assertThatThrownBy(() -> executeTurn(command))
@@ -279,7 +393,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 생성_정상_완료시_저장된_ASSISTANT_메시지_id_를_멱등_키로_실측_정산한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문"); // 2자 → 입력 추정 1
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문"); // 2자 → 입력 추정 1
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15)); // 실측 출력 5
@@ -295,7 +409,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 사용량이_실린_청크가_여러_건이면_더하지_않고_마지막_값으로_정산한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문"); // 2자 → 입력 추정 1
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문"); // 2자 → 입력 추정 1
         givenLoadHistory(7L, List.of(), 100L);
         // 공급자가 사용량을 두 번 실어 보낸 경우 — 뒤의 값이 그 턴의 실측이다(3 + 5 = 8 이 아니다).
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
@@ -316,7 +430,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 본문_없이_메타데이터만_실린_청크는_token_이벤트로_내보내지_않는다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15)); // 델타 1건 + 종료 사유 청크 + 사용량 청크
@@ -332,7 +446,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 생성_에러면_예약을_전액_환불한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(Flux.error(new RuntimeException("boom")));
@@ -345,7 +459,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 생성_에러면_게이트_계상을_보상_차감한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(Flux.error(new RuntimeException("boom")));
@@ -358,7 +472,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 게이트_보상_차감이_실패해도_error_이벤트는_그대로_반환된다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(Flux.error(new RuntimeException("boom")));
@@ -373,7 +487,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 생성_성공_후_저장_실패면_게이트_계상을_보상_차감하지_않는다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
@@ -389,7 +503,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 정상_완주면_게이트_계상을_보상_차감하지_않는다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
@@ -403,7 +517,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 입력_가드레일_차단_시_예약을_전액_환불한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "차단 대상");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "차단 대상");
         givenLoadHistory(7L, List.of(), 100L);
         given(inputModerationClient.check(eq("차단 대상"), any()))
                 .willReturn(InputModerationResult.blocked(List.of("self-harm")));
@@ -416,7 +530,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void Moderation_불능_UNAVAILABLE_시_예약을_전액_환불한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(inputModerationClient.check(eq("질문"), any()))
                 .willReturn(InputModerationResult.serviceUnavailable("OpenAI Moderation 502"));
@@ -429,7 +543,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 게이트_거절_시_예약을_전액_환불하고_예외를_그대로_던진다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         willThrow(new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST))
                 .given(aiChatClient).acquireRateLimitPermit(any(AiChatStreamCommand.class));
@@ -449,7 +563,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void USER_저장이_실패하면_게이트_계상을_보상_차감하고_예외를_그대로_전파한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         willThrow(new RuntimeException("db down"))
                 .given(persistService).recordUserMessage(anyLong(), anyLong(), anyString());
@@ -466,7 +580,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 사전_단계에서_NotFoundException_이_던져지면_그대로_전파된다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         given(persistService.loadHistory(7L, 1L))
                 .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
@@ -481,7 +595,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 사전_단계에서_BadRequestException_SESSION_LOCKED_도_그대로_전파된다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         given(persistService.loadHistory(7L, 1L))
                 .willThrow(new BadRequestException(AiChatErrorCode.SESSION_LOCKED));
 
@@ -493,7 +607,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 입력_가드레일에_차단되면_REJECTED_저장_후_BadRequest_를_던지고_생성은_시작하지_않는다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "차단 대상");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "차단 대상");
         givenLoadHistory(7L, List.of(), 100L);
         given(inputModerationClient.check(eq("차단 대상"), any()))
                 .willReturn(InputModerationResult.blocked(List.of("self-harm")));
@@ -510,7 +624,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 입력_가드레일_차단_응답_메시지는_거부_정본_텍스트다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "차단 대상");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "차단 대상");
         givenLoadHistory(7L, List.of(), 100L);
         given(inputModerationClient.check(eq("차단 대상"), any()))
                 .willReturn(InputModerationResult.blocked(List.of("sexual-minors")));
@@ -522,7 +636,7 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void Moderation_API_장애_UNAVAILABLE_이면_저장없이_ServiceUnavailable_을_던진다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(inputModerationClient.check(eq("질문"), any()))
                 .willReturn(InputModerationResult.serviceUnavailable("OpenAI Moderation 502"));
@@ -540,7 +654,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 생성이_정상이면_Token_과_Done_이벤트가_순서대로_반환되고_USER_와_ASSISTANT_가_저장된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "주제 요약");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "주제 요약");
 
         givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
@@ -580,7 +694,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 생성_에러면_FAILED_가_저장되고_Error_이벤트가_반환된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "질문");
 
         givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
@@ -601,7 +715,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void TooManyRequestsException_BURST_이면_AI_RATE_LIMIT_BURST_코드와_RateLimitInfo_가_Error_이벤트로_운반된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "질문");
 
         givenLoadHistory(sessionId, List.of(), 100L);
         RateLimitInfo info = new RateLimitInfo(
@@ -625,7 +739,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void TooManyRequestsException_QUOTA_EXHAUSTED_이면_AI_QUOTA_EXHAUSTED_코드의_Error_이벤트가_반환된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "질문");
 
         givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
@@ -645,7 +759,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 이전_이력이_있으면_LLM_호출_시_history_와_현재_user_메시지가_함께_전달된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "이번 질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "이번 질문");
 
         givenLoadHistory(sessionId, List.of(
                 new HistoryMessage(HistoryMessage.Role.USER, "이전 질문"),
@@ -673,7 +787,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 누적_요약이_있으면_AiChatStreamCommand_에_contextSummary_로_전달된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "이번 질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "이번 질문");
 
         givenLoadHistory(sessionId, "이전 대화를 압축한 누적 요약", List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
@@ -691,7 +805,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 생성_타임아웃_등_미분류_IO_예외는_AI_STREAM_INTERRUPTED_error_이벤트가_된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "질문");
 
         givenLoadHistory(sessionId, List.of(), 100L);
         // RestClient I/O 실패(읽기 타임아웃 포함)는 ResourceAccessException 으로 올라온다.
@@ -708,7 +822,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 정산이_실패해도_성공_이벤트는_그대로_반환된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "질문");
 
         givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
@@ -730,7 +844,7 @@ class AiChatMessageSendServiceTest {
     @Test
     void 이미_정산된_메시지의_중복_정산은_무시되고_성공_이벤트는_그대로_반환된다() {
         Long sessionId = 7L;
-        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, "질문");
+        SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "질문");
 
         givenLoadHistory(sessionId, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))

@@ -15,6 +15,7 @@ import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.aiChat.out.UserMessageRateLimiter;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.BusinessException;
+import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.ServiceUnavailableException;
 import com.readum.domain.exception.TooManyRequestsException;
@@ -53,14 +54,18 @@ public class AiChatMessageSendService {
     private final BookRepository bookRepository;
     private final InputModerationClient inputModerationClient;
     private final UserTokenBudgetWriter userTokenBudgetWriter;
+    private final AiChatTurnRequestWriter aiChatTurnRequestWriter;
     private final TokenCounter tokenCounter;
 
     /**
      * 선행 처리 결과 — 생성 단계(generateAndPersistStream)에 필요한 모든 문맥. 예약(reservation)은 항상 존재한다.
      * rateLimitPermit 은 전역 게이트 확보 결과로 항상 존재한다 (게이트가 검사 없이 통과시켰다면 계상 없는 permit).
+     * turnRequestId 는 이 턴의 요청 기록(ai_chat_turn_request) id — 생성 이후의 요청 종료(성공 확정·실패
+     * 기록·예약 반환)가 잠글 행을 가리킨다.
      */
     public record PreparedChatTurn(
             Long userId,
+            Long turnRequestId,
             AiChatStreamCommand streamCommand,
             UserTokenBudgetWriter.ReserveResult.Granted reservation,
             int estimatedMessageInputTokens,
@@ -72,12 +77,18 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 선행 처리(요청의 가상 스레드에서 동기 순차): 본문 검증 → 사용자 폭주 가드 → 예산 예약 → 이력 조회 →
-     * 입력 모더레이션 → 전역 게이트 → USER 저장.
+     * 선행 처리(요청의 가상 스레드에서 동기 순차): 본문 검증 → <b>요청 중복 판정</b> → 사용자 폭주 가드 →
+     * 예산 예약 → 이력 조회 → 입력 모더레이션 → 전역 게이트 → USER 저장.
      * 각 단계는 앞 단계의 결과를 보고 다음을 정하는 순차 업무이고, 요청 스레드가 가상 스레드라
      * 여기서 기다려도 다른 요청의 처리를 막지 않는다 — 그래서 리액티브 체인 밖에 둔다.
      * 여기서 던진 예외는 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 변환한다.
-     * 예산 예약을 moderation 앞에 두는 이유: 예산이 소진된 사용자가 공짜 moderation 호출
+     *
+     * <p>중복 판정을 폭주 가드보다 앞에 두는 이유: 재전송은 사용자가 새로 시도한 것이 아니라 같은 요청이
+     * 다시 도착한 것이다. 가드를 먼저 통과시키면 재전송이 폭주 슬롯을 갉아먹고(슬롯은 반환하지 않는다),
+     * 예약·moderation 같은 부수 효과도 중복으로 시작된다. 중복 판정 자체도 DB 삽입이라 부수 효과지만,
+     * 그 삽입이 곧 멱등 판정이라 어떤 것보다 앞서야 한다.
+     *
+     * <p>예산 예약을 moderation 앞에 두는 이유: 예산이 소진된 사용자가 공짜 moderation 호출
      * (제공자 RPM 자원)을 소모하지 못하게 한다 — 토큰 추정(tokenCounter)은 로컬 계산이라
      * 예약을 앞으로 당겨도 외부 비용이 없다.
      */
@@ -86,24 +97,82 @@ public class AiChatMessageSendService {
         Long sessionId = command.sessionId();
         Long userId = command.userId();
 
-        verifyUserMessageRateLimit(userId);
+        // 진행 목록(메모리) 등록은 별도 작업의 몫이다. 등록 시점은 여기(요청 수락)보다 앞이며,
+        // 중복으로 판정된 요청은 생성하지 않고 그 호출의 등록을 정리한다.
+        Long turnRequestId = claimTurnRequest(userId, sessionId, command.requestId());
 
-        BudgetReservation reservation = reserveTokenBudget(userId, normalizedContent);
-
-        // 예약 이후의 모든 거절·실패(이력 조회 실패, moderation 차단/불능, 게이트 거절, USER 저장 실패)는
-        // 생성이 시작되지 않은 경우라 예약을 전액 환불하고 원래 예외를 그대로 던진다.
+        // 예약 전 거절(폭주 가드·예산 거절)과 예약 후 거절(이력 조회·moderation·게이트·USER 저장)을 나눈다.
+        // 바깥 catch 는 두 경우 모두 요청 상태를 실패로 끝내고, 안쪽 catch 는 예약이 있는 경우에만 환불한다.
         try {
-            return prepareAfterReservation(sessionId, userId, normalizedContent, reservation);
+            verifyUserMessageRateLimit(userId);
+
+            BudgetReservation reservation = reserveTokenBudget(turnRequestId, userId, normalizedContent);
+
+            try {
+                return prepareAfterReservation(sessionId, userId, normalizedContent, turnRequestId, reservation);
+            } catch (RuntimeException rejectionAfterReservation) {
+                refundQuietly(userId, reservation.granted(), sessionId);
+                throw rejectionAfterReservation;
+            }
         } catch (RuntimeException prepareRejection) {
-            refundQuietly(userId, reservation.granted(), sessionId);
+            failTurnRequestQuietly(turnRequestId, prepareRejection);
             throw prepareRejection;
         }
+    }
+
+    /**
+     * 요청 자리를 잡으며 중복을 판정한다 — 판정은 조회가 아니라 (userId, requestId) UNIQUE 삽입이라
+     * 같은 ID 의 동시 요청 중 정확히 한 건만 통과한다.
+     * 중복이면 409 로 거절한다: 진행 중이든 이미 끝났든(성공·실패) 새 생성·예약·과금을 시작하지 않는다.
+     * 실패한 요청을 다시 시도하려면 클라이언트가 새 식별자를 보낸다.
+     * 같은 ID 에 다른 본문이 실려 와도 본문을 비교하지 않고 같은 요청으로 보아 409 로 거절한다
+     * — 클라이언트 계약의 <b>후보</b>이며, 확정 전까지는 이 단순한 규칙을 쓴다.
+     */
+    private Long claimTurnRequest(Long userId, Long sessionId, String requestId) {
+        try {
+            return aiChatTurnRequestWriter.claim(userId, sessionId, requestId, turnRequestExpiryTimeout());
+        } catch (DataIntegrityViolationException duplicateRequest) {
+            log.info("중복 요청 거절 userId={} sessionId={} requestId={}", userId, sessionId, requestId);
+            throw new ConflictException(AiChatErrorCode.DUPLICATE_TURN_REQUEST);
+        }
+    }
+
+    /**
+     * 만료 유예 = 생성 전체 기한 + 종료 대기 상한. 생성이 전체 기한까지 늘어지고 그 뒤 후처리가
+     * 종료 대기 상한만큼 더 걸려도 정상 요청을 만료로 오판하지 않는 하한이다.
+     * <b>후보값</b>이며, 만료 시각과 후처리 대기 정책의 관계는 만료 복구 작업에서 확정한다.
+     */
+    private Duration turnRequestExpiryTimeout() {
+        AiChatProperties.Streaming streaming = aiChatProperties.streaming();
+        return Duration.ofSeconds(
+                (long) streaming.generationTotalTimeoutSeconds() + streaming.shutdownWaitSeconds());
+    }
+
+    /**
+     * 선행 단계의 거절로 요청 상태를 끝낸다. 실패는 삼킨다 — 여기서 던지면 원래의 4xx 가 500 으로 둔갑한다.
+     * 끝내지 못한 행은 미종료로 남아 만료 복구의 대상이 된다.
+     */
+    private void failTurnRequestQuietly(Long turnRequestId, RuntimeException prepareRejection) {
+        try {
+            aiChatTurnRequestWriter.markFailed(turnRequestId, failureCodeOf(prepareRejection));
+        } catch (RuntimeException failRecordError) {
+            log.error("요청 실패 기록 실패 turnRequestId={}", turnRequestId, failRecordError);
+        }
+    }
+
+    /** 실패 사유 표식 — 도메인 예외면 ErrorCode 이름, 아니면 예외 타입 이름(운영 확인용, 컬럼 길이에 맞춰 자름). */
+    private String failureCodeOf(RuntimeException prepareRejection) {
+        String code = (prepareRejection instanceof BusinessException businessException)
+                ? businessException.getErrorCode().name()
+                : prepareRejection.getClass().getSimpleName();
+        return code.length() > 50 ? code.substring(0, 50) : code;
     }
 
     private PreparedChatTurn prepareAfterReservation(
             Long sessionId,
             Long userId,
             String normalizedContent,
+            Long turnRequestId,
             BudgetReservation reservation
     ) {
         TurnContext turnContext = loadTurnContext(sessionId, userId);
@@ -124,6 +193,7 @@ public class AiChatMessageSendService {
 
         return new PreparedChatTurn(
                 userId,
+                turnRequestId,
                 streamCommand,
                 reservation.granted(),
                 reservation.estimatedMessageInputTokens(),
@@ -229,11 +299,16 @@ public class AiChatMessageSendService {
     ) {
     }
 
-    private BudgetReservation reserveTokenBudget(Long userId, String normalizedContent) {
+    /**
+     * 예산 예약과 요청 기록의 예약 정보를 한 트랜잭션으로 커밋한다 (AiChatTurnRequestWriter#reserveWithRecord) —
+     * 예약량·예산 기간이 요청 행에 함께 남아야 비정상 종료 뒤에도 무엇을 얼마나 되돌릴지 알 수 있다.
+     */
+    private BudgetReservation reserveTokenBudget(Long turnRequestId, Long userId, String normalizedContent) {
         int estimatedMessageInputTokens = tokenCounter.count(normalizedContent);
         int reservedTokens = estimatedMessageInputTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
         // DB 원장이 정본이라 우회(fail-open) 경로가 없다 — reserve 의 DB 예외는 그대로 전파한다(500).
-        UserTokenBudgetWriter.ReserveResult reserveResult = userTokenBudgetWriter.reserve(userId, reservedTokens);
+        UserTokenBudgetWriter.ReserveResult reserveResult =
+                aiChatTurnRequestWriter.reserveWithRecord(turnRequestId, userId, reservedTokens);
         if (reserveResult instanceof UserTokenBudgetWriter.ReserveResult.Denied denied) {
             throw tokenBudgetExceeded(denied.retryAfter());
         }
