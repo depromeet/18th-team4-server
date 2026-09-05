@@ -1,6 +1,7 @@
 package com.readum.infrastructure.ai.openai;
 
 import com.readum.domain.aiChat.out.InputModerationClient;
+import com.readum.infrastructure.ai.openai.guardrail.ChatInputGuardrail;
 import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import com.readum.infrastructure.ai.openai.guardrail.ModerationOutputAdvisor;
 import com.readum.infrastructure.ai.openai.guardrail.PromptInjectionPatternAdvisor;
@@ -102,25 +103,34 @@ public class OpenAiConfig {
     }
 
     /**
-     * [측정용 임시 — 조건 A] 채팅 응답 스트리밍 전용 ChatClient. 측정 후 처리 별도 결정, dev 머지 금지.
+     * 채팅 응답 스트리밍 전용 ChatModel.
      *
-     * 조건 A 의 세계는 "입력 검사 → 스트리밍" 이라 출력 검증 advisor 가 없다
-     * ({@link ModerationOutputAdvisor} 는 스트림 경로에서 청크를 전부 모은 뒤 검사하므로 스트리밍이 성립하지 않는다).
-     * 입력 advisor(정규식 패턴 · 금칙어)는 로컬 검사라 그대로 둔다.
-     * 전송은 WebClient(reactor-netty) 이고, {@code streamUsage} 를 켜서 마지막 청크로 실측 usage 를 받는다
+     * <p>ChatClient 가 아니라 ChatModel 을 노출한다. ChatClient 의 스트림 경로에는 내부 advisor
+     * ({@code ChatModelStreamAdvisor}) 가 자동으로 끼며, 그 advisor 는 모델 스트림 뒤에
+     * {@code publishOn(Schedulers.boundedElastic())} 를 둔다. 끄거나 다른 scheduler 를 지정하는 옵션이 없고,
+     * 사용자 advisor 를 하나도 달지 않아도 남는다(Spring AI 2.0.0-M4 소스 확인). 전달·저장·정산을 가상 스레드로
+     * 옮긴 뒤에는 청크를 공유 풀로 한 번 더 옮겨 실을 업무상 이유가 없어 그 경계를 두지 않는다.
+     * 직접 호출이 Spring AI 내부의 모든 실행 자원이나 모든 scheduler 사용을 없앤다는 뜻은 아니다.
+     *
+     * <p>ChatClient 가 대신 해 주던 것 중 이 경로가 쓰던 기능은 각각 이렇게 보존한다.
+     * <ul>
+     *   <li>시스템 메시지 + 대화 이력의 프롬프트 조립 → {@code AiChatClientImpl} 이 같은 순서로 직접 조립</li>
+     *   <li>로컬 입력 검사(정규식 패턴 · 금칙어) → {@link ChatInputGuardrail} 이 같은 판정 수행</li>
+     *   <li>모델·옵션({@code streamUsage} 포함)·재시도 0회·오류 핸들러 → 이 빈에 그대로</li>
+     * </ul>
+     * 출력 검증 advisor 는 원래도 이 경로에 달지 않았다 — {@link ModerationOutputAdvisor} 는 스트림에서 조각을
+     * 전부 모은 뒤 검사하므로 달면 조각 단위 전달이 성립하지 않는다. 비스트리밍 {@code chatClient} 빈에는 그대로 있다.
+     *
+     * <p>전송은 WebClient(reactor-netty) 이고, {@code streamUsage} 를 켜서 마지막 청크로 실측 사용량을 받는다
      * (OpenAI 의 {@code stream_options.include_usage}).
      */
     @Bean
-    public ChatClient streamingChatClient(
-            GuardrailProperties guardrailProperties,
+    public OpenAiChatModel streamingChatModel(
             ResponseErrorHandler openAiResponseErrorHandler,
             @Value("${spring.ai.openai.api-key}") String apiKey,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
-            @Value("${spring.ai.openai.chat.options.model}") String chatModelName,
-            @Value("classpath:prompts/reading-assistant-system.st") Resource systemPromptResource
-    ) throws IOException {
-        String systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
-
+            @Value("${spring.ai.openai.chat.options.model}") String chatModelName
+    ) {
         // 스트리밍은 RestClient 가 아니라 WebClient 경로를 탄다. RestClient 는 OpenAiApi 빌더의
         // 필수 인자라 채팅용과 동일한 JDK 기반 구성을 넘겨두지만 스트림 호출에서는 쓰이지 않는다.
         java.net.http.HttpClient jdkHttpClient = java.net.http.HttpClient.newBuilder()
@@ -137,8 +147,10 @@ public class OpenAiConfig {
                 .webClientBuilder(WebClient.builder())
                 .responseErrorHandler(openAiResponseErrorHandler)
                 .build();
+        // 재시도를 두지 않는 이유는 비스트리밍 빈과 같다 — 사용자가 기다리기를 그만둔 뒤에도 보이지 않는
+        // 과금 호출이 반복되는 것을 막는다. 실패는 즉시 표면화하고 재전송 여부는 사용자가 정한다.
         RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
-        OpenAiChatModel chatModel = OpenAiChatModel.builder()
+        return OpenAiChatModel.builder()
                 .openAiApi(openAiApi)
                 .defaultOptions(OpenAiChatOptions.builder()
                         .model(chatModelName)
@@ -146,13 +158,12 @@ public class OpenAiConfig {
                         .build())
                 .retryTemplate(new RetryTemplate(noRetry))
                 .build();
+    }
 
-        List<Advisor> advisors = inputAdvisors(guardrailProperties);
-        ChatClient.Builder chatClientBuilder = ChatClient.builder(chatModel).defaultSystem(systemPrompt);
-        if (!advisors.isEmpty()) {
-            chatClientBuilder = chatClientBuilder.defaultAdvisors(advisors);
-        }
-        return chatClientBuilder.build();
+    /** 스트리밍 경로가 ChatClient 없이 수행할 로컬 입력 검사 — 판정 기준은 입력 advisor 두 개와 같다. */
+    @Bean
+    public ChatInputGuardrail chatInputGuardrail(GuardrailProperties guardrailProperties) {
+        return new ChatInputGuardrail(guardrailProperties.input());
     }
 
     /** 로컬 입력 검사 advisor 목록 (정규식 prompt-injection 차단 · 금칙어). 호출자가 뒤에 출력 advisor 를 덧붙일 수 있게 가변 목록을 준다. */
