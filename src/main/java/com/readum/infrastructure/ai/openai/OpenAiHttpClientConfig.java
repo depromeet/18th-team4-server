@@ -10,28 +10,29 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
-import org.springframework.http.client.ReactorClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 
 /**
- * [측정용 임시 — 조건 A] 입력 moderation 클라이언트 구성. 측정 후 처리 별도 결정, dev 머지 금지.
- * 입력 검사 전송을 Reactor 전송 팩토리로 구성한다 — executor 를 지정하지 않아 요청 본문 쓰기가
- * 전역 {@code Schedulers.boundedElastic()} 에 위임된다. 긴 응답 대기와 본문 전송 작업이 같은
- * 제한된 풀에 결합되는 것이 이 실험의 축이다.
+ * 입력 moderation 클라이언트 구성.
+ * 단순 요청/응답이라 리액티브가 불필요 → 블로킹 JDK HttpClient 로 구성하고,
+ * 요청의 가상 스레드에서 끝까지 블로킹으로 기다린다 — 요청 본문 쓰기와 응답 대기가
+ * 호출 스레드 하나에서 끝나므로 공유 풀에 의존하지 않는다.
  */
 @Slf4j
 @Configuration
 public class OpenAiHttpClientConfig {
 
     /**
-     * [측정용 임시 — 조건 A] moderation ModerationModel 을 동기 RestClient + Reactor 전송 팩토리로 구성한다
-     * (auto-config 대체). 기본 생성자를 쓰고 setExecutor 를 호출하지 않는다 —
-     * 기본 executor 가 전역 {@code Schedulers.boundedElastic()} 이라, 동시 요청이 풀 상한에 도달하면
-     * 본문 쓰기가 실행될 워커가 남지 않는 자기 교착이 성립하는지 검증한다.
-     * connect 10초 / read 30초, 자체 재시도 없음은 기존 구성 그대로 유지한다.
+     * moderation ModerationModel 을 블로킹 JDK HttpClient(HTTP/1.1) 로 구성한다 (auto-config 대체).
+     * 리액터 전송 팩토리로 감싸면 요청 본문 쓰기가 전역 {@code Schedulers.boundedElastic()} 으로 넘어가
+     * 응답 대기와 본문 쓰기가 같은 풀의 서로 다른 워커를 요구하지만, 여기서는 그 분리가 없다 —
+     * 본문 쓰기도 응답 대기도 호출한 가상 스레드 하나에서 일어난다.
+     * 단순 1회성 호출이라 HTTP/2 멀티플렉싱 이점이 없어 HTTP/1.1 로 고정한다. JDK 자체 연결 풀을 그대로 쓴다.
      */
     @Bean
     @Primary
@@ -40,10 +41,13 @@ public class OpenAiHttpClientConfig {
             @Value("${spring.ai.openai.api-key}") String apiKey,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl
     ) {
-        // 재현의 심장: 기본 생성자로 만들고 setExecutor(...) 를 호출하지 않는다.
-        // 그래야 요청 본문 쓰기(OutputStreamPublisher)가 전역 Schedulers.boundedElastic() 으로 제출된다.
-        ReactorClientHttpRequestFactory requestFactory = new ReactorClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(Duration.ofSeconds(10));
+        HttpClient jdkHttpClient = HttpClient.newBuilder()
+                // moderation 은 단순 1회성 요청/응답이라 HTTP/2 멀티플렉싱 이점이 없다. HTTP/1.1 로 고정해
+                // HTTP/2 스택(스트림 멀티플렉싱·흐름 제어)을 아예 배제 → 가드레일 경로를 단순·예측가능하게 둔다.
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(jdkHttpClient);
         requestFactory.setReadTimeout(Duration.ofSeconds(30)); // moderation 이 매달리지 않게 상한(② read 타임아웃)
         RestClient.Builder restClientBuilder = RestClient.builder().requestFactory(requestFactory);
         OpenAiModerationApi api = OpenAiModerationApi.builder()
@@ -56,7 +60,7 @@ public class OpenAiHttpClientConfig {
         // congestion collapse 를 키우는 증폭기였다(측정 확인). 근본(본문 굶음)을 고쳤으므로 재시도로 가릴 실패가 없고,
         // 남는 드문 일시적 실패는 InputModerationClient 의 failurePolicy(CLOSED→503)로 빠르게 표면화한다.
         RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
-        log.info("[OpenAI HTTP] moderation model: [측정용 임시] Reactor 전송 팩토리(기본 executor = 전역 boundedElastic), 자체 재시도 없음");
+        log.info("[OpenAI HTTP] moderation model: 블로킹 JDK HttpClient (HTTP/1.1), 자체 재시도 없음");
         return new OpenAiModerationModel(api, new RetryTemplate(noRetry));
     }
 }

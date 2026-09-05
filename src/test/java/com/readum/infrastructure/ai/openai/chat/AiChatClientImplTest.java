@@ -22,7 +22,7 @@ class AiChatClientImplTest {
     @Mock
     private ChatClient chatClient;
 
-    // [측정용 임시 — 조건 A] 스트리밍 전용 ChatClient. 이 테스트가 다루는 게이트 보상 경로에서는 쓰이지 않는다.
+    // 스트리밍 전용 ChatClient. 이 테스트가 다루는 게이트 보상 경로에서는 쓰이지 않는다.
     @Mock
     private ChatClient streamingChatClient;
 

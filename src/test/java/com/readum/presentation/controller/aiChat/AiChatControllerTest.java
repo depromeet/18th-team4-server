@@ -48,6 +48,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
@@ -66,6 +67,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -353,33 +355,43 @@ class AiChatControllerTest {
                 .andExpect(jsonPath("$.error.message", containsString("4000자")));
     }
 
-    // 사전 관문 거절은 첫 전송 전 completeWithError 로 끝나므로,
-    // 컨테이너 async dispatch 를 태우면 GlobalExceptionHandler 의 4xx/5xx JSON 이 나간다.
+    // 선행 처리 거절은 요청 스레드에서 동기 예외로 끝나므로, SSE 가 시작되지 않고
+    // GlobalExceptionHandler 의 4xx/5xx JSON 이 그대로 동기 응답된다.
+    // PreparedChatTurn 은 도메인 패키지 밖에서 만들 수 없어(예약 결과 타입이 package-private),
+    // 통과 경로에서는 prepare 의 기본 반환값(null)을 그대로 생성 단계 스텁으로 넘긴다.
+
+    private ResultActions send(String content) throws Exception {
+        return mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new SendMessageRequest(content))));
+    }
 
     private MvcResult sendAndStartAsync(String content) throws Exception {
         return mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.TEXT_EVENT_STREAM)
                         .content(objectMapper.writeValueAsString(new SendMessageRequest(content))))
                 .andExpect(request().asyncStarted())
                 .andReturn();
     }
 
     @Test
-    void 메시지_전송_세션_없으면_404() throws Exception {
-        given(aiChatMessageSendService.stream(any(SendMessageCommand.class)))
-                .willReturn(Flux.error(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND)));
+    void 메시지_전송_세션_없으면_SSE_를_시작하지_않고_404_JSON_을_응답한다() throws Exception {
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
+                .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
+        send("질문")
+                .andExpect(request().asyncNotStarted())
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.message").value("세션을 찾을 수 없습니다."));
     }
 
     @Test
     void 메시지_전송_잠긴_세션이면_400() throws Exception {
-        given(aiChatMessageSendService.stream(any(SendMessageCommand.class)))
-                .willReturn(Flux.error(new BadRequestException(AiChatErrorCode.SESSION_LOCKED)));
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
+                .willThrow(new BadRequestException(AiChatErrorCode.SESSION_LOCKED));
 
-        mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
+        send("질문")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message").value("감상문 생성 중에는 메시지를 보낼 수 없습니다."));
     }
@@ -388,29 +400,37 @@ class AiChatControllerTest {
     void 메시지_전송_사용자_호출_한도를_넘으면_429_와_RetryAfter_헤더() throws Exception {
         RateLimitInfo info = new RateLimitInfo(
                 Duration.ofSeconds(10), 5L, null, 0L, null, null, null);
-        given(aiChatMessageSendService.stream(any(SendMessageCommand.class)))
-                .willReturn(Flux.error(
-                        new TooManyRequestsException(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED, info)));
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
+                .willThrow(new TooManyRequestsException(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED, info));
 
-        mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
+        send("질문")
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists(HttpHeaders.RETRY_AFTER));
     }
 
     @Test
     void 메시지_전송_입력_검사_불능이면_503() throws Exception {
-        given(aiChatMessageSendService.stream(any(SendMessageCommand.class)))
-                .willReturn(Flux.error(
-                        new ServiceUnavailableException(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE)));
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
+                .willThrow(new ServiceUnavailableException(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE));
 
-        mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
+        send("질문")
                 .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    void 선행_처리가_거절하면_생성_단계는_시작되지_않는다() throws Exception {
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
+                .willThrow(new BadRequestException(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT));
+
+        send("차단 대상").andExpect(status().isBadRequest());
+
+        verify(aiChatMessageSendService, never()).generateAndPersistStream(any());
     }
 
     @Test
     void 메시지_전송_정상_스트림이면_token_과_done_이벤트가_방출된다() throws Exception {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
-        given(aiChatMessageSendService.stream(any(SendMessageCommand.class))).willReturn(Flux.just(
+        given(aiChatMessageSendService.generateAndPersistStream(any())).willReturn(Flux.just(
                 new MessageStreamEvent.Token("alpha"),
                 new MessageStreamEvent.Token(" beta"),
                 new MessageStreamEvent.Done(
@@ -418,14 +438,7 @@ class AiChatControllerTest {
                         createdAt)
         ));
 
-        MvcResult initial = mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .accept(MediaType.TEXT_EVENT_STREAM)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
-                .andExpect(request().asyncStarted())
-                .andReturn();
-
-        String body = mockMvc.perform(asyncDispatch(initial))
+        String body = mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -446,7 +459,7 @@ class AiChatControllerTest {
         AtomicBoolean cancelled = new AtomicBoolean(false);
         AtomicBoolean consumedToEnd = new AtomicBoolean(false);
         Sinks.Many<MessageStreamEvent> events = Sinks.many().unicast().onBackpressureBuffer();
-        given(aiChatMessageSendService.stream(any(SendMessageCommand.class)))
+        given(aiChatMessageSendService.generateAndPersistStream(any()))
                 .willReturn(events.asFlux()
                         .doOnCancel(() -> cancelled.set(true))
                         .doOnComplete(() -> consumedToEnd.set(true)));
@@ -467,7 +480,7 @@ class AiChatControllerTest {
 
     @Test
     void 메시지_전송_스트림_에러_이벤트도_정상_방출된다() throws Exception {
-        given(aiChatMessageSendService.stream(any(SendMessageCommand.class))).willReturn(Flux.just(
+        given(aiChatMessageSendService.generateAndPersistStream(any())).willReturn(Flux.just(
                 new MessageStreamEvent.Token("부분"),
                 MessageStreamEvent.Error.of(
                         AiChatErrorCode.AI_STREAM_INTERRUPTED.name(),
@@ -475,14 +488,7 @@ class AiChatControllerTest {
                 )
         ));
 
-        MvcResult initial = mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .accept(MediaType.TEXT_EVENT_STREAM)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
-                .andExpect(request().asyncStarted())
-                .andReturn();
-
-        String body = mockMvc.perform(asyncDispatch(initial))
+        String body = mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

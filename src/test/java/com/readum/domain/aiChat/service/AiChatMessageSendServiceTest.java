@@ -132,9 +132,13 @@ class AiChatMessageSendServiceTest {
                 new AiChatStreamChunk("", inputTokens, outputTokens, totalTokens));
     }
 
-    /** 한 턴을 끝까지 소비한다. 사전 관문 거절은 여기서 원래 예외 그대로 다시 던져진다. */
+    /**
+     * 한 턴을 선행 처리 → 생성 순서로 끝까지 실행한다.
+     * 선행 처리의 거절은 prepare 가 동기로 던지므로 이 호출에서 그대로 다시 던져진다.
+     */
     private List<MessageStreamEvent> executeTurn(SendMessageCommand command) {
-        return service.stream(command).collectList().block();
+        AiChatMessageSendService.PreparedChatTurn turn = service.prepare(command);
+        return service.generateAndPersistStream(turn).collectList().block();
     }
 
     @Test

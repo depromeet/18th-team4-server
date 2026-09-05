@@ -139,6 +139,13 @@ public class AiChatController {
         return GlobalApiResponse.ok(BookChatSessionsResponse.from(result));
     }
 
+    /**
+     * 선행 처리는 요청 스레드(가상 스레드)에서 동기로 끝낸다 — 여기서 던진 예외는 SSE 시작 전이라
+     * GlobalExceptionHandler 의 4xx/5xx JSON(429 는 Retry-After·X-RateLimit-* 헤더 포함)으로 나간다.
+     *
+     * 그다음 emitter 를 만들어 생성 스트림을 서버가 구독한다. 구독 해제를 SSE 연결에 묶지 않으므로
+     * 클라이언트 이탈이 생성을 취소하지 않는다 — 전송만 멈추고 소비·저장·정산은 끝까지 진행된다 (스펙 §5-1).
+     */
     @Operation(
             summary = "메시지 전송 (SSE 응답)",
             description = """
@@ -211,28 +218,23 @@ public class AiChatController {
                     }
             )
     })
-    /**
-     * [측정용 임시 — 조건 A] 리액티브 체인이 요청 생애를 소유한다. 측정 후 처리 별도 결정, dev 머지 금지.
-     *
-     * 컨트롤러는 emitter 를 만들어 즉시 반환하고(요청 스레드 반납), 서버가 체인을 구독해 결과를 emitter 로 흘린다.
-     * 구독 해제를 SSE 연결에 묶지 않으므로 클라이언트 이탈이 생성을 취소하지 않는다 —
-     * 전송만 멈추고 소비·저장·정산은 끝까지 진행된다 (스펙 §5-1, A/B 공통 불변).
-     */
     @PostMapping(value = "/sessions/{sessionId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter sendMessage(
             @AuthenticatedUserId Long userId,
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
+        AiChatMessageSendService.PreparedChatTurn turn =
+                aiChatMessageSendService.prepare(request.toCommand(userId, sessionId));
+
         SseEmitter emitter = new SseEmitter(SSE_EMITTER_TIMEOUT_MILLIS);
         // 전송 실패(클라이언트 이탈) 이후에는 더 보내지 않는다. 소비는 계속한다.
         AtomicBoolean deliveryStopped = new AtomicBoolean(false);
-        AtomicBoolean anythingDelivered = new AtomicBoolean(false);
 
-        aiChatMessageSendService.stream(request.toCommand(userId, sessionId))
+        aiChatMessageSendService.generateAndPersistStream(turn)
                 .subscribe(
-                        event -> deliver(emitter, event, sessionId, deliveryStopped, anythingDelivered),
-                        error -> failStream(emitter, error, sessionId, anythingDelivered),
+                        event -> deliver(emitter, event, sessionId, deliveryStopped),
+                        error -> failStream(emitter, error, sessionId),
                         () -> completeQuietly(emitter, sessionId));
         return emitter;
     }
@@ -241,15 +243,13 @@ public class AiChatController {
             SseEmitter emitter,
             MessageStreamEvent event,
             Long sessionId,
-            AtomicBoolean deliveryStopped,
-            AtomicBoolean anythingDelivered
+            AtomicBoolean deliveryStopped
     ) {
         if (deliveryStopped.get()) {
             return;
         }
         try {
             emitter.send(messageStreamSseSerializer.toSseEvent(event));
-            anythingDelivered.set(true);
         } catch (IOException | IllegalStateException sendError) {
             // 클라이언트 이탈 추정. 전송만 멈추고 생성·저장·정산은 그대로 진행된다 (스펙 §5-1).
             deliveryStopped.set(true);
@@ -262,17 +262,11 @@ public class AiChatController {
     }
 
     /**
-     * 체인이 에러로 끝난 경우. 아직 아무것도 전송되지 않았다면 응답이 커밋 전이므로,
-     * 미전송 상태의 completeWithError 가 컨테이너 async dispatch 를 태워
-     * GlobalExceptionHandler 의 4xx/5xx JSON 이 나가게 한다.
+     * 생성 스트림이 error 신호로 끝난 경우. 생성 단계의 실패는 서비스가 error 이벤트로 바꿔 주므로
+     * 여기 오면 계약이 깨진 것이다 — 클라이언트가 emitter 타임아웃까지 매달리지 않게 즉시 종료한다.
      */
-    private void failStream(SseEmitter emitter, Throwable error, Long sessionId, AtomicBoolean anythingDelivered) {
-        if (anythingDelivered.get()) {
-            // 생성 시작 이후의 실패는 서비스가 error 이벤트로 바꿔 주므로 여기 오면 계약이 깨진 것이다.
-            log.error("AI 채팅 SSE 처리 중 예기치 못한 실패 sessionId={}", sessionId, error);
-        } else {
-            log.info("AI 채팅 사전 관문 거절 sessionId={} cause={}", sessionId, error.toString());
-        }
+    private void failStream(SseEmitter emitter, Throwable error, Long sessionId) {
+        log.error("AI 채팅 SSE 처리 중 예기치 못한 실패 sessionId={}", sessionId, error);
         emitter.completeWithError(error);
     }
 

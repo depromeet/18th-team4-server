@@ -72,8 +72,8 @@ class AiChatStreamGuardrailTest {
     private static final String REJECT_MESSAGE = "요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요.";
 
     // 커밋 후 리스너(제목 생성 등)를 같은 스레드에서 실행해 테스트 실행 시점을 결정적으로 만든다.
-    // 메시지 전송 경로 자체는 [측정용 임시 — 조건 A] 구조라 이 executor 를 쓰지 않는다
-    // (리액티브 체인이 공유 boundedElastic 위에서 돌고, 완료는 async dispatch 로 기다린다).
+    // 메시지 전송 경로 자체는 이 executor 를 쓰지 않는다 — 선행 처리는 요청 스레드에서 동기로 끝나고,
+    // 생성 구간은 공유 boundedElastic 위에서 돌며 완료를 async dispatch 로 기다린다.
     @TestConfiguration
     static class DirectExecutorConfig {
         @Bean
@@ -148,8 +148,8 @@ class AiChatStreamGuardrailTest {
 
     /**
      * 요청을 보내고, 비동기로 시작됐으면 async dispatch 까지 태워 최종 응답을 돌려준다.
-     * 조건 A 구조에서는 관문 거절도 체인 위에서 일어나므로, 거절의 4xx/5xx JSON 은 async dispatch 뒤에 나온다.
-     * (Bean Validation 거절은 컨트롤러 진입 전이라 그대로 동기 응답이다.)
+     * 선행 처리 거절(모더레이션 차단·불능 등)은 SSE 시작 전 동기 예외라 그대로 동기 응답이고,
+     * 통과 경로만 SSE 로 비동기 시작돼 async dispatch 를 태워야 본문이 나온다.
      */
     private org.springframework.test.web.servlet.ResultActions send(String content) throws Exception {
         // Accept 헤더를 지정하지 않는다(= accept all). 통과 시 produces=text/event-stream 매칭이 되고,

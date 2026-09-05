@@ -56,7 +56,7 @@ public class AiChatMessageSendService {
     private final TokenCounter tokenCounter;
 
     /**
-     * 사전 단계 결과 — 생성 단계에 필요한 모든 문맥. 예약(reservation)은 항상 존재한다.
+     * 선행 처리 결과 — 생성 단계(generateAndPersistStream)에 필요한 모든 문맥. 예약(reservation)은 항상 존재한다.
      * rateLimitPermit 은 전역 게이트 확보 결과로 항상 존재한다 (게이트가 검사 없이 통과시켰다면 계상 없는 permit).
      */
     public record PreparedChatTurn(
@@ -72,76 +72,62 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * [측정용 임시 — 조건 A] 한 턴 전체를 리액티브 체인으로 조립해 이벤트 스트림으로 돌려준다.
-     * 측정 후 처리 별도 결정, dev 머지 금지.
-     *
-     * 요청 스레드는 이 메서드가 반환되는 즉시 반납된다 — 모든 블로킹 작업(Redis · DB · 입력 검사 HTTP)은
-     * 전역 공유 {@code Schedulers.boundedElastic()} 으로 오프로딩되고, 기다림은 스레드 정지가 아니라
-     * 체인의 미완료로 표현된다. block() 브리지는 어디에도 없다.
-     *
-     * 관문 순서와 의미는 동기 구조와 같다: 본문 검증 → rate limit → 예산 예약 → 이력 조회 →
-     * 입력 모더레이션 → 전역 게이트 → USER 저장 → 생성 스트림.
-     * 첫 전송 전에 끝나는 에러(관문 거절)는 스트림의 error 신호로 나가고, 구독자(컨트롤러)가
-     * 미전송 상태의 completeWithError 로 4xx/5xx JSON 이 되게 한다.
-     * 생성 시작 이후의 실패는 error 이벤트(스트림 요소)로 운반된다 — SSE 가 이미 200 으로 커밋된 뒤라
-     * 그것이 유일한 전달 수단이다.
-     */
-    public Flux<MessageStreamEvent> stream(SendMessageCommand command) {
-        return prepareChain(command).flatMapMany(this::generateAndPersistStream);
-    }
-
-    /**
-     * 사전 단계 체인: rate limit → 예산 예약 → 이력 조회 → 입력 모더레이션 → 전역 게이트 → USER 저장.
+     * 선행 처리(요청의 가상 스레드에서 동기 순차): 본문 검증 → 사용자 폭주 가드 → 예산 예약 → 이력 조회 →
+     * 입력 모더레이션 → 전역 게이트 → USER 저장.
+     * 각 단계는 앞 단계의 결과를 보고 다음을 정하는 순차 업무이고, 요청 스레드가 가상 스레드라
+     * 여기서 기다려도 다른 요청의 처리를 막지 않는다 — 그래서 리액티브 체인 밖에 둔다.
+     * 여기서 던진 예외는 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 변환한다.
      * 예산 예약을 moderation 앞에 두는 이유: 예산이 소진된 사용자가 공짜 moderation 호출
      * (제공자 RPM 자원)을 소모하지 못하게 한다 — 토큰 추정(tokenCounter)은 로컬 계산이라
      * 예약을 앞으로 당겨도 외부 비용이 없다.
      */
-    private Mono<PreparedChatTurn> prepareChain(SendMessageCommand command) {
+    public PreparedChatTurn prepare(SendMessageCommand command) {
+        String normalizedContent = validateAndStripContent(command.content());
         Long sessionId = command.sessionId();
         Long userId = command.userId();
 
-        return offload(() -> validateAndStripContent(command.content()))
-                .flatMap(normalizedContent -> offload(() -> {
-                    verifyUserMessageRateLimit(userId);
-                    return normalizedContent;
-                }))
-                .flatMap(normalizedContent -> offload(() -> reserveTokenBudget(userId, normalizedContent))
-                        // 예약 이후의 모든 거절·실패(이력 조회 실패, moderation 차단/불능, 게이트 거절, USER 저장 실패)는
-                        // 생성이 시작되지 않은 경우라 예약을 전액 환불하고 원래 예외를 그대로 흘려보낸다.
-                        .flatMap(reservation -> prepareAfterReservationChain(
-                                sessionId, userId, normalizedContent, reservation)
-                                .onErrorResume(prepareRejection -> offloadWork(
-                                        () -> refundQuietly(userId, reservation.granted(), sessionId))
-                                        .then(Mono.error(prepareRejection)))));
+        verifyUserMessageRateLimit(userId);
+
+        BudgetReservation reservation = reserveTokenBudget(userId, normalizedContent);
+
+        // 예약 이후의 모든 거절·실패(이력 조회 실패, moderation 차단/불능, 게이트 거절, USER 저장 실패)는
+        // 생성이 시작되지 않은 경우라 예약을 전액 환불하고 원래 예외를 그대로 던진다.
+        try {
+            return prepareAfterReservation(sessionId, userId, normalizedContent, reservation);
+        } catch (RuntimeException prepareRejection) {
+            refundQuietly(userId, reservation.granted(), sessionId);
+            throw prepareRejection;
+        }
     }
 
-    private Mono<PreparedChatTurn> prepareAfterReservationChain(
+    private PreparedChatTurn prepareAfterReservation(
             Long sessionId,
             Long userId,
             String normalizedContent,
             BudgetReservation reservation
     ) {
-        return offload(() -> loadTurnContext(sessionId, userId))
-                .flatMap(turnContext -> offload(() -> {
-                    InputModerationResult moderation =
-                            inputModerationClient.check(normalizedContent, turnContext.bookContext());
-                    applyModerationDecision(moderation, sessionId, userId, normalizedContent);
-                    return buildStreamCommand(sessionId, normalizedContent, turnContext);
-                }))
-                // 전역 게이트: 옛 코드처럼 SSE 시작 전에 확보한다. USER 저장보다 먼저 확인해
-                // 거절(429) 시 응답 없는 USER 메시지가 대화 이력에 남지 않게 한다.
-                // 거절 시 예약 환불은 prepareChain 의 공통 환불 경로가 담당하고, 게이트 분당 계상은
-                // tryAcquire 가 거절하면서 스스로 되돌렸으므로 여기서 또 보상하면 이중 차감이다.
-                .flatMap(streamCommand -> offload(() -> aiChatClient.acquireRateLimitPermit(streamCommand))
-                        .flatMap(rateLimitPermit -> offload(() -> {
-                            recordUserMessageOrCompensate(sessionId, userId, normalizedContent, rateLimitPermit);
-                            return new PreparedChatTurn(
-                                    userId,
-                                    streamCommand,
-                                    reservation.granted(),
-                                    reservation.estimatedMessageInputTokens(),
-                                    rateLimitPermit);
-                        })));
+        TurnContext turnContext = loadTurnContext(sessionId, userId);
+
+        InputModerationResult moderation =
+                inputModerationClient.check(normalizedContent, turnContext.bookContext());
+        applyModerationDecision(moderation, sessionId, userId, normalizedContent);
+
+        AiChatStreamCommand streamCommand = buildStreamCommand(sessionId, normalizedContent, turnContext);
+
+        // 전역 게이트: SSE 시작 전에 확보한다. USER 저장보다 먼저 확인해
+        // 거절(429) 시 응답 없는 USER 메시지가 대화 이력에 남지 않게 한다.
+        // 거절 시 예약 환불은 prepare() 의 공통 환불 경로가 담당하고, 게이트 분당 계상은
+        // tryAcquire 가 거절하면서 스스로 되돌렸으므로 여기서 또 보상하면 이중 차감이다.
+        AiChatClient.RateLimitPermit rateLimitPermit = aiChatClient.acquireRateLimitPermit(streamCommand);
+
+        recordUserMessageOrCompensate(sessionId, userId, normalizedContent, rateLimitPermit);
+
+        return new PreparedChatTurn(
+                userId,
+                streamCommand,
+                reservation.granted(),
+                reservation.estimatedMessageInputTokens(),
+                rateLimitPermit);
     }
 
     /**
@@ -151,7 +137,7 @@ public class AiChatMessageSendService {
      * 예외를 밖으로 던지지 않고 error 이벤트로 변환한다 (기존 generateAndPersist 와 동일한 계약).
      * 클라이언트가 도중에 이탈해도 구독은 서버가 소유하므로 끝까지 소비·저장·정산한다(스펙 §5-1).
      */
-    private Flux<MessageStreamEvent> generateAndPersistStream(PreparedChatTurn turn) {
+    public Flux<MessageStreamEvent> generateAndPersistStream(PreparedChatTurn turn) {
         // 리액티브 신호는 직렬로 전달되므로(같은 시퀀스 내 happens-before) 누적 상태에 별도 동기화가 필요 없다.
         StringBuilder accumulatedContent = new StringBuilder();
         AtomicReference<AiChatStreamChunk> measuredUsage = new AtomicReference<>();
@@ -219,7 +205,7 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 블로킹 작업 1건을 전역 공유 boundedElastic 으로 오프로딩한다 (조건 A 의 실행 자원 배치).
+     * 블로킹 작업 1건을 전역 공유 boundedElastic 으로 오프로딩한다.
      * 결과가 null 이면 Mono 가 빈 채로 끝나 뒤 단계가 통째로 건너뛰어지므로, 조용히 사라지지 않도록 에러로 바꾼다.
      */
     private static <T> Mono<T> offload(Callable<T> blockingWork) {
@@ -227,11 +213,6 @@ public class AiChatMessageSendService {
                 .switchIfEmpty(Mono.error(() ->
                         new IllegalStateException("오프로딩한 단계가 결과 없이(null) 끝났습니다.")))
                 .subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /** 반환값이 없는 블로킹 작업의 오프로딩 (환불 등 보상 작업). */
-    private static Mono<Void> offloadWork(Runnable blockingWork) {
-        return Mono.<Void>fromRunnable(blockingWork).subscribeOn(Schedulers.boundedElastic());
     }
 
     /** 예산 예약 결과 + 그 예약에 쓰인 메시지 입력 추정 토큰. */
@@ -296,7 +277,7 @@ public class AiChatMessageSendService {
             aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
         } catch (RuntimeException userMessagePersistError) {
             // 게이트 확보 이후·생성 이전의 실패 — 생성이 일어나지 않아 OpenAI 토큰 소모가 없으므로
-            // 분당 계상을 보상 차감한다. 예약 환불은 prepareChain 의 공통 환불 경로가 담당한다.
+            // 분당 계상을 보상 차감한다. 예약 환불은 prepare() 의 공통 환불 경로가 담당한다.
             releaseRateLimitPermitQuietly(rateLimitPermit, sessionId);
             throw userMessagePersistError;
         }
@@ -330,15 +311,15 @@ public class AiChatMessageSendService {
 
     /**
      * 생성·저장 실패: 사용자 과실이 아니므로 예약 전액 환불 (기존 정책 동일).
-     * 사전 단계의 거절(게이트 거절·moderation 차단 등)은 여기가 아니라
-     * prepareChain() 의 공통 환불 경로가 담당한다.
+     * 선행 처리의 거절(게이트 거절·moderation 차단 등)은 여기가 아니라
+     * prepare() 의 공통 환불 경로가 담당한다.
      */
     private void refundReservation(PreparedChatTurn turn) {
         refundQuietly(turn.userId(), turn.reservation(), turn.sessionId());
     }
 
     /**
-     * 환불 실패는 삼킨다 — 사전 단계 거절 경로에서 던지면 원래의 4xx 가 500 으로 둔갑하고,
+     * 환불 실패는 삼킨다 — 선행 처리 거절 경로에서 던지면 원래의 4xx 가 500 으로 둔갑하고,
      * 생성·저장 실패 경로에서 던지면 error 이벤트 전달이 막힌다.
      */
     private void refundQuietly(Long userId, UserTokenBudgetWriter.ReserveResult.Granted reservation, Long sessionId) {
@@ -351,7 +332,7 @@ public class AiChatMessageSendService {
 
     /**
      * 게이트 보상 차감 실패는 삼킨다 — 분 창 만료(최대 60초)가 안전망이라 실패가
-     * 응답 경로(사전 단계의 원래 예외 전파·생성 단계의 error 이벤트 전달)를 막을 이유가 없다.
+     * 응답 경로(선행 처리의 원래 예외 전파·생성 단계의 error 이벤트 전달)를 막을 이유가 없다.
      */
     private void releaseRateLimitPermitQuietly(AiChatClient.RateLimitPermit rateLimitPermit, Long sessionId) {
         try {
