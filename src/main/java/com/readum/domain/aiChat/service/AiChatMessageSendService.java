@@ -145,13 +145,13 @@ public class AiChatMessageSendService {
         Flux<MessageStreamEvent> tokenEvents = aiChatClient.generateStream(turn.streamCommand())
                 .publishOn(Schedulers.boundedElastic())
                 .<MessageStreamEvent>handle((chunk, sink) -> {
-                    if (chunk.hasUsage()) {
+                    // 사용량은 청크별로 더하지 않는다 — 마지막으로 받은 유효 사용량이 그 턴의 실측이다.
+                    if (chunk.hasValidUsage()) {
                         measuredUsage.set(chunk);
                     }
-                    String delta = chunk.delta();
-                    if (delta != null && !delta.isEmpty()) {
-                        accumulatedContent.append(delta);
-                        sink.next(new MessageStreamEvent.Token(delta));
+                    if (chunk.hasDelta()) {
+                        accumulatedContent.append(chunk.delta());
+                        sink.next(new MessageStreamEvent.Token(chunk.delta()));
                     }
                 });
 

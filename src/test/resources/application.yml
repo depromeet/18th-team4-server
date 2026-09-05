@@ -44,6 +44,12 @@ ai-chat:
   token-budget:
     daily-tokens: 120000
     estimated-output-tokens: 512
+  streaming:
+    generation-total-timeout-seconds: 120
+    generation-idle-timeout-seconds: 30
+    delivery-timeout-seconds: 150
+    shutdown-wait-seconds: 60
+    delivery-queue-capacity: 256
 
 aladin:
   ttb-key: test-ttb-key

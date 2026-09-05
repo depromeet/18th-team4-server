@@ -174,7 +174,8 @@ class AiChatStreamGuardrailTest {
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(Flux.just(
                         AiChatStreamChunk.ofDelta(content),
-                        new AiChatStreamChunk("", 10, 5, 15)));
+                        AiChatStreamChunk.ofFinishReason("STOP"),
+                        AiChatStreamChunk.ofUsage(10, 5, 15)));
     }
 
     @Test

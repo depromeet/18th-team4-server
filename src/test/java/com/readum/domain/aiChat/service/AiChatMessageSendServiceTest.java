@@ -90,7 +90,8 @@ class AiChatMessageSendServiceTest {
             new AiChatProperties.Context(8000, 2000, 4000, 800),
             new AiChatProperties.MessageRule(1000),
             new AiChatProperties.RateLimit(10, 5),
-            new AiChatProperties.TokenBudget(120000, 512)
+            new AiChatProperties.TokenBudget(120000, 512),
+            new AiChatProperties.Streaming(120, 30, 150, 60, 256)
     );
 
     private AiChatMessageSendService service;
@@ -125,11 +126,12 @@ class AiChatMessageSendServiceTest {
                 .willReturn(new AiChatMessagePersistService.MessageLoadResult(contextSummary, history, userBookId));
     }
 
-    /** 본문 조각 1건 + 실측 사용량이 실린 마지막 조각 — 실제 스트리밍 응답과 같은 모양. */
+    /** 본문 조각 1건 + 종료 사유 조각 + 실측 사용량이 실린 마지막 조각 — 실제 스트리밍 응답과 같은 모양. */
     private Flux<AiChatStreamChunk> streamOf(String content, Integer inputTokens, Integer outputTokens, Integer totalTokens) {
         return Flux.just(
                 AiChatStreamChunk.ofDelta(content),
-                new AiChatStreamChunk("", inputTokens, outputTokens, totalTokens));
+                AiChatStreamChunk.ofFinishReason("STOP"),
+                AiChatStreamChunk.ofUsage(inputTokens, outputTokens, totalTokens));
     }
 
     /**
@@ -289,6 +291,43 @@ class AiChatMessageSendServiceTest {
         // 사용자 계상 = 메시지 입력 추정(1) + 실측 출력(5) = 6, 멱등 키 = 저장된 메시지 id(42)
         verify(userTokenBudgetWriter).settle(
                 eq(USER_ID), eq(GRANTED.periodKey()), eq(42L), eq(GRANTED.reservedTokens()), eq(6));
+    }
+
+    @Test
+    void 사용량이_실린_청크가_여러_건이면_더하지_않고_마지막_값으로_정산한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문"); // 2자 → 입력 추정 1
+        givenLoadHistory(7L, List.of(), 100L);
+        // 공급자가 사용량을 두 번 실어 보낸 경우 — 뒤의 값이 그 턴의 실측이다(3 + 5 = 8 이 아니다).
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(Flux.just(
+                        AiChatStreamChunk.ofDelta("응답"),
+                        AiChatStreamChunk.ofUsage(10, 3, 13),
+                        AiChatStreamChunk.ofFinishReason("STOP"),
+                        AiChatStreamChunk.ofUsage(10, 5, 15)));
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(42L, 7L, "응답", null, 10, 5, 15));
+
+        executeTurn(command);
+
+        // 사용자 계상 = 메시지 입력 추정(1) + 마지막 실측 출력(5) = 6
+        verify(userTokenBudgetWriter).settle(
+                eq(USER_ID), eq(GRANTED.periodKey()), eq(42L), eq(GRANTED.reservedTokens()), eq(6));
+    }
+
+    @Test
+    void 본문_없이_메타데이터만_실린_청크는_token_이벤트로_내보내지_않는다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15)); // 델타 1건 + 종료 사유 청크 + 사용량 청크
+        given(persistService.saveAssistantSuccess(anyLong(), anyString(), any()))
+                .willReturn(AiChatMessageFixture.persistedAssistantMessage(42L, 7L, "응답", null, 10, 5, 15));
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0)).isEqualTo(new MessageStreamEvent.Token("응답"));
+        assertThat(events.get(1)).isInstanceOf(MessageStreamEvent.Done.class);
     }
 
     @Test

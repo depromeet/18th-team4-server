@@ -36,7 +36,8 @@ class UserMessageRateLimiterRedisAdapterTest {
                 new AiChatProperties.Context(8000, 2000, 4000, 800),
                 new AiChatProperties.MessageRule(1000),
                 new AiChatProperties.RateLimit(10, 5),
-                new AiChatProperties.TokenBudget(120000, 512)
+                new AiChatProperties.TokenBudget(120000, 512),
+                new AiChatProperties.Streaming(120, 30, 150, 60, 256)
         );
         adapter = new UserMessageRateLimiterRedisAdapter(stringRedisTemplate, properties);
     }

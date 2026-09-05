@@ -43,7 +43,8 @@ class AiChatHistorySearchServiceTest {
                 new AiChatProperties.Context(assemblyMax, 2000, 4000, 800),
                 new AiChatProperties.MessageRule(1000),
                 new AiChatProperties.RateLimit(10, 5),
-                new AiChatProperties.TokenBudget(120000, 512)
+                new AiChatProperties.TokenBudget(120000, 512),
+                new AiChatProperties.Streaming(120, 30, 150, 60, 256)
         );
         return new AiChatHistorySearchService(
                 aiChatMessageRepository, aiChatContextSummaryRepository, properties, tokenCounter);

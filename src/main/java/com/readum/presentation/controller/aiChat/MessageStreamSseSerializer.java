@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 // AI 채팅 SSE 응답의 와이어 포맷 전담.
-// 이벤트 이름(token/done/error) 과 JSON payload 키 컨벤션을 한 곳에 모아
+// 이벤트 이름(token/done/replace/error) 과 JSON payload 키 컨벤션을 한 곳에 모아
 // AiChatController 가 HTTP 라우팅에만 집중할 수 있게 한다.
 //
 // 도메인 무관한 횡단 인프라가 아니라(presentation/common 의 GlobalApiResponse 같은) AI 채팅
@@ -30,6 +30,7 @@ public class MessageStreamSseSerializer {
         return switch (event) {
             case MessageStreamEvent.Token token -> sse("token", new TokenPayload(token.delta()));
             case MessageStreamEvent.Done done -> sse("done", toDonePayload(done));
+            case MessageStreamEvent.Replace replace -> sse("replace", toReplacePayload(replace));
             case MessageStreamEvent.Error error -> sse("error", toErrorPayload(error));
         };
     }
@@ -39,13 +40,23 @@ public class MessageStreamSseSerializer {
     }
 
     private DonePayload toDonePayload(MessageStreamEvent.Done done) {
-        return new DonePayload(
-                new TokenCountPayload(
-                        done.tokenCount().input(),
-                        done.tokenCount().output(),
-                        done.tokenCount().total()
-                ),
-                done.createdAt()
+        return new DonePayload(toTokenCountPayload(done.tokenCount()), done.createdAt());
+    }
+
+    private TokenCountPayload toTokenCountPayload(MessageStreamEvent.TokenCount tokenCount) {
+        if (tokenCount == null) {
+            return null;
+        }
+        return new TokenCountPayload(tokenCount.input(), tokenCount.output(), tokenCount.total());
+    }
+
+    // 큐 포화로 델타 전송을 포기한 연결의 종료 이벤트. done 과 달리 최종 본문(content) 을 통째로 싣는다 —
+    // 클라이언트는 지금까지 표시한 부분 답변에 이어붙이지 않고 이 본문으로 교체한다.
+    private ReplacePayload toReplacePayload(MessageStreamEvent.Replace replace) {
+        return new ReplacePayload(
+                replace.content(),
+                toTokenCountPayload(replace.tokenCount()),
+                replace.createdAt()
         );
     }
 
@@ -79,6 +90,8 @@ public class MessageStreamSseSerializer {
     // toString() 으로 String 화하면 다른 Response DTO 들(MessageResponse 등) 의 createdAt 직렬화
     // 형식과 어긋나, 같은 의미의 필드가 엔드포인트마다 다른 모양이 될 수 있다.
     private record DonePayload(TokenCountPayload tokenCount, LocalDateTime createdAt) {}
+
+    private record ReplacePayload(String content, TokenCountPayload tokenCount, LocalDateTime createdAt) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record ErrorPayload(String code, String message, Map<String, Object> rateLimit) {}

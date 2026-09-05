@@ -75,6 +75,13 @@ ai-chat:
   token-budget:
     daily-tokens: 120000         # 일일(KST 자정 리셋) 토큰 예산. 잠정값: 기존 4시간/20,000 의 산술 등가(6창 × 20,000). 재산정 예정.
     estimated-output-tokens: 512 # 예약 시 더하는 출력 추정값 (실측 도착 시 보정)
+  streaming:
+    # 아래 다섯 값은 모두 후보값 — 측정 후 조정. 기한 넷은 재는 대상과 시작점이 서로 달라 하나로 합치지 않는다.
+    generation-total-timeout-seconds: 120  # 생성 전체 기한. 외부 API(OpenAI) 호출 시작부터. 청크가 계속 와도 적용하는 절대 상한.
+    generation-idle-timeout-seconds: 30    # 무응답 기한. 스트림 시작 또는 마지막으로 인정한 수신부터 다음 데이터를 기다리는 시간.
+    delivery-timeout-seconds: 150          # 전달 기한. 전달 채널 생성 시점(SseEmitter 를 돌려주는 시점)부터. 기한 후에는 새 SSE 쓰기를 시작하지 않는다. 완성본 교체까지 담아야 해서 생성 전체 기한보다 길다.
+    shutdown-wait-seconds: 60              # 종료 대기 상한. shutdown 신호부터 진행 중인 생성·후처리를 기다리는 최대 시간. 초과분은 DB 예약 복구에 맡긴다.
+    delivery-queue-capacity: 256           # 연결 1개당 전달 큐에 쌓아둘 델타 수. 설정에 적힌 출력 상한 1024 토큰의 1/4 을 버퍼로 잡은 예상치(그 상한은 실제 요청에 걸리지 않으므로 어림잡기용). 실제 청크 크기·누적 답변·동시 요청 메모리를 함께 재서 조정한다.
 
 # 입출력 가드레일 — 환경 무관 비즈니스 룰. moderation 카테고리 정본은 OpenAiInputModerationClientImpl 레지스트리.
 readum:

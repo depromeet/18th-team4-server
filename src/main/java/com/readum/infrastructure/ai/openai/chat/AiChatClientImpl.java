@@ -20,10 +20,12 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.RateLimit;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
@@ -158,7 +160,7 @@ public class AiChatClientImpl implements AiChatClient {
                 .chatResponse()
                 .map(chatResponse -> {
                     AiChatStreamChunk chunk = toStreamChunk(chatResponse);
-                    if (chunk.hasUsage()) {
+                    if (chunk.hasValidUsage()) {
                         lastResponseWithUsage.set(chatResponse);
                     }
                     return chunk;
@@ -172,20 +174,34 @@ public class AiChatClientImpl implements AiChatClient {
                 });
     }
 
-    private AiChatStreamChunk toStreamChunk(ChatResponse chatResponse) {
-        String delta = Optional.ofNullable(chatResponse)
-                .map(ChatResponse::getResult)
-                .map(result -> result.getOutput())
+    // 본문 조각뿐 아니라 종료 사유(finish_reason)와 사용량도 그대로 DTO 로 옮긴다 — 생성 성공 판정에 둘 다 필요하다.
+    // 본문이 빈 청크(종료 사유 전용·사용량 전용)는 정상 모양이므로 걸러내지 않고 그대로 내보낸다.
+    // 매핑 계약(종료 사유·사용량 보존)을 같은 패키지의 테스트가 직접 확인할 수 있도록 package-private.
+    AiChatStreamChunk toStreamChunk(ChatResponse chatResponse) {
+        Generation result = Optional.ofNullable(chatResponse).map(ChatResponse::getResult).orElse(null);
+        String delta = Optional.ofNullable(result)
+                .map(generation -> generation.getOutput())
                 .map(output -> output.getText())
                 .orElse("");
         ChatResponseMetadata metadata = chatResponse == null ? null : chatResponse.getMetadata();
         Usage usage = Optional.ofNullable(metadata).map(ChatResponseMetadata::getUsage).orElse(null);
         return new AiChatStreamChunk(
                 delta,
+                extractFinishReason(result),
                 usage == null ? null : toIntOrNull(usage.getPromptTokens()),
                 usage == null ? null : toIntOrNull(usage.getCompletionTokens()),
                 usage == null ? null : toIntOrNull(usage.getTotalTokens())
         );
+    }
+
+    // Spring AI 는 종료 사유가 없는 중간 청크에 빈 문자열을 채워 보낸다. 빈 값은 "사유 없음"(null)으로 통일해
+    // 소비자가 빈 문자열과 null 을 따로 다루지 않게 한다. 값이 있으면 원본 그대로 보존한다 (STOP / LENGTH 등).
+    private String extractFinishReason(Generation result) {
+        String finishReason = Optional.ofNullable(result)
+                .map(Generation::getMetadata)
+                .map(ChatGenerationMetadata::getFinishReason)
+                .orElse(null);
+        return (finishReason == null || finishReason.isBlank()) ? null : finishReason;
     }
 
     private AiChatCompletion toCompletion(ChatResponse chatResponse) {
