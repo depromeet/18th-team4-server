@@ -93,4 +93,24 @@ class AiChatTurnRequestRepositoryTest {
 
         assertThat(aiChatTurnRequestRepository.findByUserIdAndRequestId(otherUserId, "request-d")).isEmpty();
     }
+
+    @Test
+    void 종료_트랜잭션이_잠글_행을_id_로_읽는다() {
+        long userId = nextUserId();
+        Long turnRequestId = aiChatTurnRequestRepository.saveAndFlush(
+                AiChatTurnRequest.createAccepted(userId, 7L, "request-e", EXPIRY_TIMEOUT)).getId();
+
+        // 잠금 조회는 종료 트랜잭션(성공 확정·실패 기록·만료 복구)의 첫 단계다 — 잠근 뒤 상태를 보고
+        // 종료 여부를 판정하므로, 잠금 없이 읽은 값으로 판정하는 경로를 두지 않는다.
+        AiChatTurnRequest locked = aiChatTurnRequestRepository.findByIdForUpdate(turnRequestId).orElseThrow();
+
+        assertThat(locked.getId()).isEqualTo(turnRequestId);
+        assertThat(locked.getStatus()).isEqualTo(AiChatTurnRequest.Status.ACCEPTED);
+        assertThat(locked.isTerminal()).isFalse();
+    }
+
+    @Test
+    void 없는_요청_id_로_잠금_조회하면_비어_있다() {
+        assertThat(aiChatTurnRequestRepository.findByIdForUpdate(9_999_999L)).isEmpty();
+    }
 }

@@ -34,8 +34,9 @@ import java.time.ZoneId;
  *   <li>SUCCEEDED / FAILED / EXPIRED — 종료. 종료된 요청에는 저장·정산·반환을 다시 반영하지 않는다.</li>
  * </ul>
  *
- * <p>SUCCEEDED(성공 확정)와 EXPIRED(만료 복구) 로의 전이는 저장·정산 트랜잭션과 만료 복구 작업이
- * 맡는다 — 이 클래스에는 선행 단계가 쓰는 전이(markReserved·markFailed)만 있다.
+ * <p>종료 전이(markSucceeded·markFailed·markExpired)는 요청 종료 트랜잭션
+ * (AiChatTurnOutcomeWriter)이 같은 행을 잠그고 미종료임을 확인한 뒤에만 부른다. 엔티티는 상태 값만
+ * 바꾸며 예산 반영·답변 저장을 알지 못한다 — 그 원자성은 트랜잭션 경계의 몫이다.
  *
  * <p>시간 출처는 KST 로 통일한다 — 예산 기간(budgetPeriodKey)이 KST 달력 날짜라,
  * 한 행 안에서 기간 키와 타임스탬프가 어긋나지 않게 한다.
@@ -134,6 +135,16 @@ public class AiChatTurnRequest {
         this.updatedAt = LocalDateTime.now(ZONE_KST);
     }
 
+    /**
+     * 성공으로 종료한다 — 저장된 ASSISTANT 메시지와 연결한다.
+     * 답변 저장·정산·예산 보정과 <b>같은 트랜잭션</b>에서 불러야 셋 중 하나만 남는 상태가 생기지 않는다.
+     */
+    public void markSucceeded(Long assistantMessageId) {
+        this.status = Status.SUCCEEDED;
+        this.assistantMessageId = assistantMessageId;
+        this.updatedAt = LocalDateTime.now(ZONE_KST);
+    }
+
     /** 실패로 종료한다. 예약 반환 자체는 예산 원장 쪽 작업이며 이 전이는 요청 상태만 끝낸다. */
     public void markFailed(String failureCode) {
         this.status = Status.FAILED;
@@ -141,7 +152,26 @@ public class AiChatTurnRequest {
         this.updatedAt = LocalDateTime.now(ZONE_KST);
     }
 
+    /**
+     * 만료로 종료한다 — 기한이 지나도록 끝나지 않은 요청을 복구 작업이 정리할 때 쓴다.
+     * 상태 이름만 FAILED 와 다르다: 무엇이 요청을 끝냈는지(생성 실패 vs 기한 경과)를 나중에 구분하려는 것이고,
+     * 사용자에게 청구하지 않고 예약을 되돌린다는 처리는 같다.
+     */
+    public void markExpired(String failureCode) {
+        this.status = Status.EXPIRED;
+        this.failureCode = failureCode;
+        this.updatedAt = LocalDateTime.now(ZONE_KST);
+    }
+
     public boolean isTerminal() {
         return status.isTerminal();
+    }
+
+    /**
+     * 되돌릴 예약이 이 행에 남아 있는가. 예약 전(ACCEPTED)에 끝난 요청은 반환할 것이 없다.
+     * 예약량과 예산 기간은 함께 커밋되므로 둘 중 하나만 있는 상태는 정상 흐름에서 나오지 않는다.
+     */
+    public boolean hasReservation() {
+        return reservedTokens != null && budgetPeriodKey != null;
     }
 }
