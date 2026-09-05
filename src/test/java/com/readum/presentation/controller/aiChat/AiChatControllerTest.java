@@ -321,11 +321,13 @@ class AiChatControllerTest {
 
     // ── 메시지 전송 ──────────────────────────────────────────────────────
 
+    // 요청 식별자는 채우고 본문만 빠뜨린다. 둘 다 빠뜨리면 위반이 두 건이라 응답 메시지에 어느 것이
+    // 실릴지 정해지지 않는다 (GlobalExceptionHandler 는 필드 오류 중 첫 건만 쓰고, 그 순서는 보장되지 않는다).
     @Test
     void 메시지_전송_본문_누락시_400() throws Exception {
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+                        .content("{\"requestId\":\"" + REQUEST_ID + "\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message", containsString("메시지 본문은 비어 있을 수 없습니다.")));
     }
