@@ -13,6 +13,7 @@ import org.springframework.data.domain.Pageable;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -21,10 +22,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
- * 만료 복구 스캔의 단위 테스트. 잠금·트랜잭션 계약은 {@link AiChatTurnOutcomeWriterTest} 가 실제 DB 로 확인하고,
+ * 미정산 예약 반환 스캔의 단위 테스트. 잠금·트랜잭션 계약은 {@link AiChatTurnOutcomeWriterTest} 가 실제 DB 로 확인하고,
  * 여기서는 스캔이 그 종료 경로를 <b>어떻게 부르는가</b>를 본다 — 기준 시각의 일관성, 상한, 한 행의 실패 격리,
  * 결과 집계.
  */
@@ -32,13 +34,14 @@ class AiChatExpiredTurnRecoveryServiceTest {
 
     private static final ZoneId ZONE_KST = ZoneId.of("Asia/Seoul");
     private static final long GRACE_SECONDS = 60L;
-    private static final int MAX_ROWS_PER_RUN = 100;
+    /** 한 번에 읽어 오는 행 수. 테스트가 여러 묶음을 돌게 하려고 작게 둔다. */
+    private static final int BATCH_SIZE = 3;
 
     private final AiChatTurnRequestRepository aiChatTurnRequestRepository =
             mock(AiChatTurnRequestRepository.class);
     private final AiChatTurnOutcomeWriter aiChatTurnOutcomeWriter = mock(AiChatTurnOutcomeWriter.class);
     private final AiChatTurnRecoveryProperties recoveryProperties =
-            new AiChatTurnRecoveryProperties(60_000L, GRACE_SECONDS, MAX_ROWS_PER_RUN);
+            new AiChatTurnRecoveryProperties(60_000L, GRACE_SECONDS, BATCH_SIZE);
 
     private final AiChatExpiredTurnRecoveryService recoveryService = new AiChatExpiredTurnRecoveryService(
             aiChatTurnRequestRepository, aiChatTurnOutcomeWriter, recoveryProperties);
@@ -49,7 +52,7 @@ class AiChatExpiredTurnRecoveryServiceTest {
 
         RecoveryReport report = recoveryService.recoverOverdueTurnRequests();
 
-        assertThat(report).isEqualTo(new RecoveryReport(0, 0, 0, 0, 0));
+        assertThat(report).isEqualTo(new RecoveryReport(0, 0, 0, 0, 0, 0));
         verify(aiChatTurnOutcomeWriter, never()).expireIfOverdue(any(), any(), anyString());
     }
 
@@ -64,7 +67,7 @@ class AiChatExpiredTurnRecoveryServiceTest {
 
         RecoveryReport report = recoveryService.recoverOverdueTurnRequests();
 
-        assertThat(report).isEqualTo(new RecoveryReport(2, 2, 800, 0, 0));
+        assertThat(report).isEqualTo(new RecoveryReport(2, 2, 800, 0, 0, 1));
     }
 
     @Test
@@ -81,7 +84,7 @@ class AiChatExpiredTurnRecoveryServiceTest {
         RecoveryReport report = recoveryService.recoverOverdueTurnRequests();
 
         // 늦은 성공이 먼저 끝낸 행과 기한 전 행을 만료로 세면 복구가 한 일을 부풀려 읽게 된다.
-        assertThat(report).isEqualTo(new RecoveryReport(3, 1, 300, 2, 0));
+        assertThat(report).isEqualTo(new RecoveryReport(3, 1, 300, 2, 0, 1));
     }
 
     @Test
@@ -98,7 +101,7 @@ class AiChatExpiredTurnRecoveryServiceTest {
         RecoveryReport report = recoveryService.recoverOverdueTurnRequests();
 
         // 실패한 행은 미종료로 남아 다음 스캔이 다시 집는다 — 그 사이 다른 행이 막히면 안 된다.
-        assertThat(report).isEqualTo(new RecoveryReport(3, 2, 800, 0, 1));
+        assertThat(report).isEqualTo(new RecoveryReport(3, 2, 800, 0, 1, 1));
         verify(aiChatTurnOutcomeWriter).expireIfOverdue(eq(33L), any(), anyString());
     }
 
@@ -126,15 +129,53 @@ class AiChatExpiredTurnRecoveryServiceTest {
     }
 
     @Test
-    void 한_스캔이_집는_행_수는_설정한_상한까지다() {
+    void 한_번에_읽어오는_행_수는_설정한_묶음_크기다() {
         given(aiChatTurnRequestRepository.findOverdueUnfinishedIds(any(), any())).willReturn(List.of());
 
         recoveryService.recoverOverdueTurnRequests();
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         verify(aiChatTurnRequestRepository).findOverdueUnfinishedIds(any(), pageable.capture());
-        assertThat(pageable.getValue().getPageSize()).isEqualTo(MAX_ROWS_PER_RUN);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(BATCH_SIZE);
         assertThat(pageable.getValue().getPageNumber()).isZero();
+    }
+
+    @Test
+    void 묶음이_꽉_차면_같은_스캔이_다음_묶음을_이어_읽어_밀린_양을_비운다() {
+        List<Long> fullBatch = idRange(1L, BATCH_SIZE);
+        List<Long> lastBatch = List.of(9001L, 9002L);
+        given(aiChatTurnRequestRepository.findOverdueUnfinishedIds(any(), any()))
+                .willReturn(fullBatch, lastBatch);
+        given(aiChatTurnOutcomeWriter.expireIfOverdue(any(), any(), anyString()))
+                .willReturn(new TurnOutcomeResult.FinishedWithoutCharge(AiChatTurnRequest.Status.EXPIRED, 10));
+
+        RecoveryReport report = recoveryService.recoverOverdueTurnRequests();
+
+        // 묶음마다 다음 주기로 미루면 밀린 양이 분당 한 묶음씩만 돌아온다.
+        assertThat(report).isEqualTo(
+                new RecoveryReport(BATCH_SIZE + 2, BATCH_SIZE + 2, (BATCH_SIZE + 2) * 10, 0, 0, 2));
+        verify(aiChatTurnRequestRepository, times(2)).findOverdueUnfinishedIds(any(), any());
+    }
+
+    @Test
+    void 건너뛴_행이_다시_조회돼도_같은_스캔에서_두_번_처리하지_않는다() {
+        List<Long> fullBatch = idRange(1L, BATCH_SIZE);
+        // 전부 "아직 기한 전" 이라 미종료로 남고, 다음 조회에 같은 목록이 그대로 다시 나온다.
+        given(aiChatTurnRequestRepository.findOverdueUnfinishedIds(any(), any()))
+                .willReturn(fullBatch, fullBatch, fullBatch);
+        given(aiChatTurnOutcomeWriter.expireIfOverdue(any(), any(), anyString()))
+                .willReturn(new TurnOutcomeResult.StillRunning(AiChatTurnRequest.Status.RESERVED));
+
+        RecoveryReport report = recoveryService.recoverOverdueTurnRequests();
+
+        assertThat(report).isEqualTo(new RecoveryReport(BATCH_SIZE, 0, 0, BATCH_SIZE, 0, 1));
+        // 두 번째 조회에서 새 id 가 없다는 것을 확인하고 멈춘다 — 세 번째 조회는 없다.
+        verify(aiChatTurnRequestRepository, times(2)).findOverdueUnfinishedIds(any(), any());
+        verify(aiChatTurnOutcomeWriter, times(BATCH_SIZE)).expireIfOverdue(any(), any(), anyString());
+    }
+
+    private static List<Long> idRange(long firstId, int count) {
+        return LongStream.range(firstId, firstId + count).boxed().toList();
     }
 
     @Test
