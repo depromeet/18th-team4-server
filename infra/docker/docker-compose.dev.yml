@@ -1,0 +1,62 @@
+# readum 개발 서버(EC2)에 상주하는 컨테이너 — 로컬 개발 환경용이 아니다.
+# 원본은 repo 의 infra/docker/ 이고, 서버에서 다음으로 기동한다:
+#   docker compose --env-file /opt/readum/.env -f docker-compose.dev.yml up -d
+#
+# Redis 는 이번 단계에서는 "서버에 떠 있는 상태"까지만 만든다. 애플리케이션이 Redis 를
+# 사용하는 코드(rate limiter·circuit breaker 상태 공유 등)는 #88 에서 별도 진행.
+# MySQL 은 RDS 에서 이관한 것 (이관 배경·절차는 해당 PR 본문 참조).
+services:
+  mysql:
+    # RDS(MySQL 8.4)와 동일 버전으로 고정해 이관 전후 동작 차이를 없앤다.
+    image: mysql:8.4
+    container_name: readum-mysql
+    restart: unless-stopped
+    # 호스트 밖에서는 접근 불가 — 외부 접속(DataGrip 등)은 SSH 터널로.
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Seoul
+    volumes:
+      # 데이터는 EBS 상의 고정 경로에 — 컨테이너 재생성/업그레이드에도 유지된다.
+      - /opt/readum/mysql-data:/var/lib/mysql
+      - /opt/readum/mysql/my.cnf:/etc/mysql/conf.d/readum.cnf:ro
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: readum-redis
+    restart: unless-stopped
+    # 호스트 밖에서는 접근 불가 — 루프백에만 바인딩.
+    ports:
+      - "127.0.0.1:6379:6379"
+    # maxmemory 64mb: t3 급 서버 메모리 예산에 맞춘 상한.
+    # noeviction: 한도 초과 시 쓰기를 에러로 거부한다. rate limiter 상태를 조용히 버리는 것(eviction)보다
+    # 시끄럽게 실패하는 쪽이 안전하다.
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      # RDB 스냅샷을 호스트에 보존 — 컨테이너 재생성 시 토큰 예산 카운터 유실 방지.
+      - /opt/readum/redis-data:/data
+
+  slack-receiver:
+    # 이미지는 slack-receiver-deploy.yml 이 빌드해 docker load 로 서버에 적재한다.
+    image: slack-receiver:latest
+    container_name: readum-slack-receiver
+    restart: unless-stopped
+    # 호스트 밖에서는 접근 불가 — 외부 노출은 nginx 가 담당.
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+      INCIDENT_DISPATCH_TOKEN: ${INCIDENT_DISPATCH_TOKEN}
+      GITHUB_REPOSITORY: depromeet/18th-team4-server
+      PORT: 8090

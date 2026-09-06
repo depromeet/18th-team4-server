@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "readwith-db": {
+      "command": "npx",
+      "args": ["-y", "@benborla29/mcp-server-mysql@2.0.8"],
+      "env": {
+        "MYSQL_HOST": "{RDS_ENDPOINT}",
+        "MYSQL_PORT": "3306",
+        "MYSQL_USER": "{DB_USER}",
+        "MYSQL_PASS": "{DB_PASSWORD}",
+        "MYSQL_DB": "readum",
+        "MYSQL_SSL": "true",
+        "MYSQL_SSL_CA": "{글로벌_번들_PEM_경로}"
+      }
+    }
+  }
+}
