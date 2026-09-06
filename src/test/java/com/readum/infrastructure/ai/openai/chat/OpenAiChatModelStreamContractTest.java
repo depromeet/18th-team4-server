@@ -227,7 +227,6 @@ class OpenAiChatModelStreamContractTest {
 
     private AiChatClientImpl aiChatClient(OpenAiChatModel model) {
         AiChatClientImpl client = new AiChatClientImpl(
-                null,
                 model,
                 new ChatInputGuardrail(GuardrailProperties.Input.defaults()),
                 new AiPromptAuditLogger(JsonMapper.builder().build()),

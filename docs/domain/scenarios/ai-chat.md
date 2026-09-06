@@ -76,7 +76,7 @@ flowchart TD
     Q -->|BLOCKED| R["USER 메시지 REJECTED 저장 → 400 GUARDRAIL_BLOCKED_INPUT"]
     Q -->|UNAVAILABLE| S["저장 없이 503 GUARDRAIL_MODERATION_UNAVAILABLE — 판정 불가 시 차단"]
     Q -->|PASSED| T["USER 메시지 COMPLETED 저장 + 세션 턴 카운트 증가"]
-    T --> U["AiChatClient.stream — 출력 advisor 체인: PromptInjectionPatternAdvisor → SafeGuardAdvisor → ModerationOutputAdvisor (infrastructure)"]
+    T --> U["AiChatClient.generateStream — OpenAiChatModel 직접 호출, 서버 소유 구독 (infrastructure)"]
     U --> V["token 이벤트 스트리밍 — delta 를 즉시 전송하며 본문 누적"]
     V --> W{"스트림 종료 방식"}
     W -->|"정상 종료 (usage 청크 도착)"| X["saveAssistantSuccess — ASSISTANT COMPLETED 저장 + 출력 토큰 누적, 첫 응답이면 제목 생성 이벤트, 커밋 후 컨텍스트 요약 트리거 이벤트(최근 원문 대화>4,000이면 요약 job 적재)"]

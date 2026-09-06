@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
@@ -44,10 +43,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @ExtendWith(MockitoExtension.class)
 class AiChatClientImplTest {
 
-    @Mock
-    private ChatClient chatClient;
-
-    // 스트리밍 전용 ChatModel. ChatClient 를 거치지 않는 직접 호출 경로다.
+    // 이 어댑터가 부르는 유일한 모델. ChatClient 를 거치지 않는 직접 호출 경로다.
     @Mock
     private ChatModel streamingChatModel;
 
@@ -59,7 +55,7 @@ class AiChatClientImplTest {
 
     private final TokenCounter tokenCounter = text -> 0;
 
-    // 실제 기본 패턴·거부 정본 문구를 그대로 쓰는 검사기 — advisor 와 같은 판정인지 보려면 같은 설정이어야 한다.
+    // 실제 기본 패턴을 그대로 쓰는 검사기 — 운영과 같은 판정을 보려면 같은 설정이어야 한다.
     private final ChatInputGuardrail chatInputGuardrail =
             new ChatInputGuardrail(GuardrailProperties.Input.defaults());
 
@@ -76,7 +72,7 @@ class AiChatClientImplTest {
     @BeforeEach
     void setUp() {
         aiChatClient = new AiChatClientImpl(
-                chatClient, streamingChatModel, chatInputGuardrail,
+                streamingChatModel, chatInputGuardrail,
                 auditLogger, rateLimitGuard, aiChatProperties, tokenCounter);
         // @Value 로 주입되던 시스템 프롬프트는 파일 로딩(@PostConstruct) 없이 직접 채운다 —
         // 이 테스트가 보는 것은 프롬프트 조립 순서와 입력 검사이지 프롬프트 원문이 아니다.

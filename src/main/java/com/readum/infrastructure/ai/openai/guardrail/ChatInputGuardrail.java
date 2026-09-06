@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  * 이 검사기는 판정만 돌려주고, 스트리밍 경로는 그 판정을 선행 단계에서 입력 moderation 차단과 같은 모양
  * (REJECTED 기록 + 400 {@code GUARDRAIL_BLOCKED_INPUT})으로 거절한다. 거부 정본 문구를 답변으로 흘려보내면
  * 종료 사유도 사용량도 없는 응답이라 정상 완료 판정을 통과하지 못하고, 사용자는 거부 문구 뒤에
- * 생성 장애 안내까지 함께 받게 된다. 거부 정본 문구 자체는 비스트리밍 {@code chatClient} 빈의 advisor 가 계속 쓴다.
+ * 생성 장애 안내까지 함께 받게 된다. 거부 정본 문구 자체는 감상문 생성용 {@code chatClient} 빈의 advisor 가 계속 쓴다.
  *
  * <p>두 검사 모두 로컬 계산이라 외부 호출 비용이 없다.
  */

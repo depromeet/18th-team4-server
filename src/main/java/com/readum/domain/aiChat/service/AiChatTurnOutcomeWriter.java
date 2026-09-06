@@ -293,8 +293,7 @@ class AiChatTurnOutcomeWriter {
                 generation.content(),
                 generation.inputTokens(),
                 generation.outputTokens(),
-                generation.totalTokens(),
-                null);
+                generation.totalTokens());
     }
 
     /** 사용자 청구량 A = 이번 메시지 입력 추정 + 실측 출력 (기존 산식 유지). */

@@ -47,6 +47,11 @@ public class OpenAiConfig {
     private static final Duration CHAT_READ_TIMEOUT = Duration.ofSeconds(90);
     private static final Duration CHAT_CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
+    /**
+     * 감상문 생성({@code AiSummaryClientImpl})이 쓰는 ChatClient. 채팅 경로는 이 빈을 쓰지 않는다 —
+     * 채팅은 {@link #streamingChatModel} 을 직접 부르고, 로컬 입력 검사는 {@link ChatInputGuardrail} 이 한다.
+     * 그래서 여기 달린 advisor 세 개(정규식 패턴 · 금칙어 · 출력 moderation)가 적용되는 경로도 감상문 생성뿐이다.
+     */
     @Bean
     public ChatClient chatClient(
             GuardrailProperties guardrailProperties,
@@ -59,7 +64,7 @@ public class OpenAiConfig {
     ) throws IOException {
         String systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
 
-        // 비스트리밍 1회성 요청/응답 — moderation 빈과 동일하게 블로킹 JDK HttpClient + HTTP/1.1.
+        // 1회성 요청/응답 — moderation 빈과 동일하게 블로킹 JDK HttpClient + HTTP/1.1.
         java.net.http.HttpClient jdkHttpClient = java.net.http.HttpClient.newBuilder()
                 .version(java.net.http.HttpClient.Version.HTTP_1_1)
                 .connectTimeout(CHAT_CONNECT_TIMEOUT)
@@ -119,8 +124,8 @@ public class OpenAiConfig {
      *       차단은 이 스트림 안이 아니라 선행 단계에서 입력 moderation 차단과 같은 모양(400)으로 거절한다</li>
      *   <li>모델·옵션({@code streamUsage} 포함)·재시도 0회·오류 핸들러 → 이 빈에 그대로</li>
      * </ul>
-     * 출력 검증 advisor 는 원래도 이 경로에 달지 않았다 — {@link ModerationOutputAdvisor} 는 스트림에서 조각을
-     * 전부 모은 뒤 검사하므로 달면 조각 단위 전달이 성립하지 않는다. 비스트리밍 {@code chatClient} 빈에는 그대로 있다.
+     * 이 경로에는 출력 검증 advisor 를 달지 않는다 — {@link ModerationOutputAdvisor} 는 조각을 전부 모은 뒤
+     * 검사하므로 달면 조각 단위 전달이 성립하지 않는다. 그 advisor 는 감상문 생성용 {@link #chatClient} 빈에 달려 있다.
      *
      * <p>전송은 WebClient(reactor-netty) 이고, {@code streamUsage} 를 켜서 마지막 청크로 실측 사용량을 받는다
      * (OpenAI 의 {@code stream_options.include_usage}).
@@ -148,8 +153,8 @@ public class OpenAiConfig {
                 .webClientBuilder(WebClient.builder())
                 .responseErrorHandler(openAiResponseErrorHandler)
                 .build();
-        // 재시도를 두지 않는 이유는 비스트리밍 빈과 같다 — 사용자가 기다리기를 그만둔 뒤에도 보이지 않는
-        // 과금 호출이 반복되는 것을 막는다. 실패는 즉시 표면화하고 재전송 여부는 사용자가 정한다.
+        // 자체 재시도를 두지 않는다 — 사용자가 기다리기를 그만둔 뒤에도 보이지 않는 과금 호출이 반복되는 것을
+        // 막는다(#103 교훈: 재시도는 증폭기). 실패는 즉시 표면화하고 재전송 여부는 사용자가 정한다.
         RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
         return OpenAiChatModel.builder()
                 .openAiApi(openAiApi)

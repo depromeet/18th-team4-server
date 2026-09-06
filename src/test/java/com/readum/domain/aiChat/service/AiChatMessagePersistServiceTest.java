@@ -193,7 +193,7 @@ class AiChatMessagePersistServiceTest {
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
         given(aiChatMessageRepository.findFirstUserMessage(sessionId)).willReturn(Optional.of(firstUserMessage));
 
-        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150);
 
         persistService.saveAssistantSuccess(sessionId, "첫 응답", meta);
 
@@ -220,7 +220,7 @@ class AiChatMessagePersistServiceTest {
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(laterSession));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
 
-        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150);
 
         persistService.saveAssistantSuccess(sessionId, "후속 응답", meta);
 
@@ -239,7 +239,7 @@ class AiChatMessagePersistServiceTest {
             return AiChatMessageFixture.persistedCopyOf(99L, incoming);
         });
 
-        AiChatCompletion meta = new AiChatCompletion(null, 312, 58, 370, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 312, 58, 370);
         AiChatMessage saved = persistService.saveAssistantSuccess(sessionId, "응답 본문", meta);
 
         ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);

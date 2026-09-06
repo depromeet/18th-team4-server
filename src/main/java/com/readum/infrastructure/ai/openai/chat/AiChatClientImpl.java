@@ -1,7 +1,6 @@
 package com.readum.infrastructure.ai.openai.chat;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
-import com.readum.domain.aiChat.dto.AiChatCompletion;
 import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
@@ -19,14 +18,12 @@ import com.readum.domain.aiChat.out.TokenCounter;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
-import org.springframework.ai.chat.metadata.RateLimit;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -56,11 +53,10 @@ public class AiChatClientImpl implements AiChatClient {
     private static final String PROMPT_TEMPLATE_ID = "reading-assistant-system";
     private static final String PROMPT_TEMPLATE_VERSION = "v1";
 
-    private final ChatClient chatClient;
-    // 스트리밍 전용 ChatModel (OpenAiConfig#streamingChatModel). ChatClient 를 거치지 않는 이유와
-    // 그 대가(프롬프트 조립·입력 검사를 여기서 직접 해야 함)는 그 빈의 주석에 적혀 있다.
+    // 이 어댑터가 부르는 모델은 스트리밍 전용 ChatModel(OpenAiConfig#streamingChatModel) 하나다.
+    // ChatClient 를 거치지 않는 이유와 그 대가(프롬프트 조립·입력 검사를 여기서 직접 해야 함)는 그 빈의 주석에 적혀 있다.
     private final ChatModel streamingChatModel;
-    // ChatClient 를 우회하면서 빠진 입력 advisor 두 개와 같은 판정을 하는 로컬 검사기.
+    // ChatClient 를 거치지 않으므로 advisor 체인이 돌지 않는다. 그 자리를 메우는 로컬 입력 검사기다.
     // 판정만 하고, 거절은 선행 단계(AiChatMessageSendService)가 400 으로 낸다.
     private final ChatInputGuardrail chatInputGuardrail;
     private final AiPromptAuditLogger auditLogger;
@@ -79,7 +75,6 @@ public class AiChatClientImpl implements AiChatClient {
     @PostConstruct
     void init() throws IOException {
         // 책 정보·이전 대화 요약을 매 호출마다 덧붙여야 하므로 시스템 프롬프트 파일을 직접 읽어 조립한다.
-        // 비스트리밍 chatClient 빈의 defaultSystem 과 같은 파일이며, 그쪽은 이 값으로 덮어쓴다.
         this.baseSystemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
     }
 
@@ -118,41 +113,6 @@ public class AiChatClientImpl implements AiChatClient {
     @Override
     public boolean isBlockedByLocalInputCheck(AiChatStreamCommand command) {
         return chatInputGuardrail.isBlocked(buildPromptMessages(command));
-    }
-
-    /** 호출 전 acquireRateLimitPermit() 이 선행되어야 한다 — 전역 게이트 검사는 여기서 하지 않는다. */
-    @Override
-    public AiChatCompletion generate(AiChatStreamCommand command) {
-        String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
-
-        List<Message> messages = command.history().stream()
-                .map(this::toSpringMessage)
-                .toList();
-
-        AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
-                conversationIdHash(command.conversationId()),
-                PROMPT_TEMPLATE_ID,
-                PROMPT_TEMPLATE_VERSION,
-                promptHash(command.history())
-        );
-        long startNanos = System.nanoTime();
-
-        try {
-            ChatResponse chatResponse = chatClient.prompt()
-                    .system(systemPrompt)
-                    .messages(messages)
-                    .call()
-                    .chatResponse();
-            AiChatCompletion completion = toCompletion(chatResponse);
-            auditLogger.success(
-                    ChatResponseAuditMapper.applyResult(baseEvent, chatResponse, elapsedMillis(startNanos)));
-            return completion;
-        } catch (RuntimeException error) {
-            logUnexpectedError(error);
-            auditLogger.failure(
-                    ChatResponseAuditMapper.applyResult(baseEvent, null, elapsedMillis(startNanos)), error);
-            throw error;
-        }
     }
 
     /**
@@ -309,23 +269,6 @@ public class AiChatClientImpl implements AiChatClient {
         return (finishReason == null || finishReason.isBlank()) ? null : finishReason;
     }
 
-    private AiChatCompletion toCompletion(ChatResponse chatResponse) {
-        String text = Optional.ofNullable(chatResponse)
-                .map(ChatResponse::getResult)
-                .map(result -> result.getOutput())
-                .map(output -> output.getText())
-                .orElse("");
-        ChatResponseMetadata metadata = chatResponse == null ? null : chatResponse.getMetadata();
-        Usage usage = Optional.ofNullable(metadata).map(ChatResponseMetadata::getUsage).orElse(null);
-        return new AiChatCompletion(
-                text,
-                usage == null ? null : toIntOrNull(usage.getPromptTokens()),
-                usage == null ? null : toIntOrNull(usage.getCompletionTokens()),
-                usage == null ? null : toIntOrNull(usage.getTotalTokens()),
-                extractRateLimit(metadata)
-        );
-    }
-
     private String conversationIdHash(Long conversationId) {
         return conversationId == null ? null : auditLogger.sha256(String.valueOf(conversationId));
     }
@@ -371,31 +314,6 @@ public class AiChatClientImpl implements AiChatClient {
             case USER -> new UserMessage(history.content());
             case ASSISTANT -> new AssistantMessage(history.content());
         };
-    }
-
-    private AiChatCompletion.RateLimitSnapshot extractRateLimit(ChatResponseMetadata metadata) {
-        if (metadata == null) {
-            return null;
-        }
-        // Spring AI 2.0.0-M4(milestone) 의 RateLimit getter 동작이 안정 보장되지 않아
-        // RuntimeException 으로 안전 폴백한다. 추출 실패 시 null 로 두고 응답 처리는 계속 진행.
-        try {
-            RateLimit rateLimit = metadata.getRateLimit();
-            if (rateLimit == null) {
-                return null;
-            }
-            return new AiChatCompletion.RateLimitSnapshot(
-                    rateLimit.getRequestsLimit(),
-                    rateLimit.getRequestsRemaining(),
-                    rateLimit.getRequestsReset(),
-                    rateLimit.getTokensLimit(),
-                    rateLimit.getTokensRemaining(),
-                    rateLimit.getTokensReset()
-            );
-        } catch (RuntimeException ex) {
-            log.debug("Rate limit 메타데이터 추출 실패", ex);
-            return null;
-        }
     }
 
     private Integer toIntOrNull(Number number) {
