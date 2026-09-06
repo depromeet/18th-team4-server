@@ -1,5 +1,6 @@
 package com.readum.presentation.controller.aiChat;
 
+import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionDisplayStatus;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
@@ -22,6 +23,7 @@ import com.readum.domain.aiChat.service.BookChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.SummaryEditService;
+import com.readum.domain.aiChat.stream.ChatDeliveryChannel;
 import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.ConflictException;
@@ -51,8 +53,6 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Sinks;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -61,12 +61,17 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
@@ -111,8 +116,57 @@ class AiChatControllerTest {
     @Mock
     private BookChatSessionSearchService bookChatSessionSearchService;
 
+    /**
+     * 전달 기한을 1초로 줄인다 — 이 슬라이스는 전달 스레드를 그 자리에서 돌리므로(directExecutor)
+     * 채널에 종료 이벤트를 넣지 않은 요청이 있으면 그 기한만큼 기다린 뒤 끝난다.
+     */
+    private static final AiChatProperties TEST_PROPERTIES = new AiChatProperties(
+            new AiChatProperties.Context(8000, 2000, 4000, 800),
+            new AiChatProperties.MessageRule(1000),
+            new AiChatProperties.RateLimit(10, 5),
+            new AiChatProperties.TokenBudget(120000, 512),
+            new AiChatProperties.Streaming(120, 30, 1, 60, 256)
+    );
+
     private MockMvc mockMvc;
     private AiChatController controller;
+
+    /**
+     * 전달을 제출한 스레드에서 그대로 실행하는 실행기 — 컨트롤러가 emitter 를 돌려주기 전에 전달이 끝나
+     * MockMvc 의 async dispatch 시점이 결정적이 된다. 실제 배선은 연결마다 가상 스레드를 쓴다.
+     */
+    private static ExecutorService directExecutor() {
+        return new AbstractExecutorService() {
+            @Override
+            public void execute(Runnable command) {
+                command.run();
+            }
+
+            @Override
+            public void shutdown() {
+            }
+
+            @Override
+            public List<Runnable> shutdownNow() {
+                return List.of();
+            }
+
+            @Override
+            public boolean isShutdown() {
+                return false;
+            }
+
+            @Override
+            public boolean isTerminated() {
+                return false;
+            }
+
+            @Override
+            public boolean awaitTermination(long timeout, TimeUnit unit) {
+                return true;
+            }
+        };
+    }
     private final ObjectMapper objectMapper = JsonMapper.builder()
             .findAndAddModules()
             .build();
@@ -129,7 +183,8 @@ class AiChatControllerTest {
                 summarySearchService,
                 summaryDraftSearchService,
                 bookChatSessionSearchService,
-                new MessageStreamSseSerializer(objectMapper)
+                new MessageStreamSseDelivery(
+                        new MessageStreamSseSerializer(objectMapper), directExecutor(), TEST_PROPERTIES)
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -427,19 +482,26 @@ class AiChatControllerTest {
 
         send("차단 대상").andExpect(status().isBadRequest());
 
-        verify(aiChatMessageSendService, never()).generateAndPersistStream(any());
+        verify(aiChatMessageSendService, never()).generateAndDeliver(any(), any());
+    }
+
+    /** 생성 구독이 하는 일을 흉내낸다 — 채널에 조각을 넣고, 저장·정산이 끝난 것처럼 종료 결과를 싣는다. */
+    private void givenGeneration(Consumer<ChatDeliveryChannel> generation) {
+        willAnswer(invocation -> {
+            generation.accept(invocation.getArgument(1, ChatDeliveryChannel.class));
+            return null;
+        }).given(aiChatMessageSendService).generateAndDeliver(any(), any());
     }
 
     @Test
     void 메시지_전송_정상_스트림이면_token_과_done_이벤트가_방출된다() throws Exception {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
-        given(aiChatMessageSendService.generateAndPersistStream(any())).willReturn(Flux.just(
-                new MessageStreamEvent.Token("alpha"),
-                new MessageStreamEvent.Token(" beta"),
-                new MessageStreamEvent.Done(
-                        new MessageStreamEvent.TokenCount(312, 58, 370),
-                        createdAt)
-        ));
+        givenGeneration(channel -> {
+            channel.offerDelta("alpha");
+            channel.offerDelta(" beta");
+            channel.completeWithSuccess(
+                    "alpha beta", new MessageStreamEvent.TokenCount(312, 58, 370), createdAt);
+        });
 
         String body = mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
                 .andExpect(status().isOk())
@@ -456,40 +518,29 @@ class AiChatControllerTest {
     }
 
     @Test
-    void 클라이언트_이탈로_전송이_실패해도_구독은_취소되지_않고_스트림을_끝까지_소비한다() {
-        // 스펙 §5-1(A/B 공통 불변): disconnect 는 전송 중단일 뿐 생성 취소가 아니다.
-        // 서버가 구독을 소유하므로, 전송이 실패해도 뒤따르는 저장·정산 신호까지 소비가 이어져야 한다.
-        AtomicBoolean cancelled = new AtomicBoolean(false);
-        AtomicBoolean consumedToEnd = new AtomicBoolean(false);
-        Sinks.Many<MessageStreamEvent> events = Sinks.many().unicast().onBackpressureBuffer();
-        given(aiChatMessageSendService.generateAndPersistStream(any()))
-                .willReturn(events.asFlux()
-                        .doOnCancel(() -> cancelled.set(true))
-                        .doOnComplete(() -> consumedToEnd.set(true)));
+    void 전달_통로를_먼저_열고_생성을_시작한_뒤_전달을_띄운다() {
+        // 생성이 첫 조각을 넣을 곳(채널)이 있어야 하므로 순서가 뒤바뀌면 안 된다.
+        // 전달을 먼저 띄우면 생성이 시작될 때까지 빈 채널에서 기다리기만 한다.
+        AtomicBoolean channelOpenedBeforeGeneration = new AtomicBoolean(false);
+        givenGeneration(channel -> {
+            channelOpenedBeforeGeneration.set(channel != null && !channel.isClosed());
+            channel.completeWithFailure(MessageStreamEvent.Error.of(
+                    AiChatErrorCode.AI_STREAM_INTERRUPTED.name(), "끝"));
+        });
 
-        SseEmitter emitter = controller.sendMessage(USER_ID, 7L, new SendMessageRequest(REQUEST_ID, "질문"));
+        controller.sendMessage(USER_ID, 7L, new SendMessageRequest(REQUEST_ID, "질문"));
 
-        events.tryEmitNext(new MessageStreamEvent.Token("앞부분"));
-        // 클라이언트 이탈 모사 — 이후 전송 시도는 IllegalStateException 으로 실패한다.
-        emitter.complete();
-        events.tryEmitNext(new MessageStreamEvent.Token("뒷부분"));
-        events.tryEmitNext(new MessageStreamEvent.Done(
-                new MessageStreamEvent.TokenCount(10, 5, 15), LocalDateTime.of(2026, 5, 2, 14, 33, 21)));
-        events.tryEmitComplete();
-
-        org.assertj.core.api.Assertions.assertThat(cancelled).isFalse();
-        org.assertj.core.api.Assertions.assertThat(consumedToEnd).isTrue();
+        org.assertj.core.api.Assertions.assertThat(channelOpenedBeforeGeneration).isTrue();
     }
 
     @Test
     void 메시지_전송_스트림_에러_이벤트도_정상_방출된다() throws Exception {
-        given(aiChatMessageSendService.generateAndPersistStream(any())).willReturn(Flux.just(
-                new MessageStreamEvent.Token("부분"),
-                MessageStreamEvent.Error.of(
-                        AiChatErrorCode.AI_STREAM_INTERRUPTED.name(),
-                        AiChatErrorCode.AI_STREAM_INTERRUPTED.getMessage()
-                )
-        ));
+        givenGeneration(channel -> {
+            channel.offerDelta("부분");
+            channel.completeWithFailure(MessageStreamEvent.Error.of(
+                    AiChatErrorCode.AI_STREAM_INTERRUPTED.name(),
+                    AiChatErrorCode.AI_STREAM_INTERRUPTED.getMessage()));
+        });
 
         String body = mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
                 .andExpect(status().isOk())

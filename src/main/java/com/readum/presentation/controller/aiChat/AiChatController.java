@@ -4,7 +4,6 @@ import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
-import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SummaryDraftCommand;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
@@ -15,6 +14,7 @@ import com.readum.domain.aiChat.service.BookChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.SummaryEditService;
+import com.readum.domain.aiChat.stream.ChatDeliveryChannel;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
@@ -51,8 +51,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Tag(name = "AI 채팅", description = "AI 와 책 한 권에 대해 대화하는 채팅 세션 및 메시지 관리")
@@ -70,10 +68,7 @@ public class AiChatController {
     private final SummarySearchService summarySearchService;
     private final SummaryDraftSearchService summaryDraftSearchService;
     private final BookChatSessionSearchService bookChatSessionSearchService;
-    private final MessageStreamSseSerializer messageStreamSseSerializer;
-
-    // 생성(최대 read 90초) + 여유. 컨테이너 기본 async 타임아웃이 생성보다 짧으면 도중에 닫히므로 명시한다.
-    private static final long SSE_EMITTER_TIMEOUT_MILLIS = 120_000L;
+    private final MessageStreamSseDelivery messageStreamSseDelivery;
 
     @Operation(
             summary = "AI 채팅 세션 생성",
@@ -143,8 +138,11 @@ public class AiChatController {
      * 선행 처리는 요청 스레드(가상 스레드)에서 동기로 끝낸다 — 여기서 던진 예외는 SSE 시작 전이라
      * GlobalExceptionHandler 의 4xx/5xx JSON(429 는 Retry-After·X-RateLimit-* 헤더 포함)으로 나간다.
      *
-     * 그다음 emitter 를 만들어 생성 스트림을 서버가 구독한다. 구독 해제를 SSE 연결에 묶지 않으므로
-     * 클라이언트 이탈이 생성을 취소하지 않는다 — 전송만 멈추고 소비·저장·정산은 끝까지 진행된다 (스펙 §5-1).
+     * <p>그 뒤로는 셋이 각자 돈다. <b>생성</b>은 서버가 소유한 구독이 소비하고, <b>전달</b>은 연결별 VT 가
+     * 채널에서 꺼내 쓰며, <b>저장·정산</b>은 생성이 끝난 뒤 별도 VT 가 맡는다. 컨트롤러는 셋을 이어 주고
+     * emitter 를 돌려줄 뿐 어느 것도 기다리지 않는다.
+     *
+     * <p>클라이언트 이탈은 생성을 취소하지 않는다 — 전달만 끝나고 소비·저장·정산은 끝까지 진행된다.
      */
     @Operation(
             summary = "메시지 전송 (SSE 응답)",
@@ -242,60 +240,17 @@ public class AiChatController {
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
-        // 진행 목록(메모리) 등록·신규 수락 차단은 별도 작업에서 이 앞에 붙는다 —
-        // 중복으로 판정된 요청은 생성하지 않고 그 호출의 등록만 정리한다.
+        // 선행 처리(진행 목록 등록·중복 판정·관문)는 요청 스레드에서 동기로 끝난다 —
+        // 거절은 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 내보낸다.
         AiChatMessageSendService.PreparedChatTurn turn =
                 aiChatMessageSendService.prepare(request.toCommand(userId, sessionId));
 
-        SseEmitter emitter = new SseEmitter(SSE_EMITTER_TIMEOUT_MILLIS);
-        // 전송 실패(클라이언트 이탈) 이후에는 더 보내지 않는다. 소비는 계속한다.
-        AtomicBoolean deliveryStopped = new AtomicBoolean(false);
-
-        aiChatMessageSendService.generateAndPersistStream(turn)
-                .subscribe(
-                        event -> deliver(emitter, event, sessionId, deliveryStopped),
-                        error -> failStream(emitter, error, sessionId),
-                        () -> completeQuietly(emitter, sessionId));
-        return emitter;
-    }
-
-    private void deliver(
-            SseEmitter emitter,
-            MessageStreamEvent event,
-            Long sessionId,
-            AtomicBoolean deliveryStopped
-    ) {
-        if (deliveryStopped.get()) {
-            return;
-        }
-        try {
-            emitter.send(messageStreamSseSerializer.toSseEvent(event));
-        } catch (IOException | IllegalStateException sendError) {
-            // 클라이언트 이탈 추정. 전송만 멈추고 생성·저장·정산은 그대로 진행된다 (스펙 §5-1).
-            deliveryStopped.set(true);
-            log.info("SSE 전송 실패(클라이언트 이탈 추정) sessionId={} cause={}", sessionId, sendError.toString());
-        } catch (RuntimeException unexpectedSendError) {
-            // 예상 밖의 전송 실패도 스트림 취소로 번지게 두지 않는다 — 취소되면 저장·정산이 통째로 건너뛰어진다.
-            deliveryStopped.set(true);
-            log.error("SSE 전송 중 예기치 못한 실패 sessionId={}", sessionId, unexpectedSendError);
-        }
-    }
-
-    /**
-     * 생성 스트림이 error 신호로 끝난 경우. 생성 단계의 실패는 서비스가 error 이벤트로 바꿔 주므로
-     * 여기 오면 계약이 깨진 것이다 — 클라이언트가 emitter 타임아웃까지 매달리지 않게 즉시 종료한다.
-     */
-    private void failStream(SseEmitter emitter, Throwable error, Long sessionId) {
-        log.error("AI 채팅 SSE 처리 중 예기치 못한 실패 sessionId={}", sessionId, error);
-        emitter.completeWithError(error);
-    }
-
-    private void completeQuietly(SseEmitter emitter, Long sessionId) {
-        try {
-            emitter.complete();
-        } catch (IllegalStateException alreadyClosed) {
-            log.info("SSE 종료 처리 생략(이미 닫힘) sessionId={} cause={}", sessionId, alreadyClosed.toString());
-        }
+        // 전달 통로를 먼저 열고(전달 기한의 시작점), 생성 구독을 건 뒤, 전달 VT 를 띄운다.
+        // 생성을 먼저 시작해도 전달이 늦지 않는다 — 그 사이의 델타는 채널이 받아 두고 전달 VT 가 꺼내 간다.
+        // 반대 순서로 두면 전달 VT 가 생성이 시작될 때까지 빈 채널에서 기다리기만 한다.
+        ChatDeliveryChannel deliveryChannel = messageStreamSseDelivery.openChannel();
+        aiChatMessageSendService.generateAndDeliver(turn, deliveryChannel);
+        return messageStreamSseDelivery.start(deliveryChannel, sessionId);
     }
 
     @Operation(

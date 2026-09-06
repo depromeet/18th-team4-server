@@ -73,7 +73,8 @@ class AiChatStreamGuardrailTest {
 
     // 커밋 후 리스너(제목 생성 등)를 같은 스레드에서 실행해 테스트 실행 시점을 결정적으로 만든다.
     // 메시지 전송 경로 자체는 이 executor 를 쓰지 않는다 — 선행 처리는 요청 스레드에서 동기로 끝나고,
-    // 생성 구간은 공유 boundedElastic 위에서 돌며 완료를 async dispatch 로 기다린다.
+    // 생성은 서버가 소유한 구독이, 저장·정산은 후처리 VT 가 따로 맡는다. 그래서 저장 결과를 보려면
+    // 응답이 아니라 요청 기록의 상태가 끝날 때까지 기다려야 한다(awaitTurnRequestStatus).
     @TestConfiguration
     static class DirectExecutorConfig {
         @Bean
@@ -139,6 +140,22 @@ class AiChatStreamGuardrailTest {
         sessionId = session.getId();
     }
 
+    /** 후처리 VT 가 요청을 끝낼 때까지 기다린다 — 저장·정산은 응답과 별개로 진행되기 때문이다. */
+    private String awaitTurnRequestStatus(String requestId) throws InterruptedException {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            String status = jdbcTemplate.queryForObject(
+                    "SELECT status FROM ai_chat_turn_request WHERE user_id = ? AND request_id = ?",
+                    String.class, userId, requestId);
+            if (status != null && !"ACCEPTED".equals(status) && !"RESERVED".equals(status)) {
+                return status;
+            }
+            Thread.sleep(50);
+        }
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_chat_turn_request WHERE user_id = ? AND request_id = ?",
+                String.class, userId, requestId);
+    }
+
     private long countByStatus(String status) {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM ai_chat_message WHERE session_id = ? AND status = ?",
@@ -152,12 +169,17 @@ class AiChatStreamGuardrailTest {
      * 통과 경로만 SSE 로 비동기 시작돼 async dispatch 를 태워야 본문이 나온다.
      */
     private org.springframework.test.web.servlet.ResultActions send(String content) throws Exception {
+        return send(content, UUID.randomUUID().toString());
+    }
+
+    private org.springframework.test.web.servlet.ResultActions send(String content, String requestId)
+            throws Exception {
         // Accept 헤더를 지정하지 않는다(= accept all). 통과 시 produces=text/event-stream 매칭이 되고,
         // 거부/장애 시 JSON 에러 본문도 content negotiation 으로 정상 반환된다.
         // (Accept: text/event-stream 만 보내면 JSON 에러 본문이 협상에 실패해 ServletException 으로 샌다.)
         // 실제 서비스·H2 를 쓰는 슬라이스라 요청마다 새 식별자를 발급한다 —
         // 같은 식별자를 재사용하면 두 번째 호출부터 중복 요청(409)으로 거절된다.
-        SendMessageRequest body = new SendMessageRequest(UUID.randomUUID().toString(), content);
+        SendMessageRequest body = new SendMessageRequest(requestId, content);
         org.springframework.test.web.servlet.ResultActions actions =
                 mockMvc.perform(post("/api/v1/ai-chat/sessions/" + sessionId + "/messages")
                         .with(authentication(new UsernamePasswordAuthenticationToken(
@@ -217,14 +239,36 @@ class AiChatStreamGuardrailTest {
     }
 
     @Test
-    void 통과하면_스트림이_완주하고_USER_메시지가_COMPLETED_로_저장된다() throws Exception {
+    void 통과하면_스트림이_완주하고_답변이_저장되며_요청이_성공으로_끝난다() throws Exception {
         given(inputModerationClient.check(any(), any())).willReturn(InputModerationResult.passed());
         givenGeneratedStream("이 책은");
+        String requestId = UUID.randomUUID().toString();
 
-        send("이 책의 줄거리를 요약해줘")
+        send("이 책의 줄거리를 요약해줘", requestId)
                 .andExpect(status().isOk());
 
-        assertThat(countByStatus("COMPLETED")).isGreaterThanOrEqualTo(1L);
+        assertThat(awaitTurnRequestStatus(requestId)).isEqualTo("SUCCEEDED");
+        // USER 1건 + ASSISTANT 1건
+        assertThat(countByStatus("COMPLETED")).isEqualTo(2L);
+    }
+
+    @Test
+    void 로컬_입력_검사의_거부_응답은_청구_없이_실패로_끝난다() throws Exception {
+        // AiChatClientImpl 은 로컬 입력 검사에 걸리면 모델을 부르지 않고 거부 문구 한 조각만 흘려보낸다 —
+        // 종료 사유도 사용량도 없는 모양이다. 새 판정에서는 정상 완료가 아니므로 실패로 끝난다.
+        given(inputModerationClient.check(any(), any())).willReturn(InputModerationResult.passed());
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(Flux.just(AiChatStreamChunk.ofDelta(REJECT_MESSAGE)));
+        String requestId = UUID.randomUUID().toString();
+
+        send("로컬 검사에 걸리는 질문", requestId)
+                .andExpect(status().isOk());
+
+        // 클라이언트는 거부 문구를 token 으로 받은 뒤 error 로 끝나는 것을 본다(응답 모양은 그대로 두었다).
+        // 서버 쪽 결과: 청구 없음 + 답변 미저장. USER 메시지만 COMPLETED 로 남는다.
+        assertThat(awaitTurnRequestStatus(requestId)).isEqualTo("FAILED");
+        assertThat(countByStatus("COMPLETED")).isEqualTo(1L);
+        assertThat(countByStatus("FAILED")).isZero();
     }
 
     @Test
