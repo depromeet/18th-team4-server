@@ -303,7 +303,26 @@ Redis 프로세스가 죽어 연결이 거부되면 그 사실이 즉시 오므�
 재연결되면 보낸다(`ClientOptions.DEFAULT_DISCONNECTED_BEHAVIOR = DisconnectedBehavior.DEFAULT`,
 큐 상한 `DEFAULT_REQUEST_QUEUE_SIZE = Integer.MAX_VALUE`). 그래도 각 명령은 발행 시점부터 명령 기한을
 재므로, 버퍼에 갇힌 명령도 1초 뒤에 `QueryTimeoutException` 으로 끝난다 — 재연결을 기다리며 무한정
-매달리지 않는다. (jar 로 확인: lettuce-core 6.8.2.RELEASE 의 `ClientOptions` 상수.)
+매달리지 않는다. (jar 로 확인: lettuce-core 6.8.2.RELEASE 의 `ClientOptions` 상수. 실측은 아래 표.)
+
+**실측 (2026-09-06, 로컬 macOS).** `RedisFailOpenTimingTest`
+(`src/test/java/com/readum/infrastructure/redis/`)가 스프링 컨텍스트 없이 `LettuceConnectionFactory` 와
+두 협력자를 직접 조립해 세 상황을 잰다: 연결을 받고 아무 바이트도 쓰지 않는 가짜 Redis(`ServerSocket`
+으로 만든다), `accept` 를 하지 않아 대기열만 채워 둔 소켓, 아무도 듣지 않는 포트(연결 거부).
+
+| 상황 | 폭주 가드 | 전역 게이트 |
+|---|---|---|
+| 연결은 받되 응답 없음 (기한 1초) | `Bypassed` **1,119ms** | `PermittedUncounted` **1,162ms** |
+| `accept` 없이 대기열만 참 (기한 1초) | `Bypassed` **1,012ms** | `PermittedUncounted` **1,013ms** |
+| 연결 거부 (죽은 Redis) | `Bypassed` **15ms** | `PermittedUncounted` **6ms** |
+| 연결은 받되 응답 없음, **기한 미설정** | `Bypassed` **60,184ms** | — |
+
+기한을 두지 않았을 때의 60초가 이 변경이 없앤 값이다. 그 비교 테스트는 한 번 도는 데 1분이 넘어
+`@Disabled` 로 두었다 — 기본 빌드에 넣지 않고, 값을 의심할 때만 손으로 켜서 돌린다.
+
+두 번째 줄은 연결이 실제로 매달리지 않고 커널 대기열에 들어가 TCP 로는 맺어진 경우다. 그래도 응답이
+없으므로 이번엔 연결 기한 대신 명령 기한이 같은 1초로 잡는다 — 어느 쪽이 먼저 걸리든 결과가 같도록
+두 값을 같게 둔 이유다.
 
 ### 수동 실행 전용 테스트 — `./gradlew mysqlTest`
 
