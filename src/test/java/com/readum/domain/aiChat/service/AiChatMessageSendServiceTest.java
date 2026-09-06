@@ -31,10 +31,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.time.InstantSource;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -111,6 +113,11 @@ class AiChatMessageSendServiceTest {
     // 진행 목록은 순수 메모리 상태라 진짜를 쓴다 — 등록·정리가 실제로 맞물리는지 보려면 대역이 도움이 되지 않는다.
     private final AiChatInFlightTurnRegistry aiChatInFlightTurnRegistry = new AiChatInFlightTurnRegistry(MAX_IN_FLIGHT_TURNS);
 
+    // 재시도 규칙도 순수 계산이라 진짜를 쓴다. 대기만 즉시 끝나게 바꿔 테스트가 초 단위로 멈추지 않게 한다 —
+    // 멈추는 조건 자체는 AiChatPostProcessingRetryTest 가 따로 확인한다.
+    private final AiChatPostProcessingRetry aiChatPostProcessingRetry = new AiChatPostProcessingRetry(
+            STREAMING.turnRequestExpiryTimeout(), InstantSource.system(), interval -> true);
+
     // 결정적 test double: settle 산술 배선만 검증한다(실제 jtokkit 정확도는 JtokkitTokenCounterTest 담당).
     // 기존 단언값 유지를 위해 구 추정과 동일한 문자÷2.5 로 센다.
     private final TokenCounter tokenCounter = text ->
@@ -166,7 +173,7 @@ class AiChatMessageSendServiceTest {
                 persistService, aiChatClient, properties,
                 userMessageRateLimiter, userBookRepository, bookRepository, inputModerationClient,
                 aiChatTurnRequestWriter, aiChatTurnOutcomeWriter,
-                inFlightTurnRegistry, aiChatPostProcessingExecutor, tokenCounter
+                inFlightTurnRegistry, aiChatPostProcessingRetry, aiChatPostProcessingExecutor, tokenCounter
         );
     }
 
@@ -677,6 +684,81 @@ class AiChatMessageSendServiceTest {
         verify(aiChatTurnOutcomeWriter, never())
                 .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
         verify(aiChatClient, never()).releaseRateLimitPermit(any());
+    }
+
+    @Test
+    void 저장이_일시_실패해도_다시_시도해_확정하면_사용자는_성공으로_끝난다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        // 풀 순간 고갈·잠금 경합처럼 몇 초 안에 지나가는 실패 — 두 번째 시도에서 확정된다.
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+                .willThrow(new CannotAcquireLockException("Lock wait timeout exceeded"))
+                .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.Succeeded(
+                        new AiChatTurnOutcomeWriter.SavedAssistantMessage(42L, 10, 5, 15, SAVED_AT)));
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        assertThat(events.getLast()).isInstanceOf(MessageStreamEvent.Done.class);
+        verify(aiChatTurnOutcomeWriter, times(2))
+                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt());
+        verify(aiChatTurnOutcomeWriter, never())
+                .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
+        assertThat(aiChatPostProcessingRetry.retryCount()).isEqualTo(1);
+        assertThat(aiChatPostProcessingRetry.failureCount(
+                AiChatPostProcessingRetry.FinishKind.SUCCESS_COMMIT)).isZero();
+    }
+
+    @Test
+    void 저장이_데이터_오류로_실패하면_다시_시도하지_않고_기존_실패_경로로_간다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+                .willThrow(new DataIntegrityViolationException("제약 위반"));
+        given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
+                .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
+                        AiChatTurnRequest.Status.RESERVED));
+        givenFinishedWithoutCharge();
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        // 다시 시도해도 같은 결과라 한 번만 부르고 곧바로 기존 재확인 경로로 간다.
+        verify(aiChatTurnOutcomeWriter)
+                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt());
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED), anyString());
+        assertThat(aiChatPostProcessingRetry.retryCount()).isZero();
+        assertThat(events.getLast()).isInstanceOf(MessageStreamEvent.Error.class);
+    }
+
+    @Test
+    void 저장이_세_번_다_실패하면_기존_재확인_경로로_가고_끝내_실패로_센다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+                .willThrow(new CannotAcquireLockException("Lock wait timeout exceeded"));
+        given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
+                .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
+                        AiChatTurnRequest.Status.RESERVED));
+        givenFinishedWithoutCharge();
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        verify(aiChatTurnOutcomeWriter, times(3))
+                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt());
+        verify(aiChatTurnOutcomeWriter).currentOutcome(TURN_REQUEST_ID);
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED), anyString());
+        assertThat(aiChatPostProcessingRetry.retryCount()).isEqualTo(2);
+        assertThat(aiChatPostProcessingRetry.failureCount(
+                AiChatPostProcessingRetry.FinishKind.SUCCESS_COMMIT)).isEqualTo(1);
+        // 완성본을 보관하지 않으므로 답변은 저장되지 않고 사용자는 error 로 끝난다.
+        assertThat(events.getLast()).isInstanceOf(MessageStreamEvent.Error.class);
     }
 
     @Test

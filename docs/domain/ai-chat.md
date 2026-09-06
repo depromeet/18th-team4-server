@@ -157,6 +157,33 @@ Spring AI 가 내부에서 걷어내 애플리케이션까지 오지 않으므�
 - **실패**: 요청 실패 기록 + 예약 반환. **받은 데까지의 부분 본문은 저장하지 않는다** —
   조각은 정상 답변이 아니고, 청구하지 않는 실패에 저장·집계만 남길 이유가 없다.
 
+**종료 트랜잭션은 유계로 다시 시도한다**(`AiChatPostProcessingRetry`). 여기서 실패하면 사용자는
+답변 전문을 이미 본 뒤에 `error` 를 받고 새 요청 식별자로 처음부터 다시 생성해야 하는데, 원인
+(풀 순간 고갈·잠금 대기 초과·일시적 연결 오류)은 대부분 몇 초 안에 지나간다. 그 몇 초를 다시 시도해
+흡수한다. 다시 걸어도 두 번 반영되지 않는다 — 잠금·미종료 확인이 이미 멱등을 만들고 있다.
+
+- **다시 시도하는 것**: 연결 획득 실패(`CannotGetJdbcConnectionException`), 잠금 획득 실패·잠금 대기
+  초과·질의 기한 초과·일시 연결 오류(`TransientDataAccessException` 아래 전부), `RecoverableDataAccessException`.
+  **커밋 도중 연결이 끊긴 경우**(`JpaSystemException` · `DataAccessResourceFailureException` ·
+  `TransactionSystemException`)는 커밋 반영 여부를 알 수 없어, 현재 상태를 먼저 읽고 아직 미종료일 때만
+  다시 시도한다.
+- **다시 시도하지 않는 것**: 데이터 오류(`DataIntegrityViolationException`), 도메인 예외
+  (`BusinessException`), 프로그램 오류(`IllegalStateException`). 이미 다른 실행이 끝낸 요청
+  (`AlreadyFinished`)은 예외가 아니라 정상 결과라 애초에 다시 시도할 대상이 아니다.
+- **멈추는 조건 셋**(하나만 걸려도 멈춘다): ① 최초 1회 + 다시 시도 2회, 합쳐 3회. 간격은 1초 고정 —
+  흡수하려는 것이 몇 초짜리 순간 경합이라 간격을 늘려 갈 이유가 없다. ② 다음 시도를 시작할 시각이
+  **턴의 만료 시각**(진행 목록 등록 시각 + 만료 유예 50초 − 여유 2초)을 넘으면 시작하지 않는다 —
+  만료 뒤에는 미정산 예약 반환이 같은 행을 닫을 수 있어 겹쳐 봐야 헛일이다. ③ 다시 시도할 예외가 아니다.
+  최악의 소요(3회 × (연결 획득 10초 + 잠금 대기 5초) = 45초)는 후처리 여유 20초를 넘지만, 조건 ②가
+  만료 시각에서 먼저 끊는다.
+- **멈춘 뒤**: 성공 확정이 끝내 실패하면 지금의 재확인 경로로 간다 — 현재 상태를 다시 읽어 미종료면
+  청구 없이 끝내고(이 종료에도 같은 재시도 규칙이 걸린다) 연결에는 `error` 를 보낸다. 청구 없는 종료가
+  끝내 실패하면 로그만 남기고 요청 행은 미종료로 남아 미정산 예약 반환이 닫는다.
+- **완성본을 따로 보관하지 않는다.** 다시 시도한 뒤에도 실패하면 **답변은 저장되지 않고**, 사용자는
+  새 요청 식별자로 다시 생성해야 한다. 지표 `ai_chat_post_processing_retries_total`(다시 시도한 횟수)과
+  `ai_chat_post_processing_failures_total`(끝내 실패한 후처리 수, 태그 `outcome` =
+  `success_commit`|`without_charge`)이 그 빈도를 보여 준다.
+
 예산 보정은 선행 처리에서 잡아 둔 **예약량**을 실제 값으로 바꾸는 일이다. 성공이면 예약량을
 빼고 **사용자 청구량**을 더하고, 실패면 예약량만 빼고 아무것도 더하지 않는다.
 사용자 청구량은 메시지 입력 추정 + 실측 출력이며 **공급자가 알려준 usage 와는 다른 값**이다.
@@ -296,7 +323,7 @@ DB 에 저장된 본문과 정확히 같았고, 연결 단절·전달 기한 만
 ## 관련 패키지
 
 - `domain/aiChat/` — service(컨텍스트 요약 워커·생명주기·적재, 턴 요청·종료 트랜잭션 협력자,
-  진행 목록, 미정산 예약 반환 포함) · service/policy · stream(연결별 전달 채널) ·
+  진행 목록, 종료 트랜잭션 유계 재시도, 미정산 예약 반환 포함) · service/policy · stream(연결별 전달 채널) ·
   out(포트: `AiChatClient` · `AiSummaryClient` · `TokenCounter` · `AiContextSummaryClient` 등) ·
   event · listener(제목 생성 · 컨텍스트 요약 트리거) · config(설정·가상 스레드 실행기·종료 절차) · dto
 - `model/aiChat/` — AiChatSession, AiChatMessage, AiChatTurnRequest(턴 요청 기록·멱등 판정),
@@ -305,6 +332,7 @@ DB 에 저장된 본문과 정확히 같았고, 연결 단절·전달 기한 만
 - `infrastructure/ai/openai/` — 포트 구현체, 기능별 하위 패키지(chat · title · summary ·
   contextsummary · guardrail · moderation · ratelimit) + 공용 배관은 루트
 - `infrastructure/redis/` — 폭주 가드 어댑터(`UserMessageRateLimiterRedisAdapter`)
+- `infrastructure/aiChat/metrics/` — 진행 중 턴 상한·후처리 재시도 지표 등록(Micrometer)
 - `infrastructure/aiChat/scheduler/` — 감상문 작업 적재 스케줄러 + 컨텍스트 요약 디스패처·reaper·풀
   + 미정산 예약 반환 스케줄러
 - `presentation/controller/aiChat/` — 컨트롤러 + SSE 전달 담당(`MessageStreamSseDelivery`)·직렬화

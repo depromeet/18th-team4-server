@@ -58,6 +58,7 @@ public class AiChatMessageSendService {
     private final AiChatTurnRequestWriter aiChatTurnRequestWriter;
     private final AiChatTurnOutcomeWriter aiChatTurnOutcomeWriter;
     private final AiChatInFlightTurnRegistry aiChatInFlightTurnRegistry;
+    private final AiChatPostProcessingRetry aiChatPostProcessingRetry;
     private final ExecutorService aiChatPostProcessingExecutor;
     private final TokenCounter tokenCounter;
 
@@ -335,7 +336,9 @@ public class AiChatMessageSendService {
      * 여기서 DB 를 만지지 않는다.
      *
      * <p>후처리 동시성 상한이나 저장·정산 전체 타이머는 두지 않는다 — 무한정 매달리는 것을 막는 것은
-     * 이미 자리 잡은 DB 쪽 대기 제한(연결 획득 기한·잠금 대기 기한)의 몫이다.
+     * 이미 자리 잡은 DB 쪽 대기 제한(연결 획득 기한·잠금 대기 기한)의 몫이다. 그 제한에 걸려 실패한 종료
+     * 트랜잭션은 {@link AiChatPostProcessingRetry} 가 유계로 다시 시도한다 — 횟수와 턴의 만료 시각으로
+     * 묶여 있어 전체 타이머를 대신하지는 않는다.
      *
      * <p>제출이 거절되면(종료 절차로 실행기가 닫힌 뒤) 저장·정산은 <b>일어나지 않은 것</b>이다.
      * 삼켜서 성공으로 기록하지 않고, 진행 목록만 정리한 뒤 미종료로 남은 요청 기록을 미정산 예약 반환에 맡긴다.
@@ -395,13 +398,21 @@ public class AiChatMessageSendService {
     /**
      * 정상 완료: 답변 저장·정산·예산 보정·요청 성공 확정을 한 트랜잭션으로 확정하고, 그 뒤에만 성공을 알린다.
      * 게이트 계상은 되돌리지 않는다 — 생성이 실제로 일어나 토큰이 소모됐으므로 계상이 맞다.
+     *
+     * <p>확정 호출은 <b>유계로 다시 시도한다</b>({@link AiChatPostProcessingRetry}) — 사용자가 답변 전문을
+     * 이미 본 뒤라, 몇 초 안에 지나가는 일시 실패로 저장을 잃지 않게 한다. 다시 시도한 뒤에도 실패하면
+     * 아래 재확인 경로로 간다.
      */
     private void finishSucceededTurn(
             PreparedChatTurn turn, ChatDeliveryChannel deliveryChannel, AiChatGenerationOutcome generation) {
         AiChatTurnOutcomeWriter.TurnOutcomeResult outcomeResult;
         try {
-            outcomeResult = aiChatTurnOutcomeWriter.finishSuccessfully(
-                    turn.turnRequestId(), generation, turn.estimatedMessageInputTokens());
+            outcomeResult = aiChatPostProcessingRetry.run(
+                    AiChatPostProcessingRetry.FinishKind.SUCCESS_COMMIT,
+                    turn.turnRequestId(), turn.inFlightTurn().startedAt(),
+                    () -> aiChatTurnOutcomeWriter.finishSuccessfully(
+                            turn.turnRequestId(), generation, turn.estimatedMessageInputTokens()),
+                    () -> aiChatTurnOutcomeWriter.currentOutcome(turn.turnRequestId()));
         } catch (RuntimeException commitError) {
             log.error("성공 확정 커밋 실패 — 현재 요청 상태를 다시 확인한다 turnRequestId={} sessionId={}",
                     turn.turnRequestId(), turn.sessionId(), commitError);
@@ -427,8 +438,7 @@ public class AiChatMessageSendService {
         if (currentOutcome instanceof AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning) {
             // 생성은 성공했지만 답변이 저장되지 않았다 — 청구하지 않는다.
             // 게이트 계상은 되돌리지 않는다(토큰은 실제로 소모됐다).
-            aiChatTurnOutcomeWriter.finishWithoutCharge(
-                    turn.turnRequestId(), AiChatTurnRequest.Status.FAILED, failureCodeOf(commitError));
+            finishWithoutChargeWithRetry(turn, failureCodeOf(commitError));
             deliveryChannel.completeWithFailure(errorEvent(AiChatErrorCode.AI_STREAM_INTERRUPTED, null));
             return;
         }
@@ -481,11 +491,24 @@ public class AiChatMessageSendService {
                 turn.turnRequestId(), turn.sessionId(), generation.status(), generation.finishReason(),
                 generationError == null ? "없음" : generationError.toString());
 
-        aiChatTurnOutcomeWriter.finishWithoutCharge(
-                turn.turnRequestId(), AiChatTurnRequest.Status.FAILED, generation.status().name());
+        finishWithoutChargeWithRetry(turn, generation.status().name());
         // 게이트 보상은 DB 트랜잭션 밖에서 — Redis 왕복을 커밋 시간에 매달지 않는다.
         releaseRateLimitPermitQuietly(turn.rateLimitPermit(), turn.sessionId());
         deliveryChannel.completeWithFailure(buildErrorEvent(generationError));
+    }
+
+    /**
+     * 청구 없는 종료를 유계 재시도로 감싼다 — 생성 실패의 종료와 성공 확정 실패 뒤의 종료가 같은 규칙을 쓴다.
+     * 끝내 실패하면 예외가 그대로 올라가 {@link #finishTurn} 의 catch 가 받는다 —
+     * 요청 행은 미종료로 남아 미정산 예약 반환이 닫는다.
+     */
+    private void finishWithoutChargeWithRetry(PreparedChatTurn turn, String failureCode) {
+        aiChatPostProcessingRetry.run(
+                AiChatPostProcessingRetry.FinishKind.WITHOUT_CHARGE,
+                turn.turnRequestId(), turn.inFlightTurn().startedAt(),
+                () -> aiChatTurnOutcomeWriter.finishWithoutCharge(
+                        turn.turnRequestId(), AiChatTurnRequest.Status.FAILED, failureCode),
+                () -> aiChatTurnOutcomeWriter.currentOutcome(turn.turnRequestId()));
     }
 
     /** 예산 예약 결과 + 그 예약에 쓰인 메시지 입력 추정 토큰. */
