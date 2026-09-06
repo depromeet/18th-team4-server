@@ -8,7 +8,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 기한이 지난 미종료 채팅 요청의 복구를 주기적으로 돌린다. 판정·종료는 모두
+ * 기한이 지난 미종료 채팅 요청의 미정산 예약 반환을 주기적으로 돌린다. 판정·종료는 모두
  * {@link AiChatExpiredTurnRecoveryService} 가 하고, 이 빈은 주기와 요약 로그만 맡는다
  * (컨텍스트 요약 회수기 ContextSummaryJobReaper 와 같은 골격).
  *
@@ -33,12 +33,12 @@ public class AiChatExpiredTurnScheduler {
             if (report.hasNothingToReport()) {
                 return;
             }
-            log.warn("기한 지난 채팅 요청 복구 대상={}건 만료 확정={}건 반환 토큰={} 건너뜀={}건 실패={}건 묶음={}개",
+            log.warn("기한 지난 채팅 요청 미정산 예약 반환 대상={}건 만료 확정={}건 반환 토큰={} 건너뜀={}건 실패={}건 묶음={}개",
                     report.scanned(), report.expired(), report.returnedTokens(),
                     report.skipped(), report.failed(), report.batches());
         } catch (RuntimeException scanFailure) {
             // 스캔 자체가 실패해도(예: DB 접속 불가) 다음 주기는 그대로 돈다. 대상 행은 미종료로 남아 있다.
-            log.error("기한 지난 채팅 요청 복구 스캔 실패 — 다음 주기에 다시 시도한다", scanFailure);
+            log.error("기한 지난 채팅 요청 미정산 예약 반환 스캔 실패 — 다음 주기에 다시 시도한다", scanFailure);
         }
     }
 }

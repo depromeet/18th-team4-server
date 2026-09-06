@@ -16,7 +16,7 @@ import java.time.Duration;
  * 요청 기록(ai_chat_turn_request)의 원자적 DB 쓰기 구간 — 선행 단계가 쓰는 전이만 담는다.
  * 선언적 {@code @Transactional} 협력자 빈 (transaction.md — 외부 호출이 섞인 서비스 흐름에서 DB 쓰기만 분리).
  *
- * <p>요청 <b>종료</b>(성공 확정·청구 없는 종료·만료 복구)는 이 클래스가 아니라
+ * <p>요청 <b>종료</b>(성공 확정·청구 없는 종료·만료 확정)는 이 클래스가 아니라
  * {@link AiChatTurnOutcomeWriter} 가 맡는다. 선행 단계의 거절도 그쪽의
  * {@code finishWithoutCharge} 한 번으로 끝낸다 — 상태 전이와 예약 반환이 갈리지 않게 하기 위해서다.
  */
@@ -49,7 +49,7 @@ class AiChatTurnRequestWriter {
      * 거절(Denied)이면 예약이 없으므로 요청 행은 ACCEPTED 그대로 둔다.
      *
      * <p><b>예산을 건드리기 전에 요청 행부터 잠근다.</b> 접수 뒤 처리가 길게 지연되면(예: 폭주 가드의
-     * Redis 응답 지연) 그 사이 만료 복구가 이 요청을 이미 {@code EXPIRED} 로 끝냈을 수 있다.
+     * Redis 응답 지연) 그 사이 미정산 예약 반환이 이 요청을 이미 {@code EXPIRED} 로 끝냈을 수 있다.
      * 잠금 없이 예약하면 늦게 재개된 이 실행이 그 종료를 {@code RESERVED} 로 덮어쓰고 생성을 시작한다 —
      * 요청 종료에 적용한 "잠금 → 미종료 확인 → 한 트랜잭션" 보호를 예약 전이에도 그대로 쓴다.
      *

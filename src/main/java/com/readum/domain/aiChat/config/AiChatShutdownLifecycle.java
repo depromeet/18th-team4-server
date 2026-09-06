@@ -42,7 +42,7 @@ import java.util.concurrent.TimeUnit;
  * 끝난 다음이다({@code AbstractApplicationContext#doClose} 는 {@code lifecycleProcessor.onClose()} 뒤에
  * {@code destroyBeans()} 를 부른다). 그래서 <b>후처리가 DB 를 쓰는 동안 풀이 먼저 닫히지는 않는다</b>.
  * 다만 단계별 기한을 넘겨 lifecycleProcessor 가 우리를 두고 먼저 진행한 경우에는 이 보장이 사라진다 —
- * 그때 실패한 후처리는 DB 의 미종료 예약으로 남아 복구(Task 9) 대상이 된다.
+ * 그때 실패한 후처리는 DB 의 미종료 예약으로 남아 미정산 예약 반환 대상이 된다.
  */
 @Slf4j
 @Component
@@ -132,8 +132,8 @@ public class AiChatShutdownLifecycle implements SmartLifecycle {
             log.info("AI 채팅 진행 턴 정리 완료 — 남은 턴 없음");
         } else {
             List<AiChatInFlightTurnRegistry.InFlightTurn> remaining = inFlightTurnRegistry.snapshot();
-            // 여기서 강제로 끊지 않는다. 남은 턴의 예약은 DB 미종료 요청 기록을 보고 복구하는 쪽(Task 9)이 되돌린다.
-            log.warn("AI 채팅 종료 대기 기한({}초) 초과 — 남은 턴 {}건은 DB 예약 복구에 맡긴다: {}",
+            // 여기서 강제로 끊지 않는다. 남은 턴의 예약은 DB 미종료 요청 기록을 보고 반환하는 쪽이 되돌린다.
+            log.warn("AI 채팅 종료 대기 기한({}초) 초과 — 남은 턴 {}건은 DB 의 미정산 예약 반환에 맡긴다: {}",
                     shutdownWait.toSeconds(), remaining.size(), describe(remaining));
         }
 
@@ -146,7 +146,7 @@ public class AiChatShutdownLifecycle implements SmartLifecycle {
             return inFlightTurnRegistry.awaitAllTurnsFinished(shutdownWait);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            log.warn("AI 채팅 종료 대기가 중단됐다 — 남은 턴은 DB 예약 복구에 맡긴다");
+            log.warn("AI 채팅 종료 대기가 중단됐다 — 남은 턴은 DB 의 미정산 예약 반환에 맡긴다");
             return false;
         }
     }
@@ -163,7 +163,7 @@ public class AiChatShutdownLifecycle implements SmartLifecycle {
         long remainingMillis = Math.max(0L, Duration.between(Instant.now(), deadline).toMillis());
         try {
             if (!aiChatPostProcessingExecutor.awaitTermination(remainingMillis, TimeUnit.MILLISECONDS)) {
-                log.warn("AI 채팅 후처리 실행기가 기한 안에 끝나지 않았다 — 미완료 후처리는 DB 예약 복구 대상이다");
+                log.warn("AI 채팅 후처리 실행기가 기한 안에 끝나지 않았다 — 미완료 후처리는 DB 의 미정산 예약 반환 대상이다");
             }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();

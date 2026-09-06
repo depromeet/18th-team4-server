@@ -19,7 +19,7 @@ import java.util.Set;
  * <p><b>왜 필요한가.</b> 요청 기록은 예약과 같은 트랜잭션으로 커밋되지만, 그 예약을 되돌리는 일은
  * 그 요청을 처리하던 실행이 한다. 프로세스가 죽거나 종료 대기 상한을 넘겨 실행이 사라지면 되돌릴 주체가
  * 없어져, 사용자의 일일 예산이 쓰지도 않은 요청에 묶인 채 남는다. 메모리 진행 목록
- * ({@link AiChatInFlightTurnRegistry})은 프로세스와 함께 사라지므로 복구의 근거가 될 수 없다 —
+ * ({@link AiChatInFlightTurnRegistry})은 프로세스와 함께 사라지므로 반환의 근거가 될 수 없다 —
  * 근거는 DB 의 미종료 행뿐이다.
  *
  * <p><b>하지 않는 것: 생성 재실행.</b> 만료는 "이 요청을 더 기다리지 않고 예약을 돌려준다" 는 정산 결정이다.
@@ -43,7 +43,7 @@ import java.util.Set;
 public class AiChatExpiredTurnRecoveryService {
 
     /**
-     * 만료로 끝낸 행의 failure_code 에 남길 표식. 운영에서 "복구가 정리한 요청" 을 골라 보기 위한 것이며
+     * 만료로 끝낸 행의 failure_code 에 남길 표식. 운영에서 "미정산 예약 반환이 정리한 요청" 을 골라 보기 위한 것이며
      * 분기 조건으로 쓰지 않는다(상태 EXPIRED 가 그 역할을 한다).
      */
     static final String EXPIRY_FAILURE_CODE = "EXPIRED_BY_RECOVERY";
@@ -141,7 +141,7 @@ public class AiChatExpiredTurnRecoveryService {
                 } catch (RuntimeException recoveryFailure) {
                     // 한 행의 실패는 여기서 멈춘다. 그 행은 미종료로 남아 다음 스캔이 다시 집는다.
                     failedCount++;
-                    log.error("만료 요청 복구 실패 turnRequestId={} — 다음 스캔에서 다시 시도한다",
+                    log.error("미정산 예약 반환 실패 turnRequestId={} — 다음 스캔에서 다시 시도한다",
                             turnRequestId, recoveryFailure);
                 }
             }
@@ -152,7 +152,7 @@ public class AiChatExpiredTurnRecoveryService {
             }
         }
         if (batchCount >= MAX_BATCHES_PER_SCAN) {
-            log.warn("만료 요청 복구가 한 스캔의 묶음 상한 {}개를 채웠다 — 남은 대상은 다음 주기가 이어 집는다"
+            log.warn("미정산 예약 반환이 한 스캔의 묶음 상한 {}개를 채웠다 — 남은 대상은 다음 주기가 이어 집는다"
                     + " (묶음당 {}건)", MAX_BATCHES_PER_SCAN, batchSize);
         }
         return new RecoveryReport(

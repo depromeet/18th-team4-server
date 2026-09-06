@@ -24,7 +24,7 @@ import java.time.LocalDateTime;
  *   <li><b>미종료인지 확인한다</b> — 이미 끝난 요청이면 아무것도 하지 않고 그 상태를 돌려준다</li>
  *   <li>종료에 딸린 DB 반영(답변 저장·정산·예산 보정 또는 예약 반환)과 상태 전이를 <b>한 트랜잭션</b>으로 커밋한다</li>
  * </ol>
- * 잠금 없이 상태만 확인하면 늦은 성공과 만료 복구가 서로를 못 보고 저장·정산·환불을 두 번 반영한다.
+ * 잠금 없이 상태만 확인하면 늦은 성공과 미정산 예약 반환이 서로를 못 보고 저장·정산·환불을 두 번 반영한다.
  * 정산 기록의 {@code message_id} UNIQUE 는 <b>같은 메시지</b>의 이중 정산만 막는다 — 요청 단위 멱등성은
  * 이 잠금·확인이 만든다(같은 요청이 답변을 두 번 저장하면 메시지 id 가 달라 UNIQUE 로 걸리지 않는다).
  *
@@ -48,7 +48,7 @@ import java.time.LocalDateTime;
  *       {@link TurnOutcomeResult.AlreadyFinished} 는 다른 실행이 이미 끝낸 요청이다.</li>
  *   <li>커밋 응답이 불확실하게 끊겼을 때는 환불로 직행하지 않고 {@link #currentOutcome} 로 현재 상태를
  *       다시 읽어 판단한다.</li>
- *   <li>만료 복구({@link AiChatExpiredTurnRecoveryService})는 {@link #expireIfOverdue} 로 들어온다 —
+ *   <li>미정산 예약 반환({@link AiChatExpiredTurnRecoveryService})은 {@link #expireIfOverdue} 로 들어온다 —
  *       잠금·미종료 확인·예약 반환은 {@link #finishWithoutCharge} 와 같은 몸통을 쓰고,
  *       잠근 뒤 기한을 다시 확인하는 조건만 더 붙는다.</li>
  * </ul>
@@ -174,7 +174,7 @@ class AiChatTurnOutcomeWriter {
      * <b>ASSISTANT 부분 본문은 저장하지 않는다.</b>
      *
      * <p>사유만 바꿔 두 곳에서 쓴다: 생성·후처리 실패는 {@code FAILED}, 기한이 지난 요청을 정리하는
-     * 만료 복구는 {@code EXPIRED} 다. 잠금·미종료 확인·반환 규칙은 둘이 같아야 늦은 성공과 복구가
+     * 만료 확정은 {@code EXPIRED} 다. 잠금·미종료 확인·반환 규칙은 둘이 같아야 늦은 성공과 반환이
      * 서로를 덮어쓰지 않는다.
      *
      * @param terminalStatus {@code FAILED} 또는 {@code EXPIRED}
@@ -194,7 +194,7 @@ class AiChatTurnOutcomeWriter {
     }
 
     /**
-     * 기한이 지난 요청을 만료로 끝낸다 — 만료 복구가 쓰는 입구다.
+     * 기한이 지난 요청을 만료로 끝낸다 — 미정산 예약 반환이 쓰는 입구다.
      * {@link #finishWithoutCharge} 와 <b>같은 잠금·미종료 확인·반환 규칙</b>을 쓰되, 조건 하나를 더 본다:
      * 잠근 행이 정말 기한을 넘겼는지 다시 확인한다.
      *
@@ -204,7 +204,7 @@ class AiChatTurnOutcomeWriter {
      *       (미종료 확인이 걸러 낸다).</li>
      *   <li>훑을 때의 판단을 그대로 믿고 상태를 바꾸지 않는다 — 판정 근거인 기한을 잠근 행에서 다시 읽는다.
      *       기한 전이면 아무것도 하지 않고 {@link TurnOutcomeResult.StillRunning} 을 돌려준다.
-     *       정상적으로 후처리에 들어간 요청을 복구가 가로채 환불하지 않게 하는 마지막 방어다.</li>
+     *       정상적으로 후처리에 들어간 요청을 미정산 예약 반환이 가로채 환불하지 않게 하는 마지막 방어다.</li>
      * </ul>
      *
      * <p>생성을 다시 실행하지 않는다. 만료는 "이 요청을 더 기다리지 않고 예약을 사용자에게 돌려준다" 는
@@ -216,14 +216,14 @@ class AiChatTurnOutcomeWriter {
     TurnOutcomeResult expireIfOverdue(Long turnRequestId, LocalDateTime overdueBefore, String failureCode) {
         AiChatTurnRequest turnRequest = lock(turnRequestId);
         if (turnRequest.isTerminal()) {
-            // 정상이다 — 늦은 성공이나 다른 복구 실행이 먼저 끝냈다. 저장·정산·반환을 다시 반영하지 않는다.
-            log.info("이미 종료된 요청의 만료 복구 생략 turnRequestId={} status={}",
+            // 정상이다 — 늦은 성공이나 다른 반환 실행이 먼저 끝냈다. 저장·정산·반환을 다시 반영하지 않는다.
+            log.info("이미 종료된 요청의 만료 확정 생략 turnRequestId={} status={}",
                     turnRequestId, turnRequest.getStatus());
             return new TurnOutcomeResult.AlreadyFinished(
                     turnRequest.getStatus(), turnRequest.getAssistantMessageId());
         }
         if (!turnRequest.isOverdueAt(overdueBefore)) {
-            log.info("아직 기한 전인 요청의 만료 복구 생략 turnRequestId={} expiresAt={} 기준={}",
+            log.info("아직 기한 전인 요청의 만료 확정 생략 turnRequestId={} expiresAt={} 기준={}",
                     turnRequestId, turnRequest.getExpiresAt(), overdueBefore);
             return new TurnOutcomeResult.StillRunning(turnRequest.getStatus());
         }
@@ -231,8 +231,8 @@ class AiChatTurnOutcomeWriter {
     }
 
     /**
-     * 잠그고 미종료임을 확인한 행을 청구 없이 끝낸다 — 실패 보상과 만료 복구가 공유하는 몸통이다.
-     * 되돌릴 양은 호출자가 기억한 값이 아니라 잠근 행에 적힌 값을 쓴다 — 만료 복구처럼 예약 당시의
+     * 잠그고 미종료임을 확인한 행을 청구 없이 끝낸다 — 실패 보상과 미정산 예약 반환이 공유하는 몸통이다.
+     * 되돌릴 양은 호출자가 기억한 값이 아니라 잠근 행에 적힌 값을 쓴다 — 미정산 예약 반환처럼 예약 당시의
      * 실행이 이미 사라진 경우에도 같은 규칙으로 정확히 예약한 만큼만 반환하기 위해서다.
      */
     private TurnOutcomeResult finishLockedWithoutCharge(

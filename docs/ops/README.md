@@ -6,7 +6,7 @@
 |------|------|
 | [infrastructure.md](infrastructure.md) | 개발 서버 구성 일체 — EC2·blue/green 배포 구조·Docker MySQL/Redis·도메인·접속 방법 |
 | [incident-analysis.md](incident-analysis.md) | 운영 장애 분석 흐름 — Slack 알림의 분석 이슈 링크, error 라벨 워크플로우, 필요한 secrets |
-| [ai-chat-shutdown-and-recovery.md](ai-chat-shutdown-and-recovery.md) | AI 채팅의 배포 종료 대기와 예약 복구 — 두 장치의 역할 분담, 자원 종료 순서, `ai-chat.streaming`·`ai-chat.turn-recovery` 설정, 수동 실행 전용 `./gradlew mysqlTest` |
+| [ai-chat-shutdown-and-recovery.md](ai-chat-shutdown-and-recovery.md) | AI 채팅의 배포 종료 대기와 미정산 예약 반환 — 두 장치의 역할 분담, 자원 종료 순서, `ai-chat.streaming`·`ai-chat.turn-recovery` 설정, 수동 실행 전용 `./gradlew mysqlTest` |
 | [_template.md](_template.md) | 운영 문서 작성 템플릿 |
 
 ## 이 디렉토리에 적지 않는 것 (2026-07-05 결정)

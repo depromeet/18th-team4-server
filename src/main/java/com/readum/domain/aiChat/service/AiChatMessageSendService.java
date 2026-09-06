@@ -110,7 +110,7 @@ public class AiChatMessageSendService {
      * 그 트랜잭션이 요청 행을 잠그고, 미종료인지 확인하고, 잠근 행에 적힌 예약량만큼 되돌리고, 상태 전이를
      * 함께 커밋한다. 예약 전 거절은 행에 예약 정보가 없어 되돌릴 양이 0 이 되므로, 호출부가 예약 전후를
      * 나눌 필요가 없다. 환불과 상태 전이를 따로 부르면 둘 중 하나만 반영된 행(되돌리지 못한 예약,
-     * 또는 만료 복구가 다시 되돌리는 이중 환급)이 생긴다.
+     * 또는 미정산 예약 반환이 다시 되돌리는 이중 환급)이 생긴다.
      */
     public PreparedChatTurn prepare(SendMessageCommand command) {
         Long sessionId = command.sessionId();
@@ -182,7 +182,7 @@ public class AiChatMessageSendService {
      * 예약 전 거절이면 잠근 행에 예약 정보가 없어 되돌릴 양이 0 이다.
      *
      * <p>실패는 삼킨다 — 여기서 던지면 원래의 4xx 가 500 으로 둔갑한다.
-     * 끝내지 못한 행은 미종료로 남아 만료 복구의 대상이 된다.
+     * 끝내지 못한 행은 미종료로 남아 미정산 예약 반환의 대상이 된다.
      */
     private void finishTurnRequestQuietly(Long turnRequestId, RuntimeException prepareRejection) {
         try {
@@ -338,7 +338,7 @@ public class AiChatMessageSendService {
      * 이미 자리 잡은 DB 쪽 대기 제한(연결 획득 기한·잠금 대기 기한)의 몫이다.
      *
      * <p>제출이 거절되면(종료 절차로 실행기가 닫힌 뒤) 저장·정산은 <b>일어나지 않은 것</b>이다.
-     * 삼켜서 성공으로 기록하지 않고, 진행 목록만 정리한 뒤 미종료로 남은 요청 기록을 예약 복구에 맡긴다.
+     * 삼켜서 성공으로 기록하지 않고, 진행 목록만 정리한 뒤 미종료로 남은 요청 기록을 미정산 예약 반환에 맡긴다.
      */
     private void submitPostProcessing(
             PreparedChatTurn turn,
@@ -355,7 +355,7 @@ public class AiChatMessageSendService {
                     () -> finishTurn(turn, deliveryChannel, generation, generationError));
         } catch (RejectedExecutionException postProcessingRejected) {
             log.error("채팅 턴 후처리 제출 거절 — 저장·정산을 시작하지 못했다."
-                            + " 요청 기록은 미종료로 남아 예약 복구 대상이다 turnRequestId={} sessionId={}",
+                            + " 요청 기록은 미종료로 남아 미정산 예약 반환 대상이다 turnRequestId={} sessionId={}",
                     turn.turnRequestId(), turn.sessionId(), postProcessingRejected);
             deliveryChannel.completeWithFailure(errorEvent(AiChatErrorCode.SERVER_SHUTTING_DOWN, null));
             aiChatInFlightTurnRegistry.finish(turn.inFlightTurn());
@@ -368,7 +368,7 @@ public class AiChatMessageSendService {
      *
      * <p>어떤 이유로 끝나든 <b>마지막에 진행 목록의 자리를 정리한다</b>. 다만 자리를 지우는 것은
      * "이번 실행이 끝났다" 는 뜻이지 "업무가 성공했다" 는 뜻이 아니다 — 확정하지 못한 요청 기록은
-     * 미종료로 남아 예약 복구의 대상이 된다.
+     * 미종료로 남아 미정산 예약 반환의 대상이 된다.
      */
     private void finishTurn(
             PreparedChatTurn turn,
@@ -383,7 +383,7 @@ public class AiChatMessageSendService {
                 finishFailedTurn(turn, deliveryChannel, generation, generationError);
             }
         } catch (RuntimeException postProcessingError) {
-            log.error("채팅 턴 후처리 실패 — 요청 기록은 미종료로 남아 예약 복구 대상이다"
+            log.error("채팅 턴 후처리 실패 — 요청 기록은 미종료로 남아 미정산 예약 반환 대상이다"
                             + " turnRequestId={} sessionId={} 생성판정={}",
                     turn.turnRequestId(), turn.sessionId(), generation.status(), postProcessingError);
             deliveryChannel.completeWithFailure(errorEvent(AiChatErrorCode.AI_STREAM_INTERRUPTED, null));
@@ -439,7 +439,7 @@ public class AiChatMessageSendService {
 
     /**
      * 확정 결과를 연결에 알린다. <b>이번 호출이 확정한 경우에만</b> 성공을 알린다 —
-     * 이미 다른 실행(만료 복구 등)이 끝낸 요청이면 그 요청은 이 답변으로 끝난 것이 아니다.
+     * 이미 다른 실행(미정산 예약 반환 등)이 끝낸 요청이면 그 요청은 이 답변으로 끝난 것이 아니다.
      */
     private void notifySuccessOutcome(
             PreparedChatTurn turn,

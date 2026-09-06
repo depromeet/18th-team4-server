@@ -48,7 +48,7 @@ public class AiChatExecutorConfig {
      *
      * <p>제출이 거절되면({@link java.util.concurrent.RejectedExecutionException}) 그 턴의 저장·정산은
      * 일어나지 않은 것이다. 호출자는 이를 삼켜서 성공으로 기록하면 안 된다 —
-     * 메모리 목록만 정리하고 DB 의 미종료 예약은 복구(Task 9)에 넘긴다.
+     * 메모리 목록만 정리하고 DB 의 미종료 예약은 미정산 예약 반환에 넘긴다.
      */
     @Bean(destroyMethod = "")
     public ExecutorService aiChatPostProcessingExecutor() {

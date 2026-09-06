@@ -20,7 +20,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 /**
- * 채팅 한 턴의 요청 기록 — 클라이언트가 발급한 requestId 의 멱등 판정과 예약 복구의 정본.
+ * 채팅 한 턴의 요청 기록 — 클라이언트가 발급한 requestId 의 멱등 판정과 미정산 예약 반환의 정본.
  *
  * <p>(user_id, request_id) UNIQUE 가 재전송 중복을 DB 에서 원자적으로 막는다. 조회 후 삽입이 아니라
  * <b>삽입 시 유일 위반</b>으로 판정하므로 같은 ID 가 동시에 들어와도 정확히 한 건만 통과한다.
@@ -103,7 +103,7 @@ public class AiChatTurnRequest {
     @Column(name = "failure_code", length = 50)
     private String failureCode;
 
-    /** 만료 판정 기준 시각 = 생성 시각 + 만료 유예. 이 시각을 넘긴 미종료 행이 복구 대상이다. */
+    /** 만료 판정 기준 시각 = 생성 시각 + 만료 유예. 이 시각을 넘긴 미종료 행이 미정산 예약 반환 대상이다. */
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
 
@@ -153,7 +153,7 @@ public class AiChatTurnRequest {
     }
 
     /**
-     * 만료로 종료한다 — 기한이 지나도록 끝나지 않은 요청을 복구 작업이 정리할 때 쓴다.
+     * 만료로 종료한다 — 기한이 지나도록 끝나지 않은 요청을 미정산 예약 반환이 정리할 때 쓴다.
      * 상태 이름만 FAILED 와 다르다: 무엇이 요청을 끝냈는지(생성 실패 vs 기한 경과)를 나중에 구분하려는 것이고,
      * 사용자에게 청구하지 않고 예약을 되돌린다는 처리는 같다.
      */
@@ -168,7 +168,7 @@ public class AiChatTurnRequest {
     }
 
     /**
-     * 기준 시각에서 볼 때 기한이 지났는가 — 만료 복구가 <b>행을 잠근 뒤</b> 다시 확인하는 조건이다.
+     * 기준 시각에서 볼 때 기한이 지났는가 — 미정산 예약 반환이 <b>행을 잠근 뒤</b> 다시 확인하는 조건이다.
      * expiresAt 은 접수 시각에서 한 번 정해지고 바뀌지 않지만, 목록 조회와 잠금 사이의 시차를 두고
      * 판단하지 않기 위해 기준 시각을 인자로 받는다 — 훑을 때 쓴 기준을 종료 시점에도 그대로 쓴다.
      */
