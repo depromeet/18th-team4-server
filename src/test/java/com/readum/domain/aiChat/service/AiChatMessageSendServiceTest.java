@@ -71,8 +71,10 @@ class AiChatMessageSendServiceTest {
             new AiChatClient.RateLimitPermit.Counted("gpt-4o-mini", 29_000_000L, 1000);
     private static final LocalDateTime SAVED_AT = LocalDateTime.of(2026, 9, 6, 12, 0, 0);
     /** 기한 넷과 큐 상한 — 운영 후보값 그대로. 기한을 짧게 둬야 하는 테스트는 따로 서비스를 만든다. */
+    /** 진행 중 턴 상한 — 운영 값. 상한 거절을 보는 테스트는 상한 1짜리 진행 목록을 따로 만든다. */
+    private static final int MAX_IN_FLIGHT_TURNS = 300;
     private static final AiChatProperties.Streaming STREAMING =
-            new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 256);
+            new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 256, 300);
 
     @Mock
     private AiChatMessagePersistService persistService;
@@ -107,7 +109,7 @@ class AiChatMessageSendServiceTest {
     private ExecutorService aiChatPostProcessingExecutor;
 
     // 진행 목록은 순수 메모리 상태라 진짜를 쓴다 — 등록·정리가 실제로 맞물리는지 보려면 대역이 도움이 되지 않는다.
-    private final AiChatInFlightTurnRegistry aiChatInFlightTurnRegistry = new AiChatInFlightTurnRegistry();
+    private final AiChatInFlightTurnRegistry aiChatInFlightTurnRegistry = new AiChatInFlightTurnRegistry(MAX_IN_FLIGHT_TURNS);
 
     // 결정적 test double: settle 산술 배선만 검증한다(실제 jtokkit 정확도는 JtokkitTokenCounterTest 담당).
     // 기존 단언값 유지를 위해 구 추정과 동일한 문자÷2.5 로 센다.
@@ -155,11 +157,16 @@ class AiChatMessageSendServiceTest {
     }
 
     private AiChatMessageSendService serviceWith(AiChatProperties properties) {
+        return serviceWith(properties, aiChatInFlightTurnRegistry);
+    }
+
+    private AiChatMessageSendService serviceWith(
+            AiChatProperties properties, AiChatInFlightTurnRegistry inFlightTurnRegistry) {
         return new AiChatMessageSendService(
                 persistService, aiChatClient, properties,
                 userMessageRateLimiter, userBookRepository, bookRepository, inputModerationClient,
                 aiChatTurnRequestWriter, aiChatTurnOutcomeWriter,
-                aiChatInFlightTurnRegistry, aiChatPostProcessingExecutor, tokenCounter
+                inFlightTurnRegistry, aiChatPostProcessingExecutor, tokenCounter
         );
     }
 
@@ -339,6 +346,29 @@ class AiChatMessageSendServiceTest {
         verify(aiChatTurnRequestWriter)
                 .claim(eq(USER_ID), eq(7L), eq(REQUEST_ID), expiryTimeout.capture());
         assertThat(expiryTimeout.getValue()).isEqualTo(Duration.ofSeconds(60 + 120 + 60));
+    }
+
+    @Test
+    void 진행_중_턴_상한에_닿으면_요청_기록도_예약도_시작하지_않고_503_으로_거절한다() {
+        // 상한 1짜리 진행 목록에 이미 한 턴이 올라가 있는 상태를 만든다.
+        AiChatInFlightTurnRegistry fullRegistry = new AiChatInFlightTurnRegistry(1);
+        fullRegistry.register("먼저-온-요청", 7L, 99L);
+        AiChatMessageSendService serviceAtCapacity = serviceWith(aiChatProperties, fullRegistry);
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+
+        assertThatThrownBy(() -> executeTurn(command, serviceAtCapacity))
+                .asInstanceOf(InstanceOfAssertFactories.type(ServiceUnavailableException.class))
+                .extracting(ServiceUnavailableException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.AI_CHAT_CAPACITY_EXCEEDED);
+
+        // 거절이 첫 부수 효과보다 앞이라 남는 자국이 하나도 없다 — 요청 자리도, 예약도, 외부 호출도 없다.
+        verifyNoInteractions(aiChatTurnRequestWriter);
+        verifyNoInteractions(aiChatTurnOutcomeWriter);
+        verifyNoInteractions(userMessageRateLimiter);
+        verifyNoInteractions(inputModerationClient);
+        verifyNoInteractions(persistService);
+        // 진행 목록도 원래대로다 — 거절된 턴은 자리를 잡지 않았고, 먼저 온 턴은 그대로 남아 있다.
+        assertThat(fullRegistry.inFlightCount()).isEqualTo(1);
     }
 
     @Test
@@ -1110,7 +1140,7 @@ class AiChatMessageSendServiceTest {
         givenCommittedSuccess(42L, 10, 5, 15);
 
         ChatDeliveryChannel deliveryChannel =
-                ChatDeliveryChannel.open(new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 1));
+                ChatDeliveryChannel.open(new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 1, 300));
         executeTurn(command, service, deliveryChannel);
         List<MessageStreamEvent> events = drain(deliveryChannel);
 
@@ -1132,7 +1162,7 @@ class AiChatMessageSendServiceTest {
         givenFinishedWithoutCharge();
 
         AiChatMessageSendService shortIdleService =
-                serviceWith(propertiesWith(new AiChatProperties.Streaming(120, 1, 150, 60, 60, 60, 256)));
+                serviceWith(propertiesWith(new AiChatProperties.Streaming(120, 1, 150, 60, 60, 60, 256, 300)));
         executeTurn(command, shortIdleService);
 
         verify(aiChatTurnOutcomeWriter, timeout(3_000)).finishWithoutCharge(
@@ -1151,7 +1181,7 @@ class AiChatMessageSendServiceTest {
         givenFinishedWithoutCharge();
 
         AiChatMessageSendService shortTotalService =
-                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 60, 60, 256)));
+                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 60, 60, 256, 300)));
         executeTurn(command, shortTotalService);
 
         verify(aiChatTurnOutcomeWriter, timeout(3_000)).finishWithoutCharge(
@@ -1174,7 +1204,7 @@ class AiChatMessageSendServiceTest {
                 });
 
         AiChatMessageSendService shortTotalService =
-                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 60, 60, 256)));
+                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 60, 60, 256, 300)));
         List<MessageStreamEvent> events = executeTurn(command, shortTotalService);
 
         // 후처리는 리액티브 체인 밖 VT 에서 돌아 기한의 영향을 받지 않는다 — 성공으로 끝난다.

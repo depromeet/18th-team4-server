@@ -64,7 +64,7 @@ class AiChatClientImplTest {
             new AiChatProperties.MessageRule(1000),
             new AiChatProperties.RateLimit(10, 5),
             new AiChatProperties.TokenBudget(120000, 512),
-            new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 256)
+            new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 256, 300)
     );
 
     private AiChatClientImpl aiChatClient;

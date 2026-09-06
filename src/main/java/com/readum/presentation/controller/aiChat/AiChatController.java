@@ -209,9 +209,12 @@ public class AiChatController {
             @ApiResponse(
                     responseCode = "503",
                     description = """
-                            입력 검사를 할 수 없거나(GUARDRAIL_MODERATION_UNAVAILABLE),
-                            서버가 종료 절차에 들어가 새 요청을 받지 않는 상태(SERVER_SHUTTING_DOWN).
-                            둘 다 SSE 가 시작되기 전이라 JSON 으로 응답한다."""),
+                            - `GUARDRAIL_MODERATION_UNAVAILABLE`: 입력 검사를 할 수 없는 상태.
+                            - `SERVER_SHUTTING_DOWN`: 서버가 종료 절차에 들어가 새 요청을 받지 않는 상태.
+                            - `AI_CHAT_CAPACITY_EXCEEDED`: 이 서버가 동시에 처리할 수 있는 턴 수의 상한에 닿은 상태.
+                              진행 중인 턴이 끝나면 다시 받으므로 잠시 뒤 재시도하면 된다 (Retry-After 5초).
+
+                            셋 다 SSE 가 시작되기 전이라 JSON 으로 응답하고, Retry-After 헤더가 함께 온다."""),
             @ApiResponse(
                     responseCode = "409",
                     description = """

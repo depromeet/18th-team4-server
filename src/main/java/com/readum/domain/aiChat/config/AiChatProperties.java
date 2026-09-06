@@ -108,6 +108,19 @@ public record AiChatProperties(
      * 다만 그 설정은 현재 요청에 max_tokens 로 걸리지 않아 실제 답변이 더 길 수 있다 — 어림잡기용 기준일 뿐이다.
      * <b>이 상한만으로 프로세스 전체의 메모리가 제한되지는 않는다</b> — 실제 청크 크기(델타 문자열 길이),
      * 연결마다 따로 쌓이는 누적 답변, 동시 요청 수를 함께 재서 조정해야 한다.
+     *
+     * <p>maxInFlightTurns — 이 프로세스가 <b>동시에 진행할 수 있는 채팅 턴 수의 상한</b>이다. 한 턴은 선행 처리 시작부터
+     * 마지막 후처리까지를 말한다({@code AiChatInFlightTurnRegistry} 의 추적 구간과 같다). 상한에 닿으면 새 요청을
+     * 503({@code AI_CHAT_CAPACITY_EXCEEDED})으로 거절한다.
+     *
+     * <p>이것은 처리량 목표가 아니라 <b>마지막 안전장치</b>다. 평소 유입을 조절하는 것은 사용자별 폭주 가드와
+     * 전역 게이트인데, 둘 다 Redis 에 기대고 Redis 가 죽으면 검사 없이 통과시킨다(fail-open, docs/record/0006).
+     * 그 순간 앱이 받는 만큼 다 받아 자기 자원(힙·연결)을 먼저 소진하는 것을 막는 자리다.
+     *
+     * <p><b>계산값이며 임시값이다.</b> 힙(배포 {@code -Xmx256m})·스트리밍 연결 풀·전역 게이트 세 자원의 상한을 각각
+     * 계산해 그 최솟값에 여유를 뺀 값이며, 실측으로 정한 값이 아니다. 산출 과정과 입력값의 출처는
+     * {@code docs/architecture/capacity-baseline.md} 의 "채팅 진행 중 턴 상한" 절에 있다.
+     * 지표 {@code ai_chat_in_flight_turns} 의 최고치와 {@code ai_chat_in_flight_rejections_total} 을 보고 조정한다.
      */
     public record Streaming(
             @Positive int generationTotalTimeoutSeconds,
@@ -116,8 +129,18 @@ public record AiChatProperties(
             @Positive int shutdownWaitSeconds,
             @Positive int prepareAllowanceSeconds,
             @Positive int postProcessingAllowanceSeconds,
-            @Positive int deliveryQueueCapacity
+            @Positive int deliveryQueueCapacity,
+            @Positive int maxInFlightTurns
     ) {
+
+        /**
+         * 스트리밍 전용 연결 풀이 대기시킬 요청 수 — 진행 중 턴 상한의 1/4.
+         * 초과를 45초씩 대기로 숨기지 않고 우리 상한의 503 이 먼저 거절하게 하려는 값이라 작게 둔다.
+         * 상한과 한 곳에서 파생시켜 둘이 어긋나지 않게 한다.
+         */
+        public int streamingPendingAcquireMaxCount() {
+            return Math.max(1, maxInFlightTurns / 4);
+        }
 
         /**
          * 요청 기록의 만료 유예 — 접수 시각에 이만큼을 더한 값이 {@code expires_at} 이 된다.

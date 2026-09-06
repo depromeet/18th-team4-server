@@ -1,5 +1,6 @@
 package com.readum.infrastructure.ai.openai;
 
+import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.infrastructure.ai.openai.guardrail.ChatInputGuardrail;
 import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
@@ -24,9 +25,12 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -46,6 +50,16 @@ public class OpenAiConfig {
     // 생성이 오래 걸려도 여기서 상한을 건다 — 기존 call 경로는 read 타임아웃이 없어 무한 대기 위험이 있었다.
     private static final Duration CHAT_READ_TIMEOUT = Duration.ofSeconds(90);
     private static final Duration CHAT_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+
+    /**
+     * 스트리밍 전용 연결 풀에서 빈 연결을 기다리는 상한. reactor-netty 기본값은 45초인데, 그만큼 기다리면
+     * 초과 요청이 우리 상한의 503 대신 45초짜리 침묵으로 나타난다. 거절은 진행 중 턴 상한이 먼저 하고,
+     * 풀 대기는 순간적인 몰림만 흡수하는 보조 역할이라 짧게 둔다.
+     */
+    private static final Duration STREAMING_PENDING_ACQUIRE_TIMEOUT = Duration.ofSeconds(5);
+
+    /** 스트리밍 전용 연결 풀 이름 — 지표·로그에서 다른 WebClient 사용자와 섞이지 않게 붙인다. */
+    private static final String STREAMING_CONNECTION_POOL_NAME = "openai-streaming";
 
     /**
      * 감상문 생성({@code AiSummaryClientImpl})이 쓰는 ChatClient. 채팅 경로는 이 빈을 쓰지 않는다 —
@@ -108,6 +122,29 @@ public class OpenAiConfig {
     }
 
     /**
+     * 채팅 스트리밍 전용 연결 풀.
+     *
+     * <p>주지 않으면 {@code WebClient.builder()} 의 기본 연결이 reactor-netty 의 <b>전역 공유 풀</b>
+     * ({@code HttpResources}) 을 탄다. 그 풀은 최대 연결 500 · 대기 큐 1,000 · 대기 기한 45초로 열려 있어
+     * (reactor-netty 1.3.4 의 {@code TcpResources#getOrCreate} 가 {@code max(기본값, 500)} 을 쓴다)
+     * 초과분이 45초짜리 대기로 조용히 쌓인다. 우리가 원하는 것은 그 반대다 — 초과는 진행 중 턴 상한이
+     * 503 으로 빨리 거절하고, 풀 대기는 순간적인 몰림만 흡수하는 보조여야 한다.
+     *
+     * <p>그래서 최대 연결을 진행 중 턴 상한과 같게 두고(그 상한을 넘는 동시 스트림은 애초에 생기지 않는다),
+     * 대기 큐는 그 1/4 로, 대기 기한은 5초로 줄인다. 이름을 붙여 다른 WebClient 사용자와 섞이지 않게 한다.
+     * 값의 정본은 {@code ai-chat.streaming.max-in-flight-turns} 한 곳이라 둘이 어긋날 수 없다.
+     */
+    @Bean(destroyMethod = "dispose")
+    public ConnectionProvider openAiStreamingConnectionProvider(AiChatProperties aiChatProperties) {
+        AiChatProperties.Streaming streaming = aiChatProperties.streaming();
+        return ConnectionProvider.builder(STREAMING_CONNECTION_POOL_NAME)
+                .maxConnections(streaming.maxInFlightTurns())
+                .pendingAcquireMaxCount(streaming.streamingPendingAcquireMaxCount())
+                .pendingAcquireTimeout(STREAMING_PENDING_ACQUIRE_TIMEOUT)
+                .build();
+    }
+
+    /**
      * 채팅 응답 스트리밍 전용 ChatModel.
      *
      * <p>ChatClient 가 아니라 ChatModel 을 노출한다. ChatClient 의 스트림 경로에는 내부 advisor
@@ -128,10 +165,12 @@ public class OpenAiConfig {
      * 검사하므로 달면 조각 단위 전달이 성립하지 않는다. 그 advisor 는 감상문 생성용 {@link #chatClient} 빈에 달려 있다.
      *
      * <p>전송은 WebClient(reactor-netty) 이고, {@code streamUsage} 를 켜서 마지막 청크로 실측 사용량을 받는다
-     * (OpenAI 의 {@code stream_options.include_usage}).
+     * (OpenAI 의 {@code stream_options.include_usage}). 연결 풀은 전역 공유 풀이 아니라
+     * {@link #openAiStreamingConnectionProvider} 가 준 전용 풀을 쓴다.
      */
     @Bean
     public OpenAiChatModel streamingChatModel(
+            ConnectionProvider openAiStreamingConnectionProvider,
             ResponseErrorHandler openAiResponseErrorHandler,
             @Value("${spring.ai.openai.api-key}") String apiKey,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
@@ -150,7 +189,8 @@ public class OpenAiConfig {
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
                 .restClientBuilder(RestClient.builder().requestFactory(requestFactory))
-                .webClientBuilder(WebClient.builder())
+                .webClientBuilder(WebClient.builder().clientConnector(new ReactorClientHttpConnector(
+                        HttpClient.create(openAiStreamingConnectionProvider))))
                 .responseErrorHandler(openAiResponseErrorHandler)
                 .build();
         // 자체 재시도를 두지 않는다 — 사용자가 기다리기를 그만둔 뒤에도 보이지 않는 과금 호출이 반복되는 것을

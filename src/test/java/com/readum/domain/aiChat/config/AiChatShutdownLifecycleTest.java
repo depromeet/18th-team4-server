@@ -17,7 +17,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AiChatShutdownLifecycleTest {
 
-    private final AiChatInFlightTurnRegistry registry = new AiChatInFlightTurnRegistry();
+    /** 종료 순서를 보는 테스트라 상한에 걸릴 일이 없게 운영 값을 그대로 쓴다. */
+    private static final int MAX_IN_FLIGHT_TURNS = 300;
+
+    private final AiChatInFlightTurnRegistry registry = new AiChatInFlightTurnRegistry(MAX_IN_FLIGHT_TURNS);
     private final ExecutorService deliveryExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final ExecutorService postProcessingExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -33,7 +36,7 @@ class AiChatShutdownLifecycleTest {
                 null,
                 null,
                 null,
-                new AiChatProperties.Streaming(120, 30, 150, shutdownWaitSeconds, 60, 60, 256));
+                new AiChatProperties.Streaming(120, 30, 150, shutdownWaitSeconds, 60, 60, 256, 300));
         AiChatShutdownLifecycle lifecycle =
                 new AiChatShutdownLifecycle(registry, deliveryExecutor, postProcessingExecutor, properties);
         lifecycle.start();

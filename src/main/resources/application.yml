@@ -85,6 +85,14 @@ ai-chat:
     prepare-allowance-seconds: 60          # 선행 처리 여유. moderation HTTP 상한 40초(연결 10 + 읽기 30) + 이력 조회·예약·게이트·USER 저장 몫 20초. 계산값이며 실측 아님.
     post-processing-allowance-seconds: 60  # 후처리 여유. 저장·정산·요청 종료 트랜잭션 몫. HikariCP 연결 획득 기본 상한 30초, 같은 행 잠금 대기는 MySQL 기본 50초까지. 계산값이며 실측 아님.
     delivery-queue-capacity: 256           # 연결 1개당 전달 큐에 쌓아둘 델타 수. 설정에 적힌 출력 상한 1024 토큰의 1/4 을 버퍼로 잡은 예상치(그 상한은 실제 요청에 걸리지 않으므로 어림잡기용). 실제 청크 크기·누적 답변·동시 요청 메모리를 함께 재서 조정한다.
+    # 동시에 진행할 수 있는 채팅 턴 수의 상한(선행 처리 시작 ~ 마지막 후처리). 넘으면 503 AI_CHAT_CAPACITY_EXCEEDED.
+    # 처리량 목표가 아니라 마지막 안전장치다 — 폭주 가드와 전역 게이트는 Redis 가 죽으면 검사 없이 통과시키므로(fail-open),
+    # 그 순간 앱이 자기 자원을 다 태우는 것을 여기서 막는다.
+    # 계산값·임시값이다: 힙(배포 -Xmx256m, 기준 사용량을 절반으로 잡아 여유 128MB ÷ 턴당 320KB ≈ 409턴)이 가장 낮은
+    # 자원 상한이고, 거기서 여유 25% 를 뺐다. 정상 운영에서 게이트가 허용하는 동시 턴(38~228)보다 크다.
+    # 산출 과정과 입력값 출처는 docs/architecture/capacity-baseline.md 의 "채팅 진행 중 턴 상한" 절.
+    # 조정은 지표 ai_chat_in_flight_turns 최고치와 ai_chat_in_flight_rejections_total 을 보고 한다.
+    max-in-flight-turns: 300
   turn-recovery:
     # 기한 지난 미종료 요청 정리(만료 확정 + 예약 반환). 세 값 모두 후보값 — 실제 만료 발생량을 보고 조정.
     scan-interval-ms: 60000  # 스캔 주기. 컨텍스트 요약 회수기(reaper-interval-ms)와 같은 간격.

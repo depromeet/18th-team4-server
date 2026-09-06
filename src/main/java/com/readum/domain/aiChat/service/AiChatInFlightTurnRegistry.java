@@ -1,8 +1,10 @@
 package com.readum.domain.aiChat.service;
 
+import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.exception.ServiceUnavailableException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -27,6 +29,12 @@ import java.util.concurrent.locks.ReentrantLock;
  * 반대로 전달이 아직 남아 있어도 후처리가 끝났으면 이 목록에서는 빠진다. 살아 있는 SSE 요청을 기다리는
  * 일은 웹 서버의 graceful shutdown 이 따로 한다.
  *
+ * <p><b>진행 중 턴 수의 상한도 여기서 지킨다.</b> 목록의 크기가 곧 이 프로세스가 동시에 떠맡은 일의 양이라,
+ * 상한 검사를 할 자리가 여기다. 상한에 닿으면 새 턴을 503({@link AiChatErrorCode#AI_CHAT_CAPACITY_EXCEEDED})으로
+ * 거절한다. 이것은 처리량 조절 장치가 아니라 <b>마지막 안전장치</b>다 — 평소 유입을 조절하는 사용자별 폭주 가드와
+ * 전역 게이트는 둘 다 Redis 에 기대고, Redis 가 죽으면 검사 없이 통과시킨다(fail-open, docs/record/0006).
+ * 그 순간 앱이 받는 만큼 다 받아 자기 자원(힙·연결)을 먼저 소진하는 것을 막는다.
+ *
  * <p><b>DB 요청 기록을 대신하지 않는다.</b> 이 목록은 JVM 메모리에만 있어서 프로세스가 강제 종료되면
  * 그대로 사라진다. 종료 대기 기한 안에 끝내지 못한 턴의 예약(토큰 예산)은 DB 의 미종료 요청 기록을 보고
  * 복구하는 쪽이 책임진다. 여기서 목록을 지우는 것은 "이번 실행이 끝났다" 는 뜻이지
@@ -35,6 +43,12 @@ import java.util.concurrent.locks.ReentrantLock;
 @Slf4j
 @Component
 public class AiChatInFlightTurnRegistry {
+
+    /**
+     * 상한 거절에 붙이는 재시도 안내 초. 진행 중인 턴은 길어야 생성 전체 기한(120초) 안에 빠지고 보통은 훨씬 빨리
+     * 빠지므로, 종료 중 거절의 기본값(30초)보다 짧게 잡아 곧 다시 시도하게 한다.
+     */
+    private static final long CAPACITY_RETRY_AFTER_SECONDS = 5L;
 
     /**
      * 등록·정리·차단·대기를 하나의 잠금으로 묶는다. 신규 수락 차단(blockNewTurns)과 등록(register)이
@@ -53,6 +67,25 @@ public class AiChatInFlightTurnRegistry {
     private long turnIdSequence = 0L;
 
     private boolean acceptingNewTurns = true;
+
+    /** 동시에 진행할 수 있는 턴 수의 상한. 계산값·임시값이며 근거는 {@code AiChatProperties.Streaming#maxInFlightTurns}. */
+    private final int maxInFlightTurns;
+
+    /**
+     * 상한에 걸려 거절한 누적 횟수. 지표로만 읽는 값이라 되돌리지 않고 늘어나기만 한다.
+     * 잠금 안에서만 만지므로 별도의 원자 타입이 필요 없다 — 읽기는 {@link #capacityRejectionCount()} 가 잠그고 읽는다.
+     */
+    private long capacityRejectionCount = 0L;
+
+    @Autowired
+    public AiChatInFlightTurnRegistry(AiChatProperties aiChatProperties) {
+        this(aiChatProperties.streaming().maxInFlightTurns());
+    }
+
+    /** 상한만 직접 주는 생성자 — 설정 전체를 조립하지 않고 상한 동작만 확인하는 테스트를 위해 열어 둔다. */
+    public AiChatInFlightTurnRegistry(int maxInFlightTurns) {
+        this.maxInFlightTurns = maxInFlightTurns;
+    }
 
     /**
      * 진행 중인 턴 하나의 운영 확인 정보.
@@ -76,14 +109,30 @@ public class AiChatInFlightTurnRegistry {
      * 턴 하나를 진행 목록에 올린다. 선행 처리의 첫 부수 효과보다 앞서 호출해야
      * 예약·외부 호출을 시작해 놓고 추적에서 빠지는 턴이 없다.
      *
-     * @throws ServiceUnavailableException 이미 종료 절차가 시작돼 신규 수락이 차단된 경우.
-     *                                     조용히 통과시키지 않는다 — 받아 놓고 곧바로 잘리는 것보다 503 으로 거절하는 편이 낫다.
+     * <p>상한 검사와 등록은 <b>같은 잠금 안에서 한 번에</b> 한다. 나눠 놓으면 여럿이 동시에 "아직 자리가 있다" 를
+     * 보고 모두 등록해 상한을 넘길 수 있다.
+     *
+     * <p>종료 차단을 상한보다 먼저 본다. 둘 다 해당하면 서버가 종료 중이라는 사실이 더 정확한 사유이고,
+     * 종료 중에는 자리가 나도 어차피 받지 않기 때문이다.
+     *
+     * @throws ServiceUnavailableException 이미 종료 절차가 시작돼 신규 수락이 차단된 경우
+     *                                     ({@link AiChatErrorCode#SERVER_SHUTTING_DOWN}), 또는 진행 중 턴이
+     *                                     상한에 닿은 경우({@link AiChatErrorCode#AI_CHAT_CAPACITY_EXCEEDED}).
+     *                                     조용히 통과시키지 않는다 — 받아 놓고 곧바로 잘리거나 자원을 다 태우는 것보다
+     *                                     503 으로 거절하는 편이 낫다.
      */
     public InFlightTurn register(String requestId, Long sessionId, Long userId) {
         stateLock.lock();
         try {
             if (!acceptingNewTurns) {
                 throw new ServiceUnavailableException(AiChatErrorCode.SERVER_SHUTTING_DOWN);
+            }
+            if (inFlightTurns.size() >= maxInFlightTurns) {
+                capacityRejectionCount++;
+                log.warn("진행 중 턴 상한 초과로 거절 inFlight={} max={} userId={} sessionId={} requestId={}",
+                        inFlightTurns.size(), maxInFlightTurns, userId, sessionId, requestId);
+                throw new ServiceUnavailableException(
+                        AiChatErrorCode.AI_CHAT_CAPACITY_EXCEEDED, CAPACITY_RETRY_AFTER_SECONDS);
             }
             InFlightTurn turn = new InFlightTurn(++turnIdSequence, requestId, sessionId, userId, Instant.now());
             inFlightTurns.put(turn.turnId(), turn);
@@ -174,6 +223,21 @@ public class AiChatInFlightTurnRegistry {
         stateLock.lock();
         try {
             return inFlightTurns.size();
+        } finally {
+            stateLock.unlock();
+        }
+    }
+
+    /** 동시에 진행할 수 있는 턴 수의 상한. 지표·로그에서 현재 수와 함께 보여 주기 위해 연다. */
+    public int maxInFlightTurns() {
+        return maxInFlightTurns;
+    }
+
+    /** 상한에 걸려 거절한 누적 횟수. 지표({@code ai_chat_in_flight_rejections_total})가 읽는다. */
+    public long capacityRejectionCount() {
+        stateLock.lock();
+        try {
+            return capacityRejectionCount;
         } finally {
             stateLock.unlock();
         }

@@ -8,4 +8,4 @@
 | [system-overview.md](system-overview.md) | 기술 스택·모듈 구성·실행 모델·계층 구조·데이터 저장·백그라운드 처리 |
 | [external-integrations.md](external-integrations.md) | OpenAI·알라딘 도서 API·Caffeine 캐시 연동, Port/Adapter 목록 |
 | [security-architecture.md](security-architecture.md) | 세션 쿠키 인증 구조와 AI 채팅 rate limit |
-| [capacity-baseline.md](capacity-baseline.md) | AI 기능 용량 기준 — 토큰 환산율·행동 가정·피크 부하 도출·정책 초기값 |
+| [capacity-baseline.md](capacity-baseline.md) | AI 기능 용량 기준 — 토큰 환산율·행동 가정·피크 부하 도출·정책 초기값·채팅 진행 중 턴 상한 |
