@@ -28,6 +28,24 @@ import java.time.Duration;
 public class OpenAiHttpClientConfig {
 
     /**
+     * moderation 호출의 연결 상한. 한 턴의 선행 처리 여유
+     * ({@code ai-chat.streaming.prepare-allowance-seconds}) 안에 들어야 하는 값이라
+     * 상수로 노출해 기동 시 대조한다({@code AiChatTimeBudgetValidator}).
+     */
+    public static final Duration MODERATION_CONNECT_TIMEOUT = Duration.ofSeconds(3);
+
+    /** moderation 호출의 응답 읽기 상한. 위와 같은 이유로 노출한다. */
+    public static final Duration MODERATION_READ_TIMEOUT = Duration.ofSeconds(5);
+
+    /**
+     * moderation 호출 하나가 쓸 수 있는 최대 시간 — 연결 + 읽기. 선행 처리 여유가 이 값보다 커야 한다.
+     * 두 값을 따로 더하는 곳이 생기지 않도록 여기 한 번만 더해 둔다.
+     */
+    public static Duration moderationHttpCeiling() {
+        return MODERATION_CONNECT_TIMEOUT.plus(MODERATION_READ_TIMEOUT);
+    }
+
+    /**
      * moderation ModerationModel 을 블로킹 JDK HttpClient(HTTP/1.1) 로 구성한다 (auto-config 대체).
      * 리액터 전송 팩토리로 감싸면 요청 본문 쓰기가 전역 {@code Schedulers.boundedElastic()} 으로 넘어가
      * 응답 대기와 본문 쓰기가 같은 풀의 서로 다른 워커를 요구하지만, 여기서는 그 분리가 없다 —
@@ -45,10 +63,10 @@ public class OpenAiHttpClientConfig {
                 // moderation 은 단순 1회성 요청/응답이라 HTTP/2 멀티플렉싱 이점이 없다. HTTP/1.1 로 고정해
                 // HTTP/2 스택(스트림 멀티플렉싱·흐름 제어)을 아예 배제 → 가드레일 경로를 단순·예측가능하게 둔다.
                 .version(HttpClient.Version.HTTP_1_1)
-                .connectTimeout(Duration.ofSeconds(10))
+                .connectTimeout(MODERATION_CONNECT_TIMEOUT)
                 .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(jdkHttpClient);
-        requestFactory.setReadTimeout(Duration.ofSeconds(30)); // moderation 이 매달리지 않게 상한(② read 타임아웃)
+        requestFactory.setReadTimeout(MODERATION_READ_TIMEOUT); // moderation 이 매달리지 않게 상한(② read 타임아웃)
         RestClient.Builder restClientBuilder = RestClient.builder().requestFactory(requestFactory);
         OpenAiModerationApi api = OpenAiModerationApi.builder()
                 .apiKey(apiKey)
@@ -60,7 +78,8 @@ public class OpenAiHttpClientConfig {
         // congestion collapse 를 키우는 증폭기였다(측정 확인). 근본(본문 굶음)을 고쳤으므로 재시도로 가릴 실패가 없고,
         // 남는 드문 일시적 실패는 InputModerationClient 의 failurePolicy(CLOSED→503)로 빠르게 표면화한다.
         RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
-        log.info("[OpenAI HTTP] moderation model: 블로킹 JDK HttpClient (HTTP/1.1), 자체 재시도 없음");
+        log.info("[OpenAI HTTP] moderation model: 블로킹 JDK HttpClient (HTTP/1.1), 자체 재시도 없음, 연결 {}s + 읽기 {}s",
+                MODERATION_CONNECT_TIMEOUT.toSeconds(), MODERATION_READ_TIMEOUT.toSeconds());
         return new OpenAiModerationModel(api, new RetryTemplate(noRetry));
     }
 }

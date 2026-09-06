@@ -18,8 +18,21 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     # 워커 풀(summary-job 12 + context-summary-job 4 = 최대 16)의 짧은 DB 단계와 웹 요청이 경합하지 않도록
     # 개발과 동일하게 24 로 둔다 (워커 동시성 계산값은 환경과 무관하므로 dev 와 같게 맞춘다).
+    # 아래 두 대기 제한은 앱에서 못박는다 — 서버 설정에 기대지 않고 로컬 컨테이너·RDS 어디서든 같은 값이 되게.
+    # 세 제한(연결 획득 · 소켓 읽기 · 행 잠금 대기)의 관계는
+    # docs/ops/ai-chat-shutdown-and-recovery.md 의 "DB 연결의 대기 제한" 절에 있다.
     hikari:
       maximum-pool-size: 24
+      # 풀에서 연결 하나를 빌리기까지 기다리는 최대 시간. 기본 30초 → 10초.
+      # 풀이 10초 넘게 비어 있는 상황은 어느 기능에서든 정상이 아니다. 채팅 후처리 여유 20초
+      # (= 연결 획득 10 + 저장·정산 10)가 성립하려면 이 값이 그 안에 들어야 한다.
+      connection-timeout: 10000
+      # 한 트랜잭션이 다른 트랜잭션이 쥔 행 잠금을 기다리는 최대 시간(초). MySQL 기본 50초 → 5초.
+      # 넘으면 그 문장이 오류로 끝나 트랜잭션이 롤백된다(JPA 예외 → Spring 롤백).
+      # 채팅에서는 요청 행을 FOR UPDATE 로 잠그는 후처리와 미정산 예약 반환이 같은 행에서 만나는 순간에,
+      # 그 밖의 기능(감상문 잡 적재 등)에서는 각자의 잠금 경합에 걸린다.
+      # URL 의 socketTimeout 60초가 이 값보다 길어, 잠금 대기는 항상 DB 쪽에서 먼저 정상 오류로 끝난다.
+      connection-init-sql: SET SESSION innodb_lock_wait_timeout = 5
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}   # 앱은 호스트에서 systemd 로 돌고 운영 Redis 는 루프백(6380) 바인딩

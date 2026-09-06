@@ -90,16 +90,20 @@ public record AiChatProperties(
      * 정상적으로 선행 처리·후처리 중인 요청을 복구가 가로채 환불하게 된다.
      * <ul>
      *   <li>prepareAllowanceSeconds — <b>선행 처리 여유</b>. 요청 행을 넣은 뒤(= 접수) 생성 호출을 시작하기까지
-     *       걸릴 수 있는 시간이다. 가장 긴 몫은 입력 moderation 의 HTTP 상한 40초
-     *       (연결 10초 + 읽기 30초, {@code OpenAiHttpClientConfig})이고, 그 뒤로 이력 조회·예약·전역 게이트·
-     *       USER 저장의 DB·Redis 시간이 더 붙는다. 후보값 60초는 40초에 나머지 몫 20초를 얹은 것이다.</li>
+     *       걸릴 수 있는 시간이다. 가장 긴 몫은 입력 moderation 의 HTTP 상한 8초
+     *       (연결 3초 + 읽기 5초, {@code OpenAiHttpClientConfig})이고, 그 뒤로 이력 조회·예약·전역 게이트·
+     *       USER 저장의 DB·Redis 시간이 더 붙는다. 후보값 10초는 8초에 나머지 몫 2초를 얹은 것이다.</li>
      *   <li>postProcessingAllowanceSeconds — <b>후처리 여유</b>. 생성이 끝난 뒤 저장·정산·요청 종료 트랜잭션이
-     *       끝나기까지 걸릴 수 있는 시간이다. DB 연결을 얻는 데만 HikariCP 기본 상한 30초가 들 수 있고,
-     *       같은 요청 행을 잠그는 대기가 MySQL 기본 {@code innodb_lock_wait_timeout} 50초까지 갈 수 있다.
-     *       후보값 60초는 그 둘 중 큰 쪽(50초)에 질의 시간 몫을 얹은 것이다.</li>
+     *       끝나기까지 걸릴 수 있는 시간이다. DB 연결을 얻는 데 Hikari {@code connection-timeout} 10초가 들 수 있고,
+     *       그 뒤 트랜잭션 안에서 같은 요청 행을 잠그는 대기가 {@code innodb_lock_wait_timeout} 5초까지 갈 수 있다.
+     *       후보값 20초는 연결 획득 10초에 저장·정산 몫 10초를 얹은 것이다.</li>
      * </ul>
      * 여기 적은 초 단위는 설정값과 코드·기본값에서 읽은 상한을 더한 <b>계산</b>이지 측정값이 아니다.
      * 실제 선행 처리·후처리 소요는 재지 않았다.
+     *
+     * <p><b>한 턴의 시간 예산은 50초</b>다 — 접수부터 선행 여유 10 + 생성 전체 기한 20 + 후처리 여유 20.
+     * 그 안에 끝내거나 어느 구간에서든 명시적으로 실패한다. 구간별 상한(moderation HTTP · Hikari 연결 획득 ·
+     * 행 잠금 대기)이 이 예산 안에 드는지는 기동 시 {@code AiChatTimeBudgetValidator} 가 대조한다.
      *
      * <p>deliveryQueueCapacity — 연결 1개당 전달 큐에 쌓아둘 델타 개수의 상한이다. 큐가 차면 완성본 대기 모드로
      * 바꾸고 이후 델타는 큐에 넣지 않는다(생성은 계속 누적한다). 초기값은 예상치다:

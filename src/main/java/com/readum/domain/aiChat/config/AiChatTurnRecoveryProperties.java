@@ -1,6 +1,7 @@
 package com.readum.domain.aiChat.config;
 
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -8,37 +9,41 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 
 /**
- * 기한이 지난 미종료 요청을 정리하는 만료 복구의 설정. {@code AiChatProperties.Streaming}(한 턴의 기한)과
- * 나눠 두는 이유는 재는 대상이 달라서다 — 저쪽은 <b>한 요청</b>의 기한이고, 이쪽은 <b>훑는 작업</b>의 주기·상한이다.
- * 세 값 모두 <b>후보값</b>이며 실제 만료 발생량을 보고 조정한다.
+ * 기한이 지난 미종료 요청을 정리하는 <b>미정산 예약 반환</b>의 설정.
+ * {@code AiChatProperties.Streaming}(한 턴의 기한)과 나눠 두는 이유는 재는 대상이 달라서다 —
+ * 저쪽은 <b>한 요청</b>의 기한이고, 이쪽은 <b>훑는 작업</b>의 주기·묶음이다.
  *
- * <p><b>graceSeconds 가 무엇을 맡는가.</b> 요청 행의 {@code expires_at} 은 <b>접수 시각 + (선행 처리 여유 +
- * 생성 전체 기한 + 후처리 여유)</b> = 60 + 120 + 60 = 240초로 찍힌다
+ * <p><b>graceSeconds 는 0 이 정본이다.</b> 요청 행의 {@code expires_at} 은 <b>접수 시각 + (선행 처리 여유 +
+ * 생성 전체 기한 + 후처리 여유)</b> = 10 + 20 + 20 = 50초로 찍힌다
  * ({@code AiChatProperties.Streaming#turnRequestExpiryTimeout()}). 한 턴이 정상적으로 끝나기까지 걸릴 수 있는
- * 구간별 상한은 이미 그 산식이 담고 있으므로, 여기 grace 가 다시 그 몫을 셀 필요는 없다.
+ * 구간별 상한을 그 산식이 이미 담고 있으므로, 만료로 판정한 행은 곧바로 처리한다.
  *
- * <p>그래서 이 값이 맡는 것은 <b>산식이 재지 않는 어긋남</b>뿐이다 — 요청 행의 시각과 복구가 읽는 시각이 서로 다른
- * 출처(각 인스턴스의 시계)라는 점, 그리고 스캔이 주기 사이에 밀릴 수 있다는 점이다. 후보값 30초는 그 두 가지를
- * 덮을 만큼으로 잡은 것이며, 실효 만료는 접수 + 270초가 된다.
+ * <p><b>유예를 두지 않아도 정확한 이유.</b> 정확성을 보장하는 것은 시간 여유가 아니라 행 잠금이다 —
+ * 종료를 확정하는 순간 {@code AiChatTurnOutcomeWriter#expireIfOverdue} 가 요청 행을 잠그고 미종료·기한 초과를
+ * 다시 확인한다. 뒤늦게 성공한 실행은 같은 잠금·확인에 걸려 저장·정산이 반영되지 않고, 반대도 마찬가지다.
+ * 그래서 유예를 늘려도 정확해지지 않고 <b>예약이 사용자에게 돌아가는 시각만 늦어진다</b>.
+ * 0 이 아닌 값은 요청 행의 시각과 스캔이 읽는 시각의 출처가 다른 환경(인스턴스 간 시계 차이)에서만 의미가 있다.
  *
- * <p>이 값을 0 에 가깝게 줄이지 않는 이유: 산식의 구간별 상한은 <b>계산</b>이지 측정이 아니다. 실제 선행 처리·후처리
- * 소요를 재기 전까지는, 정상적으로 후처리 중인 요청을 복구가 가로채 환불하는 쪽보다 조금 늦게 돌려주는 쪽이 낫다.
+ * <p><b>maxRowsPerRun 은 상한이 아니라 묶음 크기다.</b> 한 묶음을 처리한 뒤 묶음이 꽉 찼으면 같은 스캔이
+ * 곧바로 다음 묶음을 읽는다 — 밀린 양이 많아도 한 스캔에서 비운다. 이 값이 정하는 것은 한 번에 읽어 오는
+ * 행 수, 곧 한 묶음이 만드는 순간 부하다.
  *
  * <p><b>반환이 늦어지는 정도.</b> 죽은 요청의 예약이 사용자에게 돌아오기까지 최악
- * {@code expires_at + graceSeconds + scanIntervalMs} 다 — 지금 값으로 접수 후 약 5분 30초다.
+ * {@code expires_at + graceSeconds + scanIntervalMs} 다 — 지금 값으로 접수 후 약 1분 50초다.
  * 그 사이 사용자는 그만큼의 일일 예산을 못 쓴다.
  */
 @Validated
 @ConfigurationProperties(prefix = "ai-chat.turn-recovery")
 public record AiChatTurnRecoveryProperties(
         @Positive long scanIntervalMs,
-        @Positive long graceSeconds,
+        @PositiveOrZero long graceSeconds,
         @Positive int maxRowsPerRun
 ) {
 
     /**
      * 이번 스캔이 쓸 만료 판정 기준 시각 — 이 시각보다 기한이 앞선 행만 만료로 확정한다.
      * 목록 조회와 행 잠금이 같은 기준을 쓰도록 한 스캔에서 한 번만 계산해 양쪽에 넘긴다.
+     * {@code graceSeconds} 가 0 이면 스캔 시각 그대로다.
      */
     public LocalDateTime overdueBefore(LocalDateTime now) {
         return now.minus(Duration.ofSeconds(graceSeconds));
