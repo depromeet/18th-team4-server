@@ -215,10 +215,12 @@ public class AiChatController {
             @ApiResponse(
                     responseCode = "409",
                     description = """
-                            이미 접수된 requestId (DUPLICATE_TURN_REQUEST). 진행 중·성공·실패 어느 상태든
-                            같은 식별자로는 답변을 새로 만들거나 토큰을 다시 예약·과금하지 않는다.
-                            재전송이라면 그대로 두고 이력 조회로 결과를 확인하고,
-                            사용자가 새 생성을 원한다면 새 식별자로 다시 요청한다."""),
+                            - `DUPLICATE_TURN_REQUEST`: 이미 접수된 requestId. 진행 중·성공·실패 어느 상태든
+                              같은 식별자로는 답변을 새로 만들거나 토큰을 다시 예약·과금하지 않는다.
+                              재전송이라면 그대로 두고 이력 조회로 결과를 확인하고,
+                              사용자가 새 생성을 원한다면 새 식별자로 다시 요청한다.
+                            - `TURN_REQUEST_ALREADY_FINISHED`: 접수는 됐지만 기한이 지나 만료 복구가 이미 끝낸 요청.
+                              선행 처리가 길게 지연된 뒤 예약 단계에 도착한 경우다. 새 식별자로 다시 요청한다."""),
             @ApiResponse(
                     responseCode = "429",
                     description = """

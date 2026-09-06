@@ -1,5 +1,8 @@
 package com.readum.domain.aiChat.service;
 
+import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.exception.ConflictException;
+import com.readum.domain.exception.NotFoundException;
 import com.readum.model.aiChat.entity.AiChatTurnRequest;
 import com.readum.model.aiChat.repository.AiChatTurnRequestRepository;
 import com.readum.model.aiChat.repository.UserTokenBudgetRepository;
@@ -139,16 +142,36 @@ class AiChatTurnRequestWriterTest {
     }
 
     @Test
-    void 예약_정보_기록이_실패하면_예산_증가도_함께_롤백된다() {
+    void 잠글_요청_행이_없으면_예산을_건드리지_않는다() {
         long userId = nextUserId();
         long missingTurnRequestId = 9_999_999L;
 
-        // 요청 행을 찾지 못해 예약 정보를 남길 수 없으면, 되돌릴 양을 모르는 예약이 생기지 않게 예산도 되돌린다.
+        // 예약 정보를 남길 행이 없으면 되돌릴 양을 모르는 예약이 생긴다 — 예산에 손대기 전에 멈춘다.
         assertThatThrownBy(() -> aiChatTurnRequestWriter.reserveWithRecord(missingTurnRequestId, userId, 300))
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(NotFoundException.class);
 
         assertThat(usedTokensOf(userId)).isZero();
         assertThat(userTokenBudgetRepository.findByUserIdAndPeriodKey(userId, todayPeriodKey())).isEmpty();
+    }
+
+    @Test
+    void 만료로_끝난_요청에_예약을_시도하면_409_로_거절하고_예산을_건드리지_않는다() {
+        long userId = nextUserId();
+        Long turnRequestId = aiChatTurnRequestWriter.claim(userId, 7L, "request-expired", EXPIRY_TIMEOUT);
+        // 선행 처리가 길게 지연된 사이 만료 복구가 이 요청을 끝낸 상황.
+        aiChatTurnOutcomeWriter.finishWithoutCharge(
+                turnRequestId, AiChatTurnRequest.Status.EXPIRED, "TEST");
+
+        assertThatThrownBy(() -> aiChatTurnRequestWriter.reserveWithRecord(turnRequestId, userId, 300))
+                .isInstanceOf(ConflictException.class)
+                .extracting(thrown -> ((ConflictException) thrown).getErrorCode())
+                .isEqualTo(AiChatErrorCode.TURN_REQUEST_ALREADY_FINISHED);
+
+        // 늦게 재개된 실행이 종료를 RESERVED 로 덮어쓰지 못한다.
+        AiChatTurnRequest turnRequest = aiChatTurnRequestRepository.findById(turnRequestId).orElseThrow();
+        assertThat(turnRequest.getStatus()).isEqualTo(AiChatTurnRequest.Status.EXPIRED);
+        assertThat(turnRequest.getReservedTokens()).isNull();
+        assertThat(usedTokensOf(userId)).isZero();
     }
 
     @Test

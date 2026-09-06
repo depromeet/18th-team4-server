@@ -28,6 +28,10 @@ import java.time.LocalDateTime;
  * 정산 기록의 {@code message_id} UNIQUE 는 <b>같은 메시지</b>의 이중 정산만 막는다 — 요청 단위 멱등성은
  * 이 잠금·확인이 만든다(같은 요청이 답변을 두 번 저장하면 메시지 id 가 달라 UNIQUE 로 걸리지 않는다).
  *
+ * <p><b>잠금 순서는 요청 행({@code ai_chat_turn_request}) → 예산 행({@code user_token_budget}) 이다.</b>
+ * 예약 전이({@link AiChatTurnRequestWriter#reserveWithRecord})도 같은 순서로 잠그므로 예약과 종료가
+ * 서로 교착하지 않는다.
+ *
  * <p><b>트랜잭션 밖에 두는 것:</b> 외부 API 호출, SSE 쓰기, Redis 전역 게이트 보상. 이 빈은 셋 중 무엇도
  * 하지 않는다 — 커밋 시간을 외부 응답에 매달지 않기 위해서다. 게이트 보상 정책은 이 작업에서 바꾸지 않았다.
  *

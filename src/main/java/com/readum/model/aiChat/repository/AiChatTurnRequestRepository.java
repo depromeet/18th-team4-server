@@ -31,6 +31,9 @@ public interface AiChatTurnRequestRepository extends JpaRepository<AiChatTurnReq
      * 그 사이에 다른 실행(늦은 성공 vs 만료 복구)이 같은 행을 보면 둘 다 미종료로 읽어 저장·정산·환불이
      * 두 번 반영된다. 상태 컬럼의 조건부 UPDATE 만으로는 답변 저장·정산까지 한 결정 아래 묶지 못한다.
      *
+     * <p><b>예약 전이도 이 잠금을 쓴다.</b> 접수 뒤 처리가 길게 지연되면 그 사이 만료 복구가 요청을
+     * 이미 끝냈을 수 있다. 잠그지 않고 예약하면 늦게 재개된 실행이 그 종료를 덮어쓰고 생성을 시작한다.
+     *
      * <p>잠금은 트랜잭션이 끝날 때 풀리므로 이 메서드는 반드시 {@code @Transactional} 안에서 부른다.
      * 잠금 대기 시간은 DB 설정(innodb_lock_wait_timeout)을 따르며 여기서 따로 걸지 않는다.
      */
