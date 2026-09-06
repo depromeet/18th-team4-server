@@ -35,6 +35,18 @@ public interface AiChatClient {
      */
     void releaseRateLimitPermit(RateLimitPermit permit);
 
+    /**
+     * 로컬 입력 검사 — 이 요청을 모델에 보내지 않고 거절해야 하는지 판정한다.
+     * 정규식 패턴과 금칙어를 로컬에서 대조할 뿐이라 외부 호출도 과금도 없다.
+     *
+     * <p>검사 대상은 <b>조립된 프롬프트 전체</b>(시스템 메시지 + 이력 + 이번 입력)다. 프롬프트 조립은
+     * 구현체가 하므로 판정도 이 port 에 둔다 — 도메인이 조립을 다시 흉내 내면 무엇을 막는지가 갈린다.
+     *
+     * <p>차단 판정은 선행 단계에서 입력 moderation 차단과 같은 모양으로 거절한다
+     * (REJECTED 기록 + 400). 거부 문구를 답변처럼 흘려보내지 않는다.
+     */
+    boolean isBlockedByLocalInputCheck(AiChatStreamCommand command);
+
     /** 비스트리밍 동기 호출. 완성 응답을 반환하고, 실패는 예외로 던진다. 호출 전 acquireRateLimitPermit() 이 선행되어야 한다. */
     AiChatCompletion generate(AiChatStreamCommand command);
 

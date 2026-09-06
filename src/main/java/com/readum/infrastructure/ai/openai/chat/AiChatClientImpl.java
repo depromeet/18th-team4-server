@@ -61,6 +61,7 @@ public class AiChatClientImpl implements AiChatClient {
     // 그 대가(프롬프트 조립·입력 검사를 여기서 직접 해야 함)는 그 빈의 주석에 적혀 있다.
     private final ChatModel streamingChatModel;
     // ChatClient 를 우회하면서 빠진 입력 advisor 두 개와 같은 판정을 하는 로컬 검사기.
+    // 판정만 하고, 거절은 선행 단계(AiChatMessageSendService)가 400 으로 낸다.
     private final ChatInputGuardrail chatInputGuardrail;
     private final AiPromptAuditLogger auditLogger;
     private final OpenAiRateLimitGuard rateLimitGuard;
@@ -109,6 +110,16 @@ public class AiChatClientImpl implements AiChatClient {
         }
     }
 
+    /**
+     * 로컬 입력 검사. 판정 대상은 실제로 모델에 보낼 프롬프트 전체이므로, 보낼 때와 <b>같은 조립 결과</b>를
+     * 검사한다 — 조립을 여기서 하기 때문에 판정도 이 클래스가 맡는다.
+     * 로컬 계산뿐이라 외부 호출이 없고, 모델 호출이 아니므로 감사 로그도 남기지 않는다.
+     */
+    @Override
+    public boolean isBlockedByLocalInputCheck(AiChatStreamCommand command) {
+        return chatInputGuardrail.isBlocked(buildPromptMessages(command));
+    }
+
     /** 호출 전 acquireRateLimitPermit() 이 선행되어야 한다 — 전역 게이트 검사는 여기서 하지 않는다. */
     @Override
     public AiChatCompletion generate(AiChatStreamCommand command) {
@@ -148,12 +159,13 @@ public class AiChatClientImpl implements AiChatClient {
      * 토큰 스트리밍. 호출 전 acquireRateLimitPermit() 이 선행되어야 한다.
      *
      * <p>ChatClient 가 아니라 {@code OpenAiChatModel} 을 직접 호출한다(이유는 그 빈의 주석 참조).
-     * 그래서 ChatClient 가 해 주던 두 가지를 여기서 직접 한다.
-     * <ul>
-     *   <li>프롬프트 조립: 시스템 메시지가 맨 앞, 그 뒤에 대화 이력(마지막이 이번 사용자 입력).
-     *       ChatClient 의 {@code .system(...) + .messages(...)} 가 만들던 순서와 같다.</li>
-     *   <li>로컬 입력 검사: {@link ChatInputGuardrail} 이 입력 advisor 두 개와 같은 판정을 한다.</li>
-     * </ul>
+     * 그래서 ChatClient 가 해 주던 프롬프트 조립을 여기서 직접 한다: 시스템 메시지가 맨 앞,
+     * 그 뒤에 대화 이력(마지막이 이번 사용자 입력). ChatClient 의
+     * {@code .system(...) + .messages(...)} 가 만들던 순서와 같다.
+     *
+     * <p>ChatClient 가 해 주던 로컬 입력 검사는 이 메서드가 하지 않는다 —
+     * {@link #isBlockedByLocalInputCheck}로 분리해 선행 단계가 400 으로 거절한다.
+     * 그래서 이 메서드는 순수한 모델 호출이다.
      *
      * <p>감사 로그는 호출 1건당 한 번만 남긴다 — 종료 훅이 겹쳐 불려도 먼저 도착한 하나만 기록한다.
      * 성공 기록에는 마지막으로 본 사용량 청크의 응답을 결과로 쓴다.
@@ -219,26 +231,12 @@ public class AiChatClientImpl implements AiChatClient {
     }
 
     /**
-     * 모델 응답 스트림.
-     *
-     * <p>로컬 입력 검사에 걸리면 모델을 부르지 않고(= 외부 호출·과금 없음) 거부 정본 한 건만 흘려보낸다 —
-     * 입력 advisor 가 차단하던 때와 같은 모양이라 뒤따르는 감사 기록·청크 처리가 그대로 이어진다.
-     *
-     * <p><b>주의(후속 결정 대상):</b> 이 거부 응답에는 종료 사유도 사용량도 없다. 즉 응답 모양은 예전과 같지만,
-     * 새 정상 완료 판정({@code AiChatGenerationAccumulator})으로 보면 성공이 아니다.
-     * 거절을 어디서·어떤 코드로 내보내고 예약을 어떻게 되돌릴지가 정해지기 전까지는
-     * 응답 모양을 앞질러 바꾸지 않는다(판정 동등성은 유지, 응답 동등성도 현행 유지).
+     * 모델 응답 스트림. 입력 검사는 여기서 하지 않는다 — 이 경로에 도착한 요청은 선행 단계의
+     * 로컬 입력 검사와 입력 moderation 을 이미 통과한 것이다.
      *
      * <p>변환 손실이 의심되는 응답은 오류로 바꿔 스트림을 끊는다 — 성공으로 흘려보내지 않기 위해서다.
      */
     private Flux<ChatResponse> responseStream(List<Message> promptMessages) {
-        Optional<String> blockedFailureResponse =
-                chatInputGuardrail.findBlockedFailureResponse(promptMessages);
-        if (blockedFailureResponse.isPresent()) {
-            return Flux.just(ChatResponse.builder()
-                    .generations(List.of(new Generation(new AssistantMessage(blockedFailureResponse.get()))))
-                    .build());
-        }
         return streamingChatModel.stream(new Prompt(promptMessages))
                 .map(chatResponse -> {
                     if (isConversionLossSuspected(chatResponse)) {

@@ -5,7 +5,6 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -19,9 +18,11 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p><b>판정 동등성</b>(무엇을 차단하는가)은 advisor 와 같다 — 검사 대상, 검사 순서(정규식 먼저, 금칙어 다음),
- * 목록이 비었을 때 검사를 건너뛰는 규칙까지 맞췄다. <b>응답 동등성</b>(차단됐을 때 사용자가 무엇을 받는가) 역시
- * 지금은 advisor 와 같다 — 모델을 부르지 않고 거부 정본 문구를 답변으로 돌려준다.
- * 거절을 SSE 시작 전 JSON 으로 바꿀지는 아직 정해지지 않았으므로 여기서 앞질러 바꾸지 않는다.
+ * 목록이 비었을 때 검사를 건너뛰는 규칙까지 맞췄다. <b>차단됐을 때 사용자가 받는 것은 advisor 와 다르다</b> —
+ * 이 검사기는 판정만 돌려주고, 스트리밍 경로는 그 판정을 선행 단계에서 입력 moderation 차단과 같은 모양
+ * (REJECTED 기록 + 400 {@code GUARDRAIL_BLOCKED_INPUT})으로 거절한다. 거부 정본 문구를 답변으로 흘려보내면
+ * 종료 사유도 사용량도 없는 응답이라 정상 완료 판정을 통과하지 못하고, 사용자는 거부 문구 뒤에
+ * 생성 장애 안내까지 함께 받게 된다. 거부 정본 문구 자체는 비스트리밍 {@code chatClient} 빈의 advisor 가 계속 쓴다.
  *
  * <p>두 검사 모두 로컬 계산이라 외부 호출 비용이 없다.
  */
@@ -32,30 +33,28 @@ public class ChatInputGuardrail {
 
     private final List<Pattern> injectionPatterns;
     private final List<String> sensitiveWords;
-    private final String failureResponse;
 
     public ChatInputGuardrail(GuardrailProperties.Input input) {
         this.injectionPatterns = input.injectionPatterns().stream()
                 .map(pattern -> Pattern.compile(pattern, PATTERN_FLAGS))
                 .toList();
         this.sensitiveWords = List.copyOf(input.sensitiveWords());
-        this.failureResponse = input.failureResponse();
     }
 
-    /** 차단이면 거부 정본 문구를, 통과면 빈 값을 돌려준다. */
-    public Optional<String> findBlockedFailureResponse(List<Message> promptMessages) {
+    /** 이 프롬프트를 모델에 보내지 않고 거절해야 하는가. */
+    public boolean isBlocked(List<Message> promptMessages) {
         int matchedPatternIndex = findInjectionPatternIndex(promptMessages);
         if (matchedPatternIndex >= 0) {
             // 패턴 원문은 남기지 않는다 — 어떤 패턴에 걸렸는지 알려주면 우회 문구를 만들기 쉬워진다.
             log.info("[Guardrail] 입력 차단(정규식 패턴) patternIndex={} length={}",
                     matchedPatternIndex, latestUserText(promptMessages).length());
-            return Optional.of(failureResponse);
+            return true;
         }
         if (containsSensitiveWord(promptMessages)) {
             log.info("[Guardrail] 입력 차단(금칙어)");
-            return Optional.of(failureResponse);
+            return true;
         }
-        return Optional.empty();
+        return false;
     }
 
     private int findInjectionPatternIndex(List<Message> promptMessages) {

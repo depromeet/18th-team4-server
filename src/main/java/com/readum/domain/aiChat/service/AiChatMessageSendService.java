@@ -84,7 +84,7 @@ public class AiChatMessageSendService {
 
     /**
      * 선행 처리(요청의 가상 스레드에서 동기 순차): <b>진행 목록 등록</b> → 본문 검증 → <b>요청 중복 판정</b> →
-     * 사용자 폭주 가드 → 예산 예약 → 이력 조회 → 입력 모더레이션 → 전역 게이트 → USER 저장.
+     * 사용자 폭주 가드 → 예산 예약 → 이력 조회 → 로컬 입력 검사 → 입력 모더레이션 → 전역 게이트 → USER 저장.
      * 각 단계는 앞 단계의 결과를 보고 다음을 정하는 순차 업무이고, 요청 스레드가 가상 스레드라
      * 여기서 기다려도 다른 요청의 처리를 막지 않는다 — 그래서 리액티브 체인 밖에 둔다.
      * 여기서 던진 예외는 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 변환한다.
@@ -96,7 +96,8 @@ public class AiChatMessageSendService {
      *
      * <p>예산 예약을 moderation 앞에 두는 이유: 예산이 소진된 사용자가 공짜 moderation 호출
      * (제공자 RPM 자원)을 소모하지 못하게 한다 — 토큰 추정(tokenCounter)은 로컬 계산이라
-     * 예약을 앞으로 당겨도 외부 비용이 없다.
+     * 예약을 앞으로 당겨도 외부 비용이 없다. 같은 이유로 로컬 입력 검사(정규식 패턴·금칙어)도
+     * moderation 앞에 둔다.
      *
      * <p>진행 목록 등록을 맨 앞에 두는 이유: 등록은 이 실행을 종료 대기의 추적 대상으로 올리는 일이라
      * <b>첫 부수 효과(요청 자리 삽입)보다 앞서야</b> 예약·외부 호출을 시작해 놓고 추적에서 빠지는 턴이 없다.
@@ -208,11 +209,20 @@ public class AiChatMessageSendService {
     ) {
         TurnContext turnContext = loadTurnContext(sessionId, userId);
 
+        // 스트림 커맨드 조립은 순수 계산이라 부수 효과가 없다 — 로컬 입력 검사가 볼 프롬프트가
+        // 실제로 모델에 보낼 것과 같아야 해서 검사보다 앞에 둔다.
+        AiChatStreamCommand streamCommand = buildStreamCommand(sessionId, normalizedContent, turnContext);
+
+        // 로컬 입력 검사(정규식 패턴·금칙어)를 외부 moderation 보다 앞에 두는 이유:
+        // 로컬 검사는 계산만 하므로 공짜지만, moderation 은 공급자 RPM 자원을 쓰는 외부 호출이다.
+        // 어차피 거절될 요청이 그 자원을 소모하지 않게 한다.
+        if (aiChatClient.isBlockedByLocalInputCheck(streamCommand)) {
+            throw rejectBlockedInput(sessionId, userId, normalizedContent, "로컬 패턴·금칙어");
+        }
+
         InputModerationResult moderation =
                 inputModerationClient.check(normalizedContent, turnContext.bookContext());
         applyModerationDecision(moderation, sessionId, userId, normalizedContent);
-
-        AiChatStreamCommand streamCommand = buildStreamCommand(sessionId, normalizedContent, turnContext);
 
         // 전역 게이트: SSE 시작 전에 확보한다. USER 저장보다 먼저 확인해
         // 거절(429) 시 응답 없는 USER 메시지가 대화 이력에 남지 않게 한다.
@@ -516,15 +526,24 @@ public class AiChatMessageSendService {
     private void applyModerationDecision(
             InputModerationResult moderation, Long sessionId, Long userId, String normalizedContent) {
         switch (moderation.status()) {
-            case BLOCKED -> {
-                aiChatMessagePersistService.recordRejectedUserMessage(sessionId, normalizedContent);
-                log.warn("[Guardrail] 입력 차단 sessionId={} userId={} categories={}",
-                        sessionId, userId, moderation.flaggedCategories());
-                throw new BadRequestException(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);
-            }
+            case BLOCKED -> throw rejectBlockedInput(
+                    sessionId, userId, normalizedContent,
+                    "moderation " + moderation.flaggedCategories());
             case UNAVAILABLE -> throw new ServiceUnavailableException(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE);
             case PASSED -> { }
         }
+    }
+
+    /**
+     * 입력이 차단됐을 때의 공통 처리 — 로컬 입력 검사와 외부 moderation 이 같은 모양으로 거절한다.
+     * 사용자에게 나가는 것도, 남는 흔적도 같아야 어느 검사에 걸렸는지가 클라이언트 계약을 바꾸지 않는다.
+     * 예약 반환은 prepare() 의 공통 종료 경로가 하고, 게이트는 아직 확보 전이라 보상할 것이 없다.
+     */
+    private BadRequestException rejectBlockedInput(
+            Long sessionId, Long userId, String normalizedContent, String detectedBy) {
+        aiChatMessagePersistService.recordRejectedUserMessage(sessionId, normalizedContent);
+        log.warn("[Guardrail] 입력 차단 sessionId={} userId={} 검사={}", sessionId, userId, detectedBy);
+        return new BadRequestException(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);
     }
 
     private AiChatStreamCommand buildStreamCommand(

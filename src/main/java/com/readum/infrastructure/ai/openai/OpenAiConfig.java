@@ -115,7 +115,8 @@ public class OpenAiConfig {
      * <p>ChatClient 가 대신 해 주던 것 중 이 경로가 쓰던 기능은 각각 이렇게 보존한다.
      * <ul>
      *   <li>시스템 메시지 + 대화 이력의 프롬프트 조립 → {@code AiChatClientImpl} 이 같은 순서로 직접 조립</li>
-     *   <li>로컬 입력 검사(정규식 패턴 · 금칙어) → {@link ChatInputGuardrail} 이 같은 판정 수행</li>
+     *   <li>로컬 입력 검사(정규식 패턴 · 금칙어) → {@link ChatInputGuardrail} 이 같은 판정을 하되,
+     *       차단은 이 스트림 안이 아니라 선행 단계에서 입력 moderation 차단과 같은 모양(400)으로 거절한다</li>
      *   <li>모델·옵션({@code streamUsage} 포함)·재시도 0회·오류 핸들러 → 이 빈에 그대로</li>
      * </ul>
      * 출력 검증 advisor 는 원래도 이 경로에 달지 않았다 — {@link ModerationOutputAdvisor} 는 스트림에서 조각을

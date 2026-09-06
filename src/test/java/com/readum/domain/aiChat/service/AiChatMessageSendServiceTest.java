@@ -791,6 +791,47 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
+    void 로컬_입력_검사에_걸리면_moderation_을_부르지_않고_moderation_차단과_같은_모양으로_거절한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "차단 대상");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.isBlockedByLocalInputCheck(any(AiChatStreamCommand.class))).willReturn(true);
+
+        assertThatThrownBy(() -> executeTurn(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(BadRequestException.class))
+                .extracting(BadRequestException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT);
+
+        // 처리는 moderation 차단과 같다: REJECTED 기록 + 400, USER 미저장, 생성 미시작.
+        verify(persistService).recordRejectedUserMessage(7L, "차단 대상");
+        verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
+        verify(aiChatClient, never()).generateStream(any(AiChatStreamCommand.class));
+        // 로컬 검사는 공짜지만 moderation 은 공급자 RPM 자원을 쓴다 — 거절될 요청이 그것을 소모하지 않는다.
+        verifyNoInteractions(inputModerationClient);
+        // 게이트는 아직 확보 전이라 보상할 것이 없다.
+        verify(aiChatClient, never()).acquireRateLimitPermit(any(AiChatStreamCommand.class));
+        verify(aiChatClient, never()).releaseRateLimitPermit(any());
+        // 예약 반환은 공통 종료 경로가 한 트랜잭션으로 한다.
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
+                AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT.name());
+    }
+
+    @Test
+    void 로컬_입력_검사를_통과하면_그_다음에_외부_moderation_을_부른다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 1, 1, 2));
+        givenCommittedSuccess(1L, 1, 1, 2);
+
+        executeTurn(command);
+
+        InOrder inputCheckOrder = inOrder(aiChatClient, inputModerationClient);
+        inputCheckOrder.verify(aiChatClient).isBlockedByLocalInputCheck(any(AiChatStreamCommand.class));
+        inputCheckOrder.verify(inputModerationClient).check(eq("질문"), any());
+    }
+
+    @Test
     void Moderation_API_장애_UNAVAILABLE_이면_저장없이_ServiceUnavailable_을_던진다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);

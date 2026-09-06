@@ -50,6 +50,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -156,6 +158,26 @@ class AiChatStreamGuardrailTest {
                 String.class, userId, requestId);
     }
 
+    private String turnRequestStatusOf(String requestId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_chat_turn_request WHERE user_id = ? AND request_id = ?",
+                String.class, userId, requestId);
+    }
+
+    private String failureCodeOf(String requestId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT failure_code FROM ai_chat_turn_request WHERE user_id = ? AND request_id = ?",
+                String.class, userId, requestId);
+    }
+
+    /** 오늘 예산 원장의 사용량 — 예약이 되돌아왔으면 0 이다(행 자체가 없을 수도 있다). */
+    private long usedTokensOf() {
+        Long usedTokens = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(used_tokens), 0) FROM user_token_budget WHERE user_id = ?",
+                Long.class, userId);
+        return usedTokens == null ? 0 : usedTokens;
+    }
+
     private long countByStatus(String status) {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM ai_chat_message WHERE session_id = ? AND status = ?",
@@ -253,22 +275,25 @@ class AiChatStreamGuardrailTest {
     }
 
     @Test
-    void 로컬_입력_검사의_거부_응답은_청구_없이_실패로_끝난다() throws Exception {
-        // AiChatClientImpl 은 로컬 입력 검사에 걸리면 모델을 부르지 않고 거부 문구 한 조각만 흘려보낸다 —
-        // 종료 사유도 사용량도 없는 모양이다. 새 판정에서는 정상 완료가 아니므로 실패로 끝난다.
+    void 로컬_입력_검사에_걸리면_SSE_를_시작하지_않고_400_으로_거절하며_예약을_되돌린다() throws Exception {
+        // 로컬 입력 검사는 선행 단계에서 판정하고, 차단은 입력 moderation 차단과 같은 모양으로 거절한다.
         given(inputModerationClient.check(any(), any())).willReturn(InputModerationResult.passed());
-        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
-                .willReturn(Flux.just(AiChatStreamChunk.ofDelta(REJECT_MESSAGE)));
+        given(aiChatClient.isBlockedByLocalInputCheck(any(AiChatStreamCommand.class))).willReturn(true);
         String requestId = UUID.randomUUID().toString();
 
         send("로컬 검사에 걸리는 질문", requestId)
-                .andExpect(status().isOk());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message").value(REJECT_MESSAGE));
 
-        // 클라이언트는 거부 문구를 token 으로 받은 뒤 error 로 끝나는 것을 본다(응답 모양은 그대로 두었다).
-        // 서버 쪽 결과: 청구 없음 + 답변 미저장. USER 메시지만 COMPLETED 로 남는다.
-        assertThat(awaitTurnRequestStatus(requestId)).isEqualTo("FAILED");
-        assertThat(countByStatus("COMPLETED")).isEqualTo(1L);
-        assertThat(countByStatus("FAILED")).isZero();
+        // 요청 기록은 실패로 끝나고 예약은 되돌아온다 — 청구가 남지 않는다.
+        assertThat(turnRequestStatusOf(requestId)).isEqualTo("FAILED");
+        assertThat(failureCodeOf(requestId)).isEqualTo("GUARDRAIL_BLOCKED_INPUT");
+        assertThat(usedTokensOf()).isZero();
+        // 차단된 입력은 감사 추적용 REJECTED 로만 남고 대화 이력에는 들어가지 않는다.
+        assertThat(countByStatus("REJECTED")).isEqualTo(1L);
+        assertThat(countByStatus("COMPLETED")).isZero();
+        // 생성은 시작조차 하지 않는다.
+        verify(aiChatClient, never()).generateStream(any(AiChatStreamCommand.class));
     }
 
     @Test

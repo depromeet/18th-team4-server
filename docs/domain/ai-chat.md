@@ -97,15 +97,28 @@
    없다 — DB 장애면 채팅 요청 자체가 실패한다.
 6. 소유권·잠금 확인 — `LOCKED` 면 400(이미 감상문 확정), 활성 summary_job 이
    있으면 400(생성 중). 이 시점까지 USER 메시지는 저장되지 않는다.
-7. 입력 moderation (`InputModerationClient`, SSE 시작 전 동기 호출) —
-   차단이면 `REJECTED` 로 저장 후 400, moderation API 자체가 죽어 있으면
-   저장 없이 503 (판정 불가 시 통과가 아니라 차단을 선택하는 정책).
+7. **입력 검사 두 단계** — 둘 다 SSE 시작 전 동기 호출이고, 차단이면 `REJECTED` 로 저장 후
+   400(`GUARDRAIL_BLOCKED_INPUT`)이라는 처리가 **같다**.
+   - 먼저 **로컬 입력 검사**(`AiChatClient.isBlockedByLocalInputCheck` → `ChatInputGuardrail`):
+     조립된 프롬프트 전체를 정규식 패턴·금칙어와 대조한다. 계산만 하므로 공짜다.
+     그래서 외부 moderation 보다 앞에 둔다 — 어차피 거절될 요청이 공급자 RPM 자원을 쓰지 않게 한다.
+     (예전에는 이 검사가 생성 스트림 안에서 거부 문구를 답변처럼 흘려보냈다. 그 응답에는 종료 사유도
+     사용량도 없어 정상 완료 판정을 통과하지 못했고, 사용자는 거부 문구 뒤에 생성 장애 안내까지 받았다.)
+   - 그다음 **입력 moderation**(`InputModerationClient`) — 차단이면 위와 같은 처리,
+     moderation API 자체가 죽어 있으면 저장 없이 503 (판정 불가 시 통과가 아니라 차단을 선택하는 정책).
 8. **OpenAI 전역 게이트 확보**(`acquireRateLimitPermit`) → USER 메시지 `COMPLETED` 저장.
    게이트 거절이면 429 — SSE 시작 전이라 HTTP JSON 으로 나가고,
    USER 저장 전이라 응답 없는 USER 메시지가 대화 이력에 남지 않는다.
 
-예약 이후 단계에서 거절·실패하면(잠금·moderation 차단/불능·게이트 거절·저장 실패)
-예약을 전액 환불하고, 어느 단계에서 거절되든 요청 행을 실패로 끝낸다.
+요청 자리를 잡은 뒤 어느 단계에서 거절·실패하든 **요청 종료 트랜잭션 한 번**으로 끝낸다 —
+요청 행을 잠그고, 미종료를 확인하고, 잠근 행에 적힌 예약량만큼 되돌리고, 상태를 `FAILED` 로
+바꾸는 것을 함께 커밋한다. 예약 전 거절(폭주 가드·예산 거절)은 행에 예약 정보가 없어 되돌릴 양이
+0 이라 같은 경로로 끝난다. 환불과 상태 전이를 따로 부르면 되돌리지 못한 예약이나 이중 환급이 생긴다.
+
+예약 전이 자체도 요청 행을 잠그고 `ACCEPTED` 임을 확인한 뒤에 한다. 선행 처리가 길게 지연된 사이
+만료 복구가 이미 끝낸 요청이면 예산을 건드리지 않고 409(`TURN_REQUEST_ALREADY_FINISHED`)로
+거절한다 — 늦게 재개된 실행이 그 종료를 `RESERVED` 로 덮어쓰지 못하게 한다.
+잠금 순서는 요청 행 → 예산 행으로 예약·종료가 같아 서로 교착하지 않는다.
 
 **생성** — `AiChatClient.generateStream()` 이 돌려주는 Flux 를 **서버가 구독한다**.
 청크 콜백이 하는 일은 셋뿐이다: 누적, 종료 사유·사용량 수집(`AiChatGenerationAccumulator`),
@@ -113,8 +126,9 @@
 호출은 `ChatClient` 가 아니라 `OpenAiChatModel` 을 직접 쓴다 — `ChatClient` 의 스트림 경로에
 자동으로 끼는 내부 advisor 가 청크 배달 뒤에 `publishOn(boundedElastic)` 을 두는데, 전달·저장·정산을
 가상 스레드로 옮긴 뒤에는 청크를 공유 풀로 한 번 더 옮길 업무상 이유가 없기 때문이다.
-`ChatClient` 가 하던 프롬프트 조립과 로컬 입력 검사는 각각 `AiChatClientImpl` 과
-`ChatInputGuardrail` 이 같은 판정으로 이어받았다.
+`ChatClient` 가 하던 프롬프트 조립은 `AiChatClientImpl` 이, 로컬 입력 검사(정규식 패턴·금칙어)는
+`ChatInputGuardrail` 이 같은 판정으로 이어받았다. 다만 **차단됐을 때의 처리는 선행 단계로 옮겼다**
+— 아래 선행 처리 7번 참조. 생성 스트림은 순수한 모델 호출이다.
 
 > **출력 쪽 검사는 지금 채팅 스트림에 걸려 있지 않다.** 출력 moderation advisor
 > (`ModerationOutputAdvisor`)는 조각을 전부 모은 뒤에 검사하는 구조라 조각 단위 전달과
