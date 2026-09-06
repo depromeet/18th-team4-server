@@ -118,7 +118,7 @@
 
 ## Redis
 
-컨테이너 readum-redis (Redis 7.4), 127.0.0.1:6379 바인딩 + 비밀번호, `maxmemory 64mb`·`noeviction`. 앱이 사용 중: 사용자 토큰 예산 + OpenAI 전역 게이트(분당 예산 + quota 쿨다운). 구 circuit breaker 는 quota 쿨다운으로 게이트에 통합·Redis 공유되어 #88 의 상태 공유 항목이 해소됐다.
+컨테이너 readum-redis (Redis 7.4), 127.0.0.1:6379 바인딩 + 비밀번호, `maxmemory 64mb`·`noeviction`. 앱이 사용 중: 사용자 메시지 폭주 가드(10초/5건) + OpenAI 전역 게이트(분당 예산 + quota 쿨다운). (사용자 토큰 예산은 2026-09 에 MySQL 원장 `user_token_budget` 으로 이전.) 구 circuit breaker 는 quota 쿨다운으로 게이트에 통합·Redis 공유되어 #88 의 상태 공유 항목이 해소됐다.
 
 ## 도메인 / HTTPS
 

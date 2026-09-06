@@ -1,9 +1,9 @@
 package com.readum.presentation.controller.aiChat;
 
+import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionDisplayStatus;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
-import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.dto.AiChatSessionResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
@@ -23,10 +23,14 @@ import com.readum.domain.aiChat.service.BookChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.SummaryEditService;
+import com.readum.domain.aiChat.stream.ChatDeliveryChannel;
 import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.domain.exception.BadRequestException;
 import com.readum.domain.exception.ConflictException;
 import com.readum.domain.exception.NotFoundException;
+import com.readum.domain.exception.RateLimitInfo;
+import com.readum.domain.exception.ServiceUnavailableException;
+import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.exception.UnprocessableEntityException;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.presentation.common.GlobalExceptionHandler;
@@ -39,30 +43,42 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -71,6 +87,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AiChatControllerTest {
 
     private static final Long USER_ID = 1L;
+    private static final String REQUEST_ID = "0f2f1c9a-9f4d-4b2b-8f0d-6e0b0e7d5a11";
 
     @Mock
     private AiChatSessionCreateService aiChatSessionCreateService;
@@ -99,14 +116,64 @@ class AiChatControllerTest {
     @Mock
     private BookChatSessionSearchService bookChatSessionSearchService;
 
+    /**
+     * 전달 기한을 1초로 줄인다 — 이 슬라이스는 전달 스레드를 그 자리에서 돌리므로(directExecutor)
+     * 채널에 종료 이벤트를 넣지 않은 요청이 있으면 그 기한만큼 기다린 뒤 끝난다.
+     */
+    private static final AiChatProperties TEST_PROPERTIES = new AiChatProperties(
+            new AiChatProperties.Context(8000, 2000, 4000, 800),
+            new AiChatProperties.MessageRule(1000),
+            new AiChatProperties.RateLimit(10, 5),
+            new AiChatProperties.TokenBudget(120000, 512),
+            new AiChatProperties.Streaming(120, 30, 1, 60, 60, 60, 256, 300)
+    );
+
     private MockMvc mockMvc;
+    private AiChatController controller;
+
+    /**
+     * 전달을 제출한 스레드에서 그대로 실행하는 실행기 — 컨트롤러가 emitter 를 돌려주기 전에 전달이 끝나
+     * MockMvc 의 async dispatch 시점이 결정적이 된다. 실제 배선은 연결마다 가상 스레드를 쓴다.
+     */
+    private static ExecutorService directExecutor() {
+        return new AbstractExecutorService() {
+            @Override
+            public void execute(Runnable command) {
+                command.run();
+            }
+
+            @Override
+            public void shutdown() {
+            }
+
+            @Override
+            public List<Runnable> shutdownNow() {
+                return List.of();
+            }
+
+            @Override
+            public boolean isShutdown() {
+                return false;
+            }
+
+            @Override
+            public boolean isTerminated() {
+                return false;
+            }
+
+            @Override
+            public boolean awaitTermination(long timeout, TimeUnit unit) {
+                return true;
+            }
+        };
+    }
     private final ObjectMapper objectMapper = JsonMapper.builder()
             .findAndAddModules()
             .build();
 
     @BeforeEach
     void setUp() {
-        AiChatController controller = new AiChatController(
+        controller = new AiChatController(
                 aiChatSessionCreateService,
                 aiChatSessionSearchService,
                 aiChatMessageSendService,
@@ -116,8 +183,8 @@ class AiChatControllerTest {
                 summarySearchService,
                 summaryDraftSearchService,
                 bookChatSessionSearchService,
-                new MessageStreamSseSerializer(objectMapper),
-                Runnable::run // 테스트에서는 같은 스레드에서 즉시 방출
+                new MessageStreamSseDelivery(
+                        new MessageStreamSseSerializer(objectMapper), directExecutor(), TEST_PROPERTIES)
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -309,11 +376,13 @@ class AiChatControllerTest {
 
     // ── 메시지 전송 ──────────────────────────────────────────────────────
 
+    // 요청 식별자는 채우고 본문만 빠뜨린다. 둘 다 빠뜨리면 위반이 두 건이라 응답 메시지에 어느 것이
+    // 실릴지 정해지지 않는다 (GlobalExceptionHandler 는 필드 오류 중 첫 건만 쓰고, 그 순서는 보장되지 않는다).
     @Test
     void 메시지_전송_본문_누락시_400() throws Exception {
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+                        .content("{\"requestId\":\"" + REQUEST_ID + "\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message", containsString("메시지 본문은 비어 있을 수 없습니다.")));
     }
@@ -322,7 +391,7 @@ class AiChatControllerTest {
     void 메시지_전송_빈_본문이면_400() throws Exception {
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest(""))))
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, ""))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -330,7 +399,7 @@ class AiChatControllerTest {
     void 메시지_전송_whitespace_본문이면_400_변환된다() throws Exception {
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("   "))))
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, "   "))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -339,20 +408,38 @@ class AiChatControllerTest {
         String tooLong = "가".repeat(4001);
         mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest(tooLong))))
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, tooLong))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message", containsString("4000자")));
     }
 
-    // 사전 단계(prepare) 예외는 SSE 시작 전이므로 GlobalExceptionHandler 의 4xx JSON 으로 나간다.
+    // 선행 처리 거절은 요청 스레드에서 동기 예외로 끝나므로, SSE 가 시작되지 않고
+    // GlobalExceptionHandler 의 4xx/5xx JSON 이 그대로 동기 응답된다.
+    // PreparedChatTurn 은 도메인 패키지 밖에서 만들 수 없어(예약 결과 타입이 package-private),
+    // 통과 경로에서는 prepare 의 기본 반환값(null)을 그대로 생성 단계 스텁으로 넘긴다.
+
+    private ResultActions send(String content) throws Exception {
+        return mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, content))));
+    }
+
+    private MvcResult sendAndStartAsync(String content) throws Exception {
+        return mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .content(objectMapper.writeValueAsString(new SendMessageRequest(REQUEST_ID, content))))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+    }
+
     @Test
-    void 메시지_전송_세션_없으면_404() throws Exception {
+    void 메시지_전송_세션_없으면_SSE_를_시작하지_않고_404_JSON_을_응답한다() throws Exception {
         given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
                 .willThrow(new NotFoundException(AiChatErrorCode.SESSION_NOT_FOUND));
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
+        send("질문")
+                .andExpect(request().asyncNotStarted())
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.message").value("세션을 찾을 수 없습니다."));
     }
@@ -362,35 +449,61 @@ class AiChatControllerTest {
         given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
                 .willThrow(new BadRequestException(AiChatErrorCode.SESSION_LOCKED));
 
-        mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
+        send("질문")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.message").value("감상문 생성 중에는 메시지를 보낼 수 없습니다."));
     }
 
     @Test
+    void 메시지_전송_사용자_호출_한도를_넘으면_429_와_RetryAfter_헤더() throws Exception {
+        RateLimitInfo info = new RateLimitInfo(
+                Duration.ofSeconds(10), 5L, null, 0L, null, null, null);
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
+                .willThrow(new TooManyRequestsException(AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED, info));
+
+        send("질문")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists(HttpHeaders.RETRY_AFTER));
+    }
+
+    @Test
+    void 메시지_전송_입력_검사_불능이면_503() throws Exception {
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
+                .willThrow(new ServiceUnavailableException(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE));
+
+        send("질문")
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    void 선행_처리가_거절하면_생성_단계는_시작되지_않는다() throws Exception {
+        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class)))
+                .willThrow(new BadRequestException(AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT));
+
+        send("차단 대상").andExpect(status().isBadRequest());
+
+        verify(aiChatMessageSendService, never()).generateAndDeliver(any(), any());
+    }
+
+    /** 생성 구독이 하는 일을 흉내낸다 — 채널에 조각을 넣고, 저장·정산이 끝난 것처럼 종료 결과를 싣는다. */
+    private void givenGeneration(Consumer<ChatDeliveryChannel> generation) {
+        willAnswer(invocation -> {
+            generation.accept(invocation.getArgument(1, ChatDeliveryChannel.class));
+            return null;
+        }).given(aiChatMessageSendService).generateAndDeliver(any(), any());
+    }
+
+    @Test
     void 메시지_전송_정상_스트림이면_token_과_done_이벤트가_방출된다() throws Exception {
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
-        AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
-                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
-        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
-        given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
-                new MessageStreamEvent.Token("alpha"),
-                new MessageStreamEvent.Token(" beta"),
-                new MessageStreamEvent.Done(
-                        new MessageStreamEvent.TokenCount(312, 58, 370),
-                        createdAt)
-        ));
+        givenGeneration(channel -> {
+            channel.offerDelta("alpha");
+            channel.offerDelta(" beta");
+            channel.completeWithSuccess(
+                    "alpha beta", new MessageStreamEvent.TokenCount(312, 58, 370), createdAt);
+        });
 
-        MvcResult initial = mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .accept(MediaType.TEXT_EVENT_STREAM)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
-                .andExpect(request().asyncStarted())
-                .andReturn();
-
-        String body = mockMvc.perform(asyncDispatch(initial))
+        String body = mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -405,56 +518,31 @@ class AiChatControllerTest {
     }
 
     @Test
-    void SSE_전송_여부와_무관하게_생성과_저장_파이프라인이_실행된다() throws Exception {
-        // 스펙 §5-1: 클라이언트가 SSE 수신 도중 이탈하더라도 생성·저장 파이프라인은 완주해야 한다.
-        // 동기 경로에서는 generateAndPersist 가 SseEmitter 쓰기와 무관하게 먼저 완료되므로
-        // prepare → generateAndPersist 호출 순서 자체를 단언한다.
-        LocalDateTime createdAt = LocalDateTime.of(2026, 5, 2, 14, 33, 21);
-        AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
-                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
-        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
-        given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
-                new MessageStreamEvent.Token("응답"),
-                new MessageStreamEvent.Done(
-                        new MessageStreamEvent.TokenCount(10, 5, 15),
-                        createdAt)
-        ));
+    void 전달_통로를_먼저_열고_생성을_시작한_뒤_전달을_띄운다() {
+        // 생성이 첫 조각을 넣을 곳(채널)이 있어야 하므로 순서가 뒤바뀌면 안 된다.
+        // 전달을 먼저 띄우면 생성이 시작될 때까지 빈 채널에서 기다리기만 한다.
+        AtomicBoolean channelOpenedBeforeGeneration = new AtomicBoolean(false);
+        givenGeneration(channel -> {
+            channelOpenedBeforeGeneration.set(channel != null && !channel.isClosed());
+            channel.completeWithFailure(MessageStreamEvent.Error.of(
+                    AiChatErrorCode.AI_STREAM_INTERRUPTED.name(), "끝"));
+        });
 
-        MvcResult initial = mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .accept(MediaType.TEXT_EVENT_STREAM)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
-                .andExpect(request().asyncStarted())
-                .andReturn();
+        controller.sendMessage(USER_ID, 7L, new SendMessageRequest(REQUEST_ID, "질문"));
 
-        mockMvc.perform(asyncDispatch(initial))
-                .andExpect(status().isOk());
-
-        // SSE 전달 성공 여부와 무관하게 생성·저장 파이프라인이 실제로 호출됐음을 단언
-        verify(aiChatMessageSendService).generateAndPersist(preparedTurn);
+        org.assertj.core.api.Assertions.assertThat(channelOpenedBeforeGeneration).isTrue();
     }
 
     @Test
     void 메시지_전송_스트림_에러_이벤트도_정상_방출된다() throws Exception {
-        AiChatMessageSendService.PreparedChatTurn preparedTurn = new AiChatMessageSendService.PreparedChatTurn(
-                USER_ID, new AiChatStreamCommand(7L, List.of(), null, null), null, 0);
-        given(aiChatMessageSendService.prepare(any(SendMessageCommand.class))).willReturn(preparedTurn);
-        given(aiChatMessageSendService.generateAndPersist(preparedTurn)).willReturn(List.of(
-                new MessageStreamEvent.Token("부분"),
-                MessageStreamEvent.Error.of(
-                        AiChatErrorCode.AI_STREAM_INTERRUPTED.name(),
-                        AiChatErrorCode.AI_STREAM_INTERRUPTED.getMessage()
-                )
-        ));
+        givenGeneration(channel -> {
+            channel.offerDelta("부분");
+            channel.completeWithFailure(MessageStreamEvent.Error.of(
+                    AiChatErrorCode.AI_STREAM_INTERRUPTED.name(),
+                    AiChatErrorCode.AI_STREAM_INTERRUPTED.getMessage()));
+        });
 
-        MvcResult initial = mockMvc.perform(post("/api/v1/ai-chat/sessions/7/messages")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .accept(MediaType.TEXT_EVENT_STREAM)
-                        .content(objectMapper.writeValueAsString(new SendMessageRequest("질문"))))
-                .andExpect(request().asyncStarted())
-                .andReturn();
-
-        String body = mockMvc.perform(asyncDispatch(initial))
+        String body = mockMvc.perform(asyncDispatch(sendAndStartAsync("질문")))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

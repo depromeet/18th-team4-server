@@ -4,7 +4,11 @@ spring:
   datasource:
     # sslMode 미지정 = PREFERRED (서버가 지원하면 TLS). RDS 시절의 REQUIRED 는 컨테이너 이관으로 제거 —
     # MySQL 이 127.0.0.1 에만 바인딩되어 루프백 구간 강제 TLS 는 실익이 없다.
-    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+    # socketTimeout=60000 — 소켓 읽기 기한 60초(앱 전체 공통). 기한이 없으면 조용히 끊긴 소켓을
+    # 커널 keepalive 시간(리눅스 기본 약 2시간)까지 기다려, 그 호출을 하던 스레드와 풀 연결이 회수되지 않는다.
+    # 60초로 둔 근거와 다른 대기 제한(Hikari connection-timeout · innodb_lock_wait_timeout)과의 관계는
+    # docs/ops/ai-chat-shutdown-and-recovery.md 의 "DB 연결의 대기 제한" 절에 있다.
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?characterEncoding=UTF-8&serverTimezone=Asia/Seoul&socketTimeout=60000
     username: ${MYSQL_USER}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -13,8 +17,22 @@ spring:
     # 워커는 TX 단계(수 ms)에서만 커넥션을 쥐고 느린 LLM 호출은 TX 밖이라 상시 점유는 이보다 훨씬 낮다.
     # EC2 Docker MySQL 의 max_connections(기본 151)의 약 16% 수준이라 외부 접속·증설 여지를 남긴다.
     # (minimum-idle 미지정 시 Hikari 가 max 와 같게 잡아 고정 크기)
+    # 아래 두 대기 제한은 앱에서 못박는다 — 서버 설정에 기대지 않고 로컬 컨테이너·RDS 어디서든 같은 값이 되게.
+    # 세 제한(연결 획득 · 소켓 읽기 · 행 잠금 대기)의 관계는
+    # docs/ops/ai-chat-shutdown-and-recovery.md 의 "DB 연결의 대기 제한" 절에 있다.
     hikari:
       maximum-pool-size: 24
+      # 풀에서 연결 하나를 빌리기까지 기다리는 최대 시간. 기본 30초 → 3초.
+      # 풀이 3초 넘게 비어 있는 상황은 어느 기능에서든 정상이 아니다(앱 전체에 걸리는 값 —
+      # 감상문 워커·요약 잡도 같은 풀을 쓴다). 채팅 후처리 여유 10초
+      # (= 연결 획득 3 + 잠금 대기 5 + 커밋 몫 2)가 성립하려면 이 값이 그 안에 들어야 한다.
+      connection-timeout: 3000
+      # 한 트랜잭션이 다른 트랜잭션이 쥔 행 잠금을 기다리는 최대 시간(초). MySQL 기본 50초 → 5초.
+      # 넘으면 그 문장이 오류로 끝나 트랜잭션이 롤백된다(JPA 예외 → Spring 롤백).
+      # 채팅에서는 요청 행을 FOR UPDATE 로 잠그는 후처리와 미정산 예약 반환이 같은 행에서 만나는 순간에,
+      # 그 밖의 기능(감상문 잡 적재 등)에서는 각자의 잠금 경합에 걸린다.
+      # URL 의 socketTimeout 60초가 이 값보다 길어, 잠금 대기는 항상 DB 쪽에서 먼저 정상 오류로 끝난다.
+      connection-init-sql: SET SESSION innodb_lock_wait_timeout = 5
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}   # 앱은 호스트에서 systemd 로 돌고 Redis 는 루프백 바인딩

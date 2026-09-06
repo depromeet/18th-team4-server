@@ -8,6 +8,9 @@ spring:
   flyway:
     enabled: false   # 테스트는 H2 + ddl-auto create-drop (MySQL 전용 V1 SQL 은 H2 에 적용 불가)
   datasource:
+    # 운영 프로파일이 URL 에 붙이는 socketTimeout 은 여기 두지 않는다 — H2 는 모르는 설정을 거부한다
+    # (JdbcSQLNonTransientConnectionException: Unsupported connection setting "SOCKETTIMEOUT", h2 2.2.224 로 확인).
+    # 소켓 읽기 기한은 실제 네트워크 연결에만 의미가 있고, 인메모리 H2 에는 기다릴 소켓 자체가 없다.
     url: jdbc:h2:mem:readum;MODE=MySQL;DB_CLOSE_DELAY=-1
     username: sa
     password:
@@ -42,9 +45,30 @@ ai-chat:
     count-period-seconds: 10
     max-message-count: 5
   token-budget:
-    window-hours: 4
-    tokens-per-window: 20000
+    daily-tokens: 120000
     estimated-output-tokens: 512
+  streaming:
+    # 기한 셋은 운영 값과 같게 둔다 — 기동 시 시간 예산 검증(AiChatTimeBudgetValidator)이 여기서도 돈다.
+    generation-total-timeout-seconds: 20
+    generation-idle-timeout-seconds: 10
+    delivery-timeout-seconds: 30
+    shutdown-wait-seconds: 60
+    # 여유 둘만 운영(10 / 10)과 다르다. 테스트 프로파일의 DataSource 는 H2 라 Hikari connection-timeout 을
+    # 걸지 않고 기본 30초를 그대로 쓰는데, 검증 조건 "연결 획득 상한 < 후처리 여유" 를 그 기본값으로 맞춰야 한다.
+    # 선행 여유도 같은 이유로 넉넉히 둔다(테스트에는 실제 moderation HTTP 호출이 없다).
+    # 운영 값이 맞물리는지는 AiChatTimeBudgetValidatorTest 가 운영 조합을 직접 넣어 확인한다.
+    prepare-allowance-seconds: 60
+    post-processing-allowance-seconds: 60
+    delivery-queue-capacity: 256
+    max-in-flight-turns: 300
+  turn-recovery:
+    # 테스트에서는 배경 스캔이 사실상 돌지 않게 한다. 미정산 예약 반환 테스트는 일부러 기한이 지난 행을 커밋해 두는데,
+    # 같은 컨텍스트의 스케줄러가 그 행을 먼저 만료시키면 단언이 시점에 따라 흔들린다.
+    # grace 도 운영(0)과 달리 크게 둔다 — 같은 이유의 두 번째 자물쇠다.
+    # 반환 동작 자체는 테스트가 판정 기준 시각을 직접 넘겨 확인한다.
+    scan-interval-ms: 3600000
+    grace-seconds: 86400
+    max-rows-per-run: 100
 
 aladin:
   ttb-key: test-ttb-key

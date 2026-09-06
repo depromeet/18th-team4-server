@@ -1,10 +1,9 @@
 package com.readum.presentation.controller.aiChat;
 
-import com.readum.domain.aiChat.dto.AiChatCompletion;
+import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.AiChatClient;
-import com.readum.domain.aiChat.out.ChatTokenBudget;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.model.aiChat.entity.AiChatSession;
@@ -35,6 +34,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import reactor.core.publisher.Flux;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -46,11 +47,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -70,8 +73,10 @@ class AiChatStreamGuardrailTest {
 
     private static final String REJECT_MESSAGE = "요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요.";
 
-    // 테스트에서는 생성 단계를 같은 스레드에서 즉시 실행해 저장 완료 시점을 결정적으로 만든다.
-    // (SseEmitter 는 초기화 전 send 를 버퍼링했다가 초기화 시 재생하므로 MockMvc 와 동작이 맞는다.)
+    // 커밋 후 리스너(제목 생성 등)를 같은 스레드에서 실행해 테스트 실행 시점을 결정적으로 만든다.
+    // 메시지 전송 경로 자체는 이 executor 를 쓰지 않는다 — 선행 처리는 요청 스레드에서 동기로 끝나고,
+    // 생성은 서버가 소유한 구독이, 저장·정산은 후처리 VT 가 따로 맡는다. 그래서 저장 결과를 보려면
+    // 응답이 아니라 요청 기록의 상태가 끝날 때까지 기다려야 한다(awaitTurnRequestStatus).
     @TestConfiguration
     static class DirectExecutorConfig {
         @Bean
@@ -105,11 +110,8 @@ class AiChatStreamGuardrailTest {
     @MockitoBean
     private AiChatClient aiChatClient;
 
-    // 실제 Redis 없이 통과하도록 예산 Port 를 mock (moderation E2E 슬라이스라 예산은 항상 허용).
-    @MockitoBean
-    private ChatTokenBudget chatTokenBudget;
-
-    // 전역 게이트도 실제 Redis 없이 항상 허용시킨다 (이 슬라이스는 moderation 검증용).
+    // 토큰 예산은 실제 빈(UserTokenBudgetWriter) + H2 원장으로 동작한다 — 일일 예산이 커서 항상 허용된다.
+    // 전역 게이트는 실제 Redis 없이 항상 허용시킨다 (이 슬라이스는 moderation 검증용).
     @MockitoBean
     private OpenAiRequestGate openAiRequestGate;
 
@@ -120,10 +122,12 @@ class AiChatStreamGuardrailTest {
 
     @BeforeEach
     void setUp() {
-        given(chatTokenBudget.reserve(anyLong(), anyInt()))
-                .willReturn(new ChatTokenBudget.Result.Granted(0L, 100));
         given(openAiRequestGate.tryAcquire(anyString(), anyInt()))
-                .willReturn(new OpenAiRequestGate.Decision.Permitted());
+                .willReturn(new OpenAiRequestGate.Decision.Permitted(
+                        new OpenAiRequestGate.GateReservation("gpt-4o-mini", 29_000_000L, 1000)));
+        // AiChatClient 자체가 mock 이므로 게이트 확보도 여기서 직접 통과시킨다 (계상 없는 permit).
+        given(aiChatClient.acquireRateLimitPermit(any(AiChatStreamCommand.class)))
+                .willReturn(new AiChatClient.RateLimitPermit.Uncounted());
 
         User user = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
         userId = user.getId();
@@ -138,6 +142,42 @@ class AiChatStreamGuardrailTest {
         sessionId = session.getId();
     }
 
+    /** 후처리 VT 가 요청을 끝낼 때까지 기다린다 — 저장·정산은 응답과 별개로 진행되기 때문이다. */
+    private String awaitTurnRequestStatus(String requestId) throws InterruptedException {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            String status = jdbcTemplate.queryForObject(
+                    "SELECT status FROM ai_chat_turn_request WHERE user_id = ? AND request_id = ?",
+                    String.class, userId, requestId);
+            if (status != null && !"ACCEPTED".equals(status) && !"RESERVED".equals(status)) {
+                return status;
+            }
+            Thread.sleep(50);
+        }
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_chat_turn_request WHERE user_id = ? AND request_id = ?",
+                String.class, userId, requestId);
+    }
+
+    private String turnRequestStatusOf(String requestId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_chat_turn_request WHERE user_id = ? AND request_id = ?",
+                String.class, userId, requestId);
+    }
+
+    private String failureCodeOf(String requestId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT failure_code FROM ai_chat_turn_request WHERE user_id = ? AND request_id = ?",
+                String.class, userId, requestId);
+    }
+
+    /** 오늘 예산 원장의 사용량 — 예약이 되돌아왔으면 0 이다(행 자체가 없을 수도 있다). */
+    private long usedTokensOf() {
+        Long usedTokens = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(used_tokens), 0) FROM user_token_budget WHERE user_id = ?",
+                Long.class, userId);
+        return usedTokens == null ? 0 : usedTokens;
+    }
+
     private long countByStatus(String status) {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM ai_chat_message WHERE session_id = ? AND status = ?",
@@ -145,16 +185,43 @@ class AiChatStreamGuardrailTest {
         return count == null ? 0 : count;
     }
 
+    /**
+     * 요청을 보내고, 비동기로 시작됐으면 async dispatch 까지 태워 최종 응답을 돌려준다.
+     * 선행 처리 거절(모더레이션 차단·불능 등)은 SSE 시작 전 동기 예외라 그대로 동기 응답이고,
+     * 통과 경로만 SSE 로 비동기 시작돼 async dispatch 를 태워야 본문이 나온다.
+     */
     private org.springframework.test.web.servlet.ResultActions send(String content) throws Exception {
+        return send(content, UUID.randomUUID().toString());
+    }
+
+    private org.springframework.test.web.servlet.ResultActions send(String content, String requestId)
+            throws Exception {
         // Accept 헤더를 지정하지 않는다(= accept all). 통과 시 produces=text/event-stream 매칭이 되고,
         // 거부/장애 시 JSON 에러 본문도 content negotiation 으로 정상 반환된다.
         // (Accept: text/event-stream 만 보내면 JSON 에러 본문이 협상에 실패해 ServletException 으로 샌다.)
-        SendMessageRequest body = new SendMessageRequest(content);
-        return mockMvc.perform(post("/api/v1/ai-chat/sessions/" + sessionId + "/messages")
-                .with(authentication(new UsernamePasswordAuthenticationToken(
-                        userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER")))))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(body)));
+        // 실제 서비스·H2 를 쓰는 슬라이스라 요청마다 새 식별자를 발급한다 —
+        // 같은 식별자를 재사용하면 두 번째 호출부터 중복 요청(409)으로 거절된다.
+        SendMessageRequest body = new SendMessageRequest(requestId, content);
+        org.springframework.test.web.servlet.ResultActions actions =
+                mockMvc.perform(post("/api/v1/ai-chat/sessions/" + sessionId + "/messages")
+                        .with(authentication(new UsernamePasswordAuthenticationToken(
+                                userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER")))))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)));
+        MvcResult started = actions.andReturn();
+        if (started.getRequest().isAsyncStarted()) {
+            return mockMvc.perform(asyncDispatch(started));
+        }
+        return actions;
+    }
+
+    /** 실제 스트리밍 응답과 같은 모양: 본문 조각 1건 + 실측 사용량이 실린 마지막 조각. */
+    private void givenGeneratedStream(String content) {
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(Flux.just(
+                        AiChatStreamChunk.ofDelta(content),
+                        AiChatStreamChunk.ofFinishReason("STOP"),
+                        AiChatStreamChunk.ofUsage(10, 5, 15)));
     }
 
     @Test
@@ -194,16 +261,39 @@ class AiChatStreamGuardrailTest {
     }
 
     @Test
-    void 통과하면_async_스트림이_시작되고_USER_메시지가_COMPLETED_로_저장된다() throws Exception {
+    void 통과하면_스트림이_완주하고_답변이_저장되며_요청이_성공으로_끝난다() throws Exception {
         given(inputModerationClient.check(any(), any())).willReturn(InputModerationResult.passed());
-        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
-                .willReturn(new AiChatCompletion("이 책은", 10, 5, 15, null));
+        givenGeneratedStream("이 책은");
+        String requestId = UUID.randomUUID().toString();
 
-        send("이 책의 줄거리를 요약해줘")
-                .andExpect(request().asyncStarted())
+        send("이 책의 줄거리를 요약해줘", requestId)
                 .andExpect(status().isOk());
 
-        assertThat(countByStatus("COMPLETED")).isGreaterThanOrEqualTo(1L);
+        assertThat(awaitTurnRequestStatus(requestId)).isEqualTo("SUCCEEDED");
+        // USER 1건 + ASSISTANT 1건
+        assertThat(countByStatus("COMPLETED")).isEqualTo(2L);
+    }
+
+    @Test
+    void 로컬_입력_검사에_걸리면_SSE_를_시작하지_않고_400_으로_거절하며_예약을_되돌린다() throws Exception {
+        // 로컬 입력 검사는 선행 단계에서 판정하고, 차단은 입력 moderation 차단과 같은 모양으로 거절한다.
+        given(inputModerationClient.check(any(), any())).willReturn(InputModerationResult.passed());
+        given(aiChatClient.isBlockedByLocalInputCheck(any(AiChatStreamCommand.class))).willReturn(true);
+        String requestId = UUID.randomUUID().toString();
+
+        send("로컬 검사에 걸리는 질문", requestId)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message").value(REJECT_MESSAGE));
+
+        // 요청 기록은 실패로 끝나고 예약은 되돌아온다 — 청구가 남지 않는다.
+        assertThat(turnRequestStatusOf(requestId)).isEqualTo("FAILED");
+        assertThat(failureCodeOf(requestId)).isEqualTo("GUARDRAIL_BLOCKED_INPUT");
+        assertThat(usedTokensOf()).isZero();
+        // 차단된 입력은 감사 추적용 REJECTED 로만 남고 대화 이력에는 들어가지 않는다.
+        assertThat(countByStatus("REJECTED")).isEqualTo(1L);
+        assertThat(countByStatus("COMPLETED")).isZero();
+        // 생성은 시작조차 하지 않는다.
+        verify(aiChatClient, never()).generateStream(any(AiChatStreamCommand.class));
     }
 
     @Test
@@ -212,12 +302,10 @@ class AiChatStreamGuardrailTest {
                 .willReturn(InputModerationResult.blocked(java.util.List.of("self-harm")));
         given(inputModerationClient.check(eq("정상 질문"), any()))
                 .willReturn(InputModerationResult.passed());
-        given(aiChatClient.generate(any(AiChatStreamCommand.class)))
-                .willReturn(new AiChatCompletion("정상 응답", 10, 5, 15, null));
+        givenGeneratedStream("정상 응답");
 
         send("차단 질문").andExpect(status().isBadRequest());
         send("정상 질문")
-                .andExpect(request().asyncStarted())
                 .andExpect(status().isOk());
 
         assertThat(countByStatus("REJECTED")).isEqualTo(1L);

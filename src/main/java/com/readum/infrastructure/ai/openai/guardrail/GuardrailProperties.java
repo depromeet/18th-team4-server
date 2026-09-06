@@ -53,8 +53,8 @@ public record GuardrailProperties(
 
         public Input {
             // 부분 바인딩 시(YAML 에 input 블록은 있지만 일부 필드가 누락된 경우) defaults 로 보완.
-            // injectionPatterns 가 비어 있으면 PromptInjectionPatternAdvisor 가 침묵 미등록되므로
-            // 반드시 기본 패턴 셋으로 보강해야 한다.
+            // injectionPatterns 가 비어 있으면 채팅의 ChatInputGuardrail 이 정규식 검사를 건너뛰고
+            // 감상문 경로의 PromptInjectionPatternAdvisor 도 침묵 미등록되므로, 반드시 기본 패턴 셋으로 보강해야 한다.
             if (maxCharacters <= 0) maxCharacters = DEFAULT_MAX_CHARACTERS;
             if (maxTokens <= 0) maxTokens = DEFAULT_MAX_TOKENS;
             if (sensitiveWords == null) sensitiveWords = DEFAULT_SENSITIVE_WORDS;

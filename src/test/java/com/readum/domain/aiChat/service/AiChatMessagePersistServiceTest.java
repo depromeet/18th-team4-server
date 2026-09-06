@@ -193,7 +193,7 @@ class AiChatMessagePersistServiceTest {
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
         given(aiChatMessageRepository.findFirstUserMessage(sessionId)).willReturn(Optional.of(firstUserMessage));
 
-        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150);
 
         persistService.saveAssistantSuccess(sessionId, "첫 응답", meta);
 
@@ -220,7 +220,7 @@ class AiChatMessagePersistServiceTest {
         given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(laterSession));
         given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
 
-        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150);
 
         persistService.saveAssistantSuccess(sessionId, "후속 응답", meta);
 
@@ -239,7 +239,7 @@ class AiChatMessagePersistServiceTest {
             return AiChatMessageFixture.persistedCopyOf(99L, incoming);
         });
 
-        AiChatCompletion meta = new AiChatCompletion(null, 312, 58, 370, null);
+        AiChatCompletion meta = new AiChatCompletion(null, 312, 58, 370);
         AiChatMessage saved = persistService.saveAssistantSuccess(sessionId, "응답 본문", meta);
 
         ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
@@ -253,28 +253,6 @@ class AiChatMessagePersistServiceTest {
         assertThat(saved.getId()).isEqualTo(99L);
         // 세션 누적치는 outputTokens(58) 만 합산. totalTokens(370) 는 입력 프롬프트까지 포함해 중복 집계 사유.
         assertThat(session.getAccumulatedTokens()).isEqualTo(58);
-    }
-
-    @Test
-    void saveAssistantFailed_은_FAILED_저장만_수행하고_partial_이_null_이면_빈_문자열로_저장() {
-        Long sessionId = 7L;
-        AiChatSession session = AiChatSessionFixture.persistedActiveSession(
-                sessionId, 100L, 1, 0, null
-        );
-        given(aiChatSessionRepository.findById(sessionId)).willReturn(Optional.of(session));
-        given(aiChatMessageRepository.save(any(AiChatMessage.class))).willAnswer(invocation -> invocation.getArgument(0));
-
-        // 입력 10, 출력 4 만 받고 끊긴 케이스. 세션 누적은 outputTokens(4) 만 반영되어야 한다.
-        AiChatCompletion meta = new AiChatCompletion(null, 10, 4, 14, null);
-        persistService.saveAssistantFailed(sessionId, null, meta);
-
-        ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
-        verify(aiChatMessageRepository).save(captor.capture());
-        AiChatMessage inserted = captor.getValue();
-        assertThat(inserted.getRole()).isEqualTo(AiChatMessage.Role.ASSISTANT);
-        assertThat(inserted.getStatus()).isEqualTo(AiChatMessage.Status.FAILED);
-        assertThat(inserted.getContent()).isEqualTo("");
-        assertThat(session.getAccumulatedTokens()).isEqualTo(4);
     }
 
     @Test

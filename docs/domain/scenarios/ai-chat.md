@@ -60,9 +60,9 @@ flowchart TD
     A["POST /api/v1/ai-chat/sessions/{sessionId}/messages"] --> B{"AiChatRateLimitInterceptor — userId 키, 분당 20 · 일 200 (dev, infrastructure)"}
     B -->|한도 초과| C["429 + 에러 JSON — SSE 시작 전"]
     B -->|통과| D["AiChatMessageSendService.execute"]
-    D --> E{"본문 검증 — 공백 정규화 후 빈 값 또는 4,000자 초과"}
+    D --> E{"본문 검증 — 공백 정규화 후 빈 값 또는 1,000자 초과"}
     E -->|위반| F["400 MESSAGE_CONTENT_BLANK / MESSAGE_CONTENT_TOO_LONG"]
-    E -->|통과| G{"DB 카운트 한도 — 10초 내 COMPLETED USER 5건 / 1시간 내 REJECTED USER 20건"}
+    E -->|통과| G{"Redis ZSET 폭주 가드 — 10초 내 전송 시도 5건 (Lua 로 검사·기록 원자 수행)"}
     G -->|초과| H["429 USER_RATE_LIMIT_EXCEEDED + Retry-After 헤더"]
     G -->|통과| I["AiChatMessagePersistService.loadHistory — USER 메시지는 아직 저장하지 않음"]
     I --> J{"세션 소유 확인"}
@@ -76,7 +76,7 @@ flowchart TD
     Q -->|BLOCKED| R["USER 메시지 REJECTED 저장 → 400 GUARDRAIL_BLOCKED_INPUT"]
     Q -->|UNAVAILABLE| S["저장 없이 503 GUARDRAIL_MODERATION_UNAVAILABLE — 판정 불가 시 차단"]
     Q -->|PASSED| T["USER 메시지 COMPLETED 저장 + 세션 턴 카운트 증가"]
-    T --> U["AiChatClient.stream — 출력 advisor 체인: PromptInjectionPatternAdvisor → SafeGuardAdvisor → ModerationOutputAdvisor (infrastructure)"]
+    T --> U["AiChatClient.generateStream — OpenAiChatModel 직접 호출, 서버 소유 구독 (infrastructure)"]
     U --> V["token 이벤트 스트리밍 — delta 를 즉시 전송하며 본문 누적"]
     V --> W{"스트림 종료 방식"}
     W -->|"정상 종료 (usage 청크 도착)"| X["saveAssistantSuccess — ASSISTANT COMPLETED 저장 + 출력 토큰 누적, 첫 응답이면 제목 생성 이벤트, 커밋 후 컨텍스트 요약 트리거 이벤트(최근 원문 대화>4,000이면 요약 job 적재)"]

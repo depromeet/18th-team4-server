@@ -134,25 +134,4 @@ public class AiChatMessagePersistService {
         });
         return saved;
     }
-
-    @Transactional
-    public void saveAssistantFailed(
-            Long sessionId, String partial, AiChatCompletion meta
-    ) {
-        Integer inputTokens = meta == null ? null : meta.inputTokens();
-        Integer outputTokens = meta == null ? null : meta.outputTokens();
-        Integer totalTokens = meta == null ? null : meta.totalTokens();
-        String partialContent = partial == null ? "" : partial;
-        // 부분 응답 크기: 실측 출력이 있으면 그 값, 없으면 부분 텍스트를 직접 센다.
-        Integer tokenCount = outputTokens != null ? outputTokens : tokenCounter.count(partialContent);
-
-        aiChatMessageRepository.save(AiChatMessage.createAssistantFailed(
-                sessionId, partialContent, inputTokens, outputTokens, totalTokens, tokenCount
-        ));
-        // 성공 경로와 동일하게 입력 토큰은 누적에서 제외하고 outputTokens 만 합산.
-        if (outputTokens != null && outputTokens > 0) {
-            aiChatSessionRepository.findById(sessionId)
-                    .ifPresent(session -> session.addAssistantTokens(outputTokens));
-        }
-    }
 }

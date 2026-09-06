@@ -12,7 +12,7 @@ Spring AI 의 `spring-ai-starter-model-openai` (BOM 2.0.0-M4, build.gradle:32) �
   `infrastructure/ai/openai/OpenAiHttpClientConfig.java`.
   이 구조 결정의 배경은 [docs/record/0003](../record/0003-aichat-concurrency-moderation-http-client.md) 참조.
   Port `domain/aiChat/out/InputModerationClient` ← Adapter `OpenAiInputModerationClientImpl`.
-- **출력 검사**: `ModerationOutputAdvisor` 가 AI 응답에 대한 검사를 담당한다.
+- **출력 검사**: `ModerationOutputAdvisor` 가 감상문 생성 경로의 응답 검사를 담당한다. 채팅 스트림에는 적용하지 않는다.
 
 ## 알라딘 도서 API
 

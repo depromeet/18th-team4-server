@@ -4,7 +4,6 @@ import com.readum.domain.aiChat.dto.AiChatSessionCreateResult;
 import com.readum.domain.aiChat.dto.AiChatSessionListResult;
 import com.readum.domain.aiChat.dto.BookChatSessionsResult;
 import com.readum.domain.aiChat.dto.MessageListResult;
-import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SummaryDraftCommand;
 import com.readum.domain.aiChat.dto.SummaryDraftEligibilityResult;
 import com.readum.domain.aiChat.service.AiChatMessageSearchService;
@@ -15,6 +14,7 @@ import com.readum.domain.aiChat.service.BookChatSessionSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftSearchService;
 import com.readum.domain.aiChat.service.SummaryDraftService;
 import com.readum.domain.aiChat.service.SummaryEditService;
+import com.readum.domain.aiChat.stream.ChatDeliveryChannel;
 import com.readum.domain.summary.dto.SummaryResult;
 import com.readum.domain.summary.service.SummarySearchService;
 import com.readum.presentation.common.GlobalApiResponse;
@@ -51,9 +51,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.concurrent.Executor;
 
 @Slf4j
 @Tag(name = "AI 채팅", description = "AI 와 책 한 권에 대해 대화하는 채팅 세션 및 메시지 관리")
@@ -71,11 +68,7 @@ public class AiChatController {
     private final SummarySearchService summarySearchService;
     private final SummaryDraftSearchService summaryDraftSearchService;
     private final BookChatSessionSearchService bookChatSessionSearchService;
-    private final MessageStreamSseSerializer messageStreamSseSerializer;
-    private final Executor aiChatVirtualThreadExecutor;
-
-    // 생성(최대 read 90초) + 여유. 컨테이너 기본 async 타임아웃이 생성보다 짧으면 도중에 닫히므로 명시한다.
-    private static final long SSE_EMITTER_TIMEOUT_MILLIS = 120_000L;
+    private final MessageStreamSseDelivery messageStreamSseDelivery;
 
     @Operation(
             summary = "AI 채팅 세션 생성",
@@ -141,16 +134,47 @@ public class AiChatController {
         return GlobalApiResponse.ok(BookChatSessionsResponse.from(result));
     }
 
+    /**
+     * 선행 처리는 요청 스레드(가상 스레드)에서 동기로 끝낸다 — 여기서 던진 예외는 SSE 시작 전이라
+     * GlobalExceptionHandler 의 4xx/5xx JSON(429 는 Retry-After·X-RateLimit-* 헤더 포함)으로 나간다.
+     *
+     * <p>그 뒤로는 셋이 각자 돈다. <b>생성</b>은 서버가 소유한 구독이 소비하고, <b>전달</b>은 연결별 VT 가
+     * 채널에서 꺼내 쓰며, <b>저장·정산</b>은 생성이 끝난 뒤 별도 VT 가 맡는다. 컨트롤러는 셋을 이어 주고
+     * emitter 를 돌려줄 뿐 어느 것도 기다리지 않는다.
+     *
+     * <p>클라이언트 이탈은 생성을 취소하지 않는다 — 전달만 끝나고 소비·저장·정산은 끝까지 진행된다.
+     */
     @Operation(
             summary = "메시지 전송 (SSE 응답)",
             description = """
                     사용자 메시지를 즉시 영속화한 뒤 AI 응답을 SSE 로 전달한다.
-                    응답은 완성 후 검증(출력 moderation)을 거쳐 한 번에 내려온다.
+                    응답은 생성되는 대로 조각 단위로 내려온다.
+
+                    **요청 식별자(requestId) 규약 — 클라이언트 필수 구현**:
+                    - 한 번의 메시지 전송마다 클라이언트가 식별자(UUID 권장)를 발급한다.
+                    - 응답이 끊겨 결과를 모를 때 **같은 요청을 다시 보낼 때는 같은 값을 그대로 유지**한다.
+                      서버는 (사용자, requestId) 조합의 유일성을 DB 에서 보장하므로, 재전송해도 답변을 새로 만들거나
+                      토큰을 다시 예약·과금하지 않는다.
+                    - 같은 값이 다시 오면 그 요청이 진행 중이든 이미 끝났든(성공·실패) **409** 로 거절한다.
+                      같은 값에 다른 본문을 실어 보내도 본문을 비교하지 않고 같은 요청으로 보아 409 로 거절한다.
+                    - 실패한 요청을 사용자가 다시 시도할 때는 **새 식별자**를 발급해 보낸다.
+                      서버가 매 재전송마다 식별자를 새로 발급해 주지 않는다.
+                    - 끊긴 요청의 결과는 메시지 이력 조회로 확인한다.
 
                     SSE 이벤트 종류:
-                    - **token**: 응답 텍스트. 완성 응답이 delta 1건으로 내려온다. payload `{"delta": "..."}`
-                    - **done**: 스트림 정상 종료. payload `{"tokenCount": {...}, "createdAt": "..."}`
+                    - **token**: 응답 텍스트 조각. payload `{"delta": "..."}` — 클라이언트는 받은 순서대로 이어붙인다.
+                    - **done**: 조각을 끝까지 보낸 연결의 정상 종료. payload `{"tokenCount": {...}, "createdAt": "..."}`
+                      본문을 싣지 않는다 — 이어붙인 부분 답변이 곧 최종 답변이다.
+                    - **replace**: 전달이 밀려 조각 전송을 포기한 연결의 정상 종료.
+                      payload `{"content": "...", "tokenCount": {...}, "createdAt": "..."}`
+                      **클라이언트는 지금까지 표시한 부분 답변을 이어붙이지 말고 content 로 통째로 교체한다.**
+                      중간 조각을 버렸기 때문에 화면의 부분 답변은 최종 답변과 다르다. 이 이벤트는 답변 저장·정산이
+                      커밋된 뒤에만 나가므로, 여기 실린 본문은 이력 조회 결과와 같다.
                     - **error**: 스트림 비정상 종료. payload `{"code": "...", "message": "...", "rateLimit": {...}?}`
+                      이때는 답변을 저장하지 않고 예약한 토큰도 되돌린다 — 부분 답변은 이력에 남지 않는다.
+
+                    연결이 done/replace/error 없이 끊기면 결과는 메시지 이력 조회로 확인한다.
+                    서버는 끊긴 연결을 다시 잇거나 이미 보낸 조각을 재생해 주지 않는다.
 
                     error 이벤트의 code:
                     - `AI_RATE_LIMIT_BURST`: OpenAI 의 일시적 한도 초과 (RPM/TPM). rateLimit payload 포함, 클라이언트 자동 재시도 가능.
@@ -178,10 +202,28 @@ public class AiChatController {
                     """
     )
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "SSE 스트림 시작 (이후 token/done/error 이벤트 흐름)"),
+            @ApiResponse(responseCode = "200", description = "SSE 스트림 시작 (이후 token/done/replace/error 이벤트 흐름)"),
             @ApiResponse(responseCode = "400", description = "본문 검증 실패 / 감상문 생성 중(SESSION_LOCKED) 또는 완성·종료된(SESSION_ALREADY_SUMMARIZED) 세션"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
+            @ApiResponse(
+                    responseCode = "503",
+                    description = """
+                            - `GUARDRAIL_MODERATION_UNAVAILABLE`: 입력 검사를 할 수 없는 상태.
+                            - `SERVER_SHUTTING_DOWN`: 서버가 종료 절차에 들어가 새 요청을 받지 않는 상태.
+                            - `AI_CHAT_CAPACITY_EXCEEDED`: 이 서버가 동시에 처리할 수 있는 턴 수의 상한에 닿은 상태.
+                              진행 중인 턴이 끝나면 다시 받으므로 잠시 뒤 재시도하면 된다 (Retry-After 5초).
+
+                            셋 다 SSE 가 시작되기 전이라 JSON 으로 응답하고, Retry-After 헤더가 함께 온다."""),
+            @ApiResponse(
+                    responseCode = "409",
+                    description = """
+                            - `DUPLICATE_TURN_REQUEST`: 이미 접수된 requestId. 진행 중·성공·실패 어느 상태든
+                              같은 식별자로는 답변을 새로 만들거나 토큰을 다시 예약·과금하지 않는다.
+                              재전송이라면 그대로 두고 이력 조회로 결과를 확인하고,
+                              사용자가 새 생성을 원한다면 새 식별자로 다시 요청한다.
+                            - `TURN_REQUEST_ALREADY_FINISHED`: 접수는 됐지만 기한이 지나 미정산 예약 반환이 이미 끝낸 요청.
+                              선행 처리가 길게 지연된 뒤 예약 단계에 도착한 경우다. 새 식별자로 다시 요청한다."""),
             @ApiResponse(
                     responseCode = "429",
                     description = """
@@ -219,30 +261,17 @@ public class AiChatController {
             @PathVariable Long sessionId,
             @Valid @RequestBody SendMessageRequest request
     ) {
-        // 사전 단계는 요청 스레드에서 동기 실행 — 예외는 SSE 시작 전 4xx/5xx JSON 으로 나간다.
-        AiChatMessageSendService.PreparedChatTurn prepared =
+        // 선행 처리(진행 목록 등록·중복 판정·관문)는 요청 스레드에서 동기로 끝난다 —
+        // 거절은 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 내보낸다.
+        AiChatMessageSendService.PreparedChatTurn turn =
                 aiChatMessageSendService.prepare(request.toCommand(userId, sessionId));
 
-        SseEmitter emitter = new SseEmitter(SSE_EMITTER_TIMEOUT_MILLIS);
-        aiChatVirtualThreadExecutor.execute(() -> {
-            try {
-                List<MessageStreamEvent> events = aiChatMessageSendService.generateAndPersist(prepared);
-                for (MessageStreamEvent event : events) {
-                    emitter.send(messageStreamSseSerializer.toSseEvent(event));
-                }
-                emitter.complete();
-            } catch (IOException | IllegalStateException sendError) {
-                // 클라이언트 이탈. 응답은 이미 저장·정산됐으므로 전달 실패만 기록한다 (스펙 §5-1).
-                log.info("SSE 전송 실패(클라이언트 이탈 추정) sessionId={} cause={}", sessionId, sendError.toString());
-                emitter.completeWithError(sendError);
-            } catch (RuntimeException unexpectedError) {
-                // generateAndPersist 는 던지지 않는 계약이지만, 계약이 깨져도 클라이언트가
-                // emitter 타임아웃(120초)까지 매달리지 않도록 즉시 종료한다.
-                log.error("AI 채팅 SSE 처리 중 예기치 못한 실패 sessionId={}", sessionId, unexpectedError);
-                emitter.completeWithError(unexpectedError);
-            }
-        });
-        return emitter;
+        // 전달 통로를 먼저 열고(전달 기한의 시작점), 생성 구독을 건 뒤, 전달 VT 를 띄운다.
+        // 생성을 먼저 시작해도 전달이 늦지 않는다 — 그 사이의 델타는 채널이 받아 두고 전달 VT 가 꺼내 간다.
+        // 반대 순서로 두면 전달 VT 가 생성이 시작될 때까지 빈 채널에서 기다리기만 한다.
+        ChatDeliveryChannel deliveryChannel = messageStreamSseDelivery.openChannel();
+        aiChatMessageSendService.generateAndDeliver(turn, deliveryChannel);
+        return messageStreamSseDelivery.start(deliveryChannel, sessionId);
     }
 
     @Operation(
