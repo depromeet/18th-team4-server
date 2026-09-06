@@ -55,7 +55,6 @@ public class AiChatMessageSendService {
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
     private final InputModerationClient inputModerationClient;
-    private final UserTokenBudgetWriter userTokenBudgetWriter;
     private final AiChatTurnRequestWriter aiChatTurnRequestWriter;
     private final AiChatTurnOutcomeWriter aiChatTurnOutcomeWriter;
     private final AiChatInFlightTurnRegistry aiChatInFlightTurnRegistry;
@@ -103,6 +102,12 @@ public class AiChatMessageSendService {
      * <b>첫 부수 효과(요청 자리 삽입)보다 앞서야</b> 예약·외부 호출을 시작해 놓고 추적에서 빠지는 턴이 없다.
      * 종료 절차가 이미 시작됐다면 등록이 503 으로 거절되고, 그 뒤로는 아무 부수 효과도 일어나지 않는다.
      * 선행 처리가 거절로 끝나면 이 호출의 등록도 함께 정리한다 — 중복(409)으로 거절된 재전송도 마찬가지다.
+     *
+     * <p><b>자리를 잡은 뒤의 거절은 종료 트랜잭션 한 번으로 끝낸다</b>({@link AiChatTurnOutcomeWriter#finishWithoutCharge}).
+     * 그 트랜잭션이 요청 행을 잠그고, 미종료인지 확인하고, 잠근 행에 적힌 예약량만큼 되돌리고, 상태 전이를
+     * 함께 커밋한다. 예약 전 거절은 행에 예약 정보가 없어 되돌릴 양이 0 이 되므로, 호출부가 예약 전후를
+     * 나눌 필요가 없다. 환불과 상태 전이를 따로 부르면 둘 중 하나만 반영된 행(되돌리지 못한 예약,
+     * 또는 만료 복구가 다시 되돌리는 이중 환급)이 생긴다.
      */
     public PreparedChatTurn prepare(SendMessageCommand command) {
         Long sessionId = command.sessionId();
@@ -127,22 +132,17 @@ public class AiChatMessageSendService {
 
         Long turnRequestId = claimTurnRequest(userId, sessionId, command.requestId());
 
-        // 예약 전 거절(폭주 가드·예산 거절)과 예약 후 거절(이력 조회·moderation·게이트·USER 저장)을 나눈다.
-        // 바깥 catch 는 두 경우 모두 요청 상태를 실패로 끝내고, 안쪽 catch 는 예약이 있는 경우에만 환불한다.
+        // 자리를 잡은 뒤의 거절은 예약 전(폭주 가드·예산 거절)이든 예약 후(이력 조회·입력 검사·게이트·
+        // USER 저장)든 종료 트랜잭션 한 번으로 끝낸다 — 되돌릴 양은 그 트랜잭션이 잠근 행에서 읽는다.
         try {
             verifyUserMessageRateLimit(userId);
 
             BudgetReservation reservation = reserveTokenBudget(turnRequestId, userId, normalizedContent);
 
-            try {
-                return prepareAfterReservation(
-                        sessionId, userId, normalizedContent, turnRequestId, inFlightTurn, reservation);
-            } catch (RuntimeException rejectionAfterReservation) {
-                refundQuietly(userId, reservation.granted(), sessionId);
-                throw rejectionAfterReservation;
-            }
+            return prepareAfterReservation(
+                    sessionId, userId, normalizedContent, turnRequestId, inFlightTurn, reservation);
         } catch (RuntimeException prepareRejection) {
-            failTurnRequestQuietly(turnRequestId, prepareRejection);
+            finishTurnRequestQuietly(turnRequestId, prepareRejection);
             throw prepareRejection;
         }
     }
@@ -175,14 +175,18 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 선행 단계의 거절로 요청 상태를 끝낸다. 실패는 삼킨다 — 여기서 던지면 원래의 4xx 가 500 으로 둔갑한다.
+     * 선행 단계의 거절로 요청을 청구 없이 끝낸다 — 상태 전이와 예약 반환이 한 트랜잭션으로 커밋된다.
+     * 예약 전 거절이면 잠근 행에 예약 정보가 없어 되돌릴 양이 0 이다.
+     *
+     * <p>실패는 삼킨다 — 여기서 던지면 원래의 4xx 가 500 으로 둔갑한다.
      * 끝내지 못한 행은 미종료로 남아 만료 복구의 대상이 된다.
      */
-    private void failTurnRequestQuietly(Long turnRequestId, RuntimeException prepareRejection) {
+    private void finishTurnRequestQuietly(Long turnRequestId, RuntimeException prepareRejection) {
         try {
-            aiChatTurnRequestWriter.markFailed(turnRequestId, failureCodeOf(prepareRejection));
-        } catch (RuntimeException failRecordError) {
-            log.error("요청 실패 기록 실패 turnRequestId={}", turnRequestId, failRecordError);
+            aiChatTurnOutcomeWriter.finishWithoutCharge(
+                    turnRequestId, AiChatTurnRequest.Status.FAILED, failureCodeOf(prepareRejection));
+        } catch (RuntimeException finishError) {
+            log.error("선행 거절의 요청 종료 실패 turnRequestId={}", turnRequestId, finishError);
         }
     }
 
@@ -212,7 +216,7 @@ public class AiChatMessageSendService {
 
         // 전역 게이트: SSE 시작 전에 확보한다. USER 저장보다 먼저 확인해
         // 거절(429) 시 응답 없는 USER 메시지가 대화 이력에 남지 않게 한다.
-        // 거절 시 예약 환불은 prepare() 의 공통 환불 경로가 담당하고, 게이트 분당 계상은
+        // 거절 시 예약 반환은 prepare() 의 공통 종료 경로가 담당하고, 게이트 분당 계상은
         // tryAcquire 가 거절하면서 스스로 되돌렸으므로 여기서 또 보상하면 이중 차감이다.
         AiChatClient.RateLimitPermit rateLimitPermit = aiChatClient.acquireRateLimitPermit(streamCommand);
 
@@ -539,21 +543,9 @@ public class AiChatMessageSendService {
             aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
         } catch (RuntimeException userMessagePersistError) {
             // 게이트 확보 이후·생성 이전의 실패 — 생성이 일어나지 않아 OpenAI 토큰 소모가 없으므로
-            // 분당 계상을 보상 차감한다. 예약 환불은 prepare() 의 공통 환불 경로가 담당한다.
+            // 분당 계상을 보상 차감한다. 예약 반환은 prepare() 의 공통 종료 경로가 담당한다.
             releaseRateLimitPermitQuietly(rateLimitPermit, sessionId);
             throw userMessagePersistError;
-        }
-    }
-
-    /**
-     * 환불 실패는 삼킨다 — 선행 처리 거절 경로에서 던지면 원래의 4xx 가 500 으로 둔갑하고,
-     * 생성·저장 실패 경로에서 던지면 error 이벤트 전달이 막힌다.
-     */
-    private void refundQuietly(Long userId, UserTokenBudgetWriter.ReserveResult.Granted reservation, Long sessionId) {
-        try {
-            userTokenBudgetWriter.refund(userId, reservation.periodKey(), reservation.reservedTokens());
-        } catch (RuntimeException refundError) {
-            log.error("토큰 예산 환불 실패 userId={} sessionId={}", userId, sessionId, refundError);
         }
     }
 
@@ -638,7 +630,7 @@ public class AiChatMessageSendService {
 
     /**
      * 사용자별 폭주 차단 — 10초 안에 5건 이상은 정상 사용이 아니라고 보고 거절한다.
-     * 비용 방어의 본체는 토큰 예산(userTokenBudgetWriter)이고, 이 가드는 초 단위 폭주만 막는다.
+     * 비용 방어의 본체는 토큰 예산 예약이고, 이 가드는 초 단위 폭주만 막는다.
      * Redis ZSET + Lua 로 검사와 기록을 원자로 수행한다 — 구 DB 카운트 방식은 검사와
      * USER 저장 사이 간격 때문에 동시 요청이 전부 통과했다.
      * 슬롯은 검사 시점에 즉시 소모되고, 뒤 단계(모더레이션 차단·예산 거절 등)에서

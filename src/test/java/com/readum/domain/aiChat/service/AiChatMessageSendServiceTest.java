@@ -158,7 +158,7 @@ class AiChatMessageSendServiceTest {
         return new AiChatMessageSendService(
                 persistService, aiChatClient, properties,
                 userMessageRateLimiter, userBookRepository, bookRepository, inputModerationClient,
-                userTokenBudgetWriter, aiChatTurnRequestWriter, aiChatTurnOutcomeWriter,
+                aiChatTurnRequestWriter, aiChatTurnOutcomeWriter,
                 aiChatInFlightTurnRegistry, aiChatPostProcessingExecutor, tokenCounter
         );
     }
@@ -287,7 +287,7 @@ class AiChatMessageSendServiceTest {
 
         // 새 생성·예약·과금을 시작하지 않는다 — 폭주 가드 슬롯도 소모하지 않는다.
         verifyNoInteractions(userMessageRateLimiter, persistService, inputModerationClient,
-                aiChatClient, userTokenBudgetWriter);
+                aiChatClient, aiChatTurnOutcomeWriter);
         verify(aiChatTurnRequestWriter, never()).reserveWithRecord(anyLong(), anyLong(), anyInt());
     }
 
@@ -299,8 +299,10 @@ class AiChatMessageSendServiceTest {
 
         assertThatThrownBy(() -> executeTurn(command)).isInstanceOf(ConflictException.class);
 
-        // 먼저 받은 요청은 아직 진행 중일 수 있다 — 재전송이 그 요청의 상태를 건드리면 안 된다.
-        verify(aiChatTurnRequestWriter, never()).markFailed(anyLong(), anyString());
+        // 자리를 잡지 못했으므로 끝낼 행이 없다 — 먼저 받은 요청은 아직 진행 중일 수 있고,
+        // 재전송이 그 요청의 상태를 건드리면 안 된다.
+        verify(aiChatTurnOutcomeWriter, never())
+                .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
     }
 
     @Test
@@ -340,21 +342,35 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 예약_전_거절은_요청을_실패로_끝내고_환불하지_않는다() {
+    void 예약_전_거절도_같은_종료_트랜잭션_한_번으로_끝낸다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         given(userMessageRateLimiter.tryConsume(USER_ID))
                 .willReturn(new UserMessageRateLimiter.Result.Denied());
 
         assertThatThrownBy(() -> executeTurn(command)).isInstanceOf(TooManyRequestsException.class);
 
-        verify(aiChatTurnRequestWriter).markFailed(
-                TURN_REQUEST_ID, AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED.name());
-        // 예약 전이라 되돌릴 예약이 없다.
+        // 예약 전이라 잠근 행에 예약 정보가 없다 — 되돌릴 양이 0 이 되므로 호출부가 예약 전후를 나누지 않는다.
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
+                AiChatErrorCode.USER_RATE_LIMIT_EXCEEDED.name());
         verify(userTokenBudgetWriter, never()).refund(anyLong(), anyInt(), anyInt());
     }
 
     @Test
-    void 예약_후_거절은_예약을_환불하고_요청을_실패로_끝낸다() {
+    void 예산_거절도_같은_종료_트랜잭션_한_번으로_끝낸다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        given(aiChatTurnRequestWriter.reserveWithRecord(anyLong(), anyLong(), anyInt()))
+                .willReturn(new UserTokenBudgetWriter.ReserveResult.Denied(Duration.ofMinutes(90)));
+
+        assertThatThrownBy(() -> executeTurn(command)).isInstanceOf(TooManyRequestsException.class);
+
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
+                AiChatErrorCode.USER_TOKEN_BUDGET_EXCEEDED.name());
+    }
+
+    @Test
+    void 예약_후_거절은_예약_반환과_상태_전이를_한_트랜잭션으로_끝낸다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(inputModerationClient.check(anyString(), any()))
@@ -362,18 +378,21 @@ class AiChatMessageSendServiceTest {
 
         assertThatThrownBy(() -> executeTurn(command)).isInstanceOf(BadRequestException.class);
 
-        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
-        verify(aiChatTurnRequestWriter).markFailed(
-                TURN_REQUEST_ID, AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT.name());
+        // 환불과 상태 전이를 따로 부르지 않는다 — 둘이 갈리면 되돌리지 못한 예약이나 이중 환급이 생긴다.
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
+                AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT.name());
+        verify(userTokenBudgetWriter, never()).refund(anyLong(), anyInt(), anyInt());
     }
 
     @Test
-    void 요청_실패_기록이_실패해도_원래_거절_응답을_그대로_내보낸다() {
+    void 요청_종료가_실패해도_원래_거절_응답을_그대로_내보낸다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         given(userMessageRateLimiter.tryConsume(USER_ID))
                 .willReturn(new UserMessageRateLimiter.Result.Denied());
-        willThrow(new DataIntegrityViolationException("boom"))
-                .given(aiChatTurnRequestWriter).markFailed(anyLong(), anyString());
+        given(aiChatTurnOutcomeWriter.finishWithoutCharge(
+                anyLong(), any(AiChatTurnRequest.Status.class), anyString()))
+                .willThrow(new DataIntegrityViolationException("boom"));
 
         // 실패 기록이 안 되면 그 행은 미종료로 남아 만료 복구가 정리한다 — 응답을 500 으로 뒤집지 않는다.
         assertThatThrownBy(() -> executeTurn(command))
@@ -480,7 +499,7 @@ class AiChatMessageSendServiceTest {
         assertThatThrownBy(() -> executeTurn(command))
                 .isInstanceOf(TooManyRequestsException.class);
 
-        // 예약된 것이 없으므로 환불 대상도 없다.
+        // 예약된 것이 없으므로 되돌릴 대상도 없다 — 종료 트랜잭션이 잠근 행에서 0 을 읽는다.
         verify(userTokenBudgetWriter, never()).refund(anyLong(), anyInt(), anyInt());
     }
 
@@ -644,7 +663,7 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 입력_가드레일_차단_시_예약을_전액_환불한다() {
+    void 입력_가드레일_차단_시_청구_없이_요청을_끝내_예약을_되돌린다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "차단 대상");
         givenLoadHistory(7L, List.of(), 100L);
         given(inputModerationClient.check(eq("차단 대상"), any()))
@@ -653,11 +672,13 @@ class AiChatMessageSendServiceTest {
         assertThatThrownBy(() -> executeTurn(command))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
+                AiChatErrorCode.GUARDRAIL_BLOCKED_INPUT.name());
     }
 
     @Test
-    void Moderation_불능_UNAVAILABLE_시_예약을_전액_환불한다() {
+    void Moderation_불능_UNAVAILABLE_시_청구_없이_요청을_끝내_예약을_되돌린다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(inputModerationClient.check(eq("질문"), any()))
@@ -666,7 +687,9 @@ class AiChatMessageSendServiceTest {
         assertThatThrownBy(() -> executeTurn(command))
                 .isInstanceOf(ServiceUnavailableException.class);
 
-        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
+                AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE.name());
     }
 
     @Test
@@ -681,7 +704,9 @@ class AiChatMessageSendServiceTest {
                 .extracting(TooManyRequestsException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.AI_RATE_LIMIT_BURST);
 
-        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
+                AiChatErrorCode.AI_RATE_LIMIT_BURST.name());
         verify(aiChatClient, never()).generateStream(any(AiChatStreamCommand.class));
         // 게이트 거절은 USER 저장 전이어야 한다 — 응답 없는 USER 메시지가 이력에 남지 않는다.
         verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
@@ -700,9 +725,10 @@ class AiChatMessageSendServiceTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("db down");
 
-        // 생성이 일어나지 않았으므로 게이트 계상 보상 + 예약 전액 환불 둘 다 수행된다.
+        // 생성이 일어나지 않았으므로 게이트 계상 보상 + 청구 없는 요청 종료(예약 반환) 둘 다 수행된다.
         verify(aiChatClient).releaseRateLimitPermit(GATE_PERMIT);
-        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED), anyString());
         verify(aiChatClient, never()).generateStream(any(AiChatStreamCommand.class));
     }
 
@@ -717,8 +743,10 @@ class AiChatMessageSendServiceTest {
                 .extracting(NotFoundException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SESSION_NOT_FOUND);
 
-        // 예약 이후의 실패는 명시된 거절 경로(moderation·게이트)가 아니어도 전액 환불된다 — 공통 환불 경로의 계약.
-        verify(userTokenBudgetWriter).refund(USER_ID, GRANTED.periodKey(), GRANTED.reservedTokens());
+        // 예약 이후의 실패는 명시된 거절 경로(moderation·게이트)가 아니어도 청구 없이 끝난다 — 공통 종료 경로의 계약.
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
+                AiChatErrorCode.SESSION_NOT_FOUND.name());
     }
 
     @Test
@@ -1128,7 +1156,8 @@ class AiChatMessageSendServiceTest {
         // 저장·정산은 일어나지 않은 것이다 — 삼켜서 성공으로 기록하지 않는다.
         verifyNoInteractions(aiChatTurnOutcomeWriter);
         // 요청 기록은 미종료(RESERVED)로 남아 예약 복구 대상이 된다 — 이 실행이 실패로 끝내지 않는다.
-        verify(aiChatTurnRequestWriter, never()).markFailed(anyLong(), anyString());
+        verify(aiChatTurnOutcomeWriter, never())
+                .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
         assertThat(aiChatInFlightTurnRegistry.inFlightCount()).isZero();
         assertThat(events.getLast())
                 .asInstanceOf(InstanceOfAssertFactories.type(MessageStreamEvent.Error.class))

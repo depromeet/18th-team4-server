@@ -40,6 +40,9 @@ class AiChatTurnRequestWriterTest {
     private AiChatTurnRequestWriter aiChatTurnRequestWriter;
 
     @Autowired
+    private AiChatTurnOutcomeWriter aiChatTurnOutcomeWriter;
+
+    @Autowired
     private AiChatTurnRequestRepository aiChatTurnRequestRepository;
 
     @Autowired
@@ -165,35 +168,11 @@ class AiChatTurnRequestWriterTest {
     }
 
     @Test
-    void 실패로_끝낸_요청은_실패_사유와_함께_종료_상태로_남는다() {
-        long userId = nextUserId();
-        Long turnRequestId = aiChatTurnRequestWriter.claim(userId, 7L, "request-d", EXPIRY_TIMEOUT);
-
-        aiChatTurnRequestWriter.markFailed(turnRequestId, "USER_RATE_LIMIT_EXCEEDED");
-
-        AiChatTurnRequest turnRequest = aiChatTurnRequestRepository.findById(turnRequestId).orElseThrow();
-        assertThat(turnRequest.getStatus()).isEqualTo(AiChatTurnRequest.Status.FAILED);
-        assertThat(turnRequest.getFailureCode()).isEqualTo("USER_RATE_LIMIT_EXCEEDED");
-        assertThat(turnRequest.isTerminal()).isTrue();
-    }
-
-    @Test
-    void 이미_종료된_요청은_실패_사유를_덮어쓰지_않는다() {
-        long userId = nextUserId();
-        Long turnRequestId = aiChatTurnRequestWriter.claim(userId, 7L, "request-e", EXPIRY_TIMEOUT);
-        aiChatTurnRequestWriter.markFailed(turnRequestId, "GUARDRAIL_BLOCKED_INPUT");
-
-        aiChatTurnRequestWriter.markFailed(turnRequestId, "USER_RATE_LIMIT_EXCEEDED");
-
-        AiChatTurnRequest turnRequest = aiChatTurnRequestRepository.findById(turnRequestId).orElseThrow();
-        assertThat(turnRequest.getFailureCode()).isEqualTo("GUARDRAIL_BLOCKED_INPUT");
-    }
-
-    @Test
     void 실패로_끝낸_요청의_식별자를_다시_보내도_새_요청으로_받지_않는다() {
         long userId = nextUserId();
         Long turnRequestId = aiChatTurnRequestWriter.claim(userId, 7L, "request-f", EXPIRY_TIMEOUT);
-        aiChatTurnRequestWriter.markFailed(turnRequestId, "AI_PROVIDER_ERROR");
+        aiChatTurnOutcomeWriter.finishWithoutCharge(
+                turnRequestId, AiChatTurnRequest.Status.FAILED, "AI_PROVIDER_ERROR");
 
         // 종료 상태도 행은 남는다 — 같은 식별자의 재전송은 자동 재생성이 아니라 중복으로 거절된다.
         assertThatThrownBy(() -> aiChatTurnRequestWriter.claim(userId, 7L, "request-f", EXPIRY_TIMEOUT))

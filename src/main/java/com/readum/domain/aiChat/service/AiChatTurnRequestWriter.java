@@ -15,9 +15,9 @@ import java.time.Duration;
  * 요청 기록(ai_chat_turn_request)의 원자적 DB 쓰기 구간 — 선행 단계가 쓰는 전이만 담는다.
  * 선언적 {@code @Transactional} 협력자 빈 (transaction.md — 외부 호출이 섞인 서비스 흐름에서 DB 쓰기만 분리).
  *
- * <p>생성 이후의 요청 종료(성공 확정·실패 기록·예약 반환)는 저장·정산 트랜잭션(별도 작업)이 맡는다.
- * 그쪽은 같은 행을 잠그고 미종료인지 확인한 뒤 상태 변경과 예산 반영을 함께 커밋한다 — 이 클래스는
- * 아직 그 잠금을 쓰지 않는다. 선행 단계에서는 그 요청을 만든 실행 하나만 행을 만지기 때문이다.
+ * <p>요청 <b>종료</b>(성공 확정·청구 없는 종료·만료 복구)는 이 클래스가 아니라
+ * {@link AiChatTurnOutcomeWriter} 가 맡는다. 선행 단계의 거절도 그쪽의
+ * {@code finishWithoutCharge} 한 번으로 끝낸다 — 상태 전이와 예약 반환이 갈리지 않게 하기 위해서다.
  */
 @Slf4j
 @Component
@@ -54,22 +54,6 @@ class AiChatTurnRequestWriter {
             find(turnRequestId).markReserved(granted.periodKey(), granted.reservedTokens());
         }
         return reserveResult;
-    }
-
-    /**
-     * 선행 단계의 거절·실패로 요청을 끝낸다. 예약 반환은 여기서 하지 않는다 —
-     * 예약 전 거절이면 되돌릴 것이 없고, 예약 후 거절이면 호출부의 환불 경로가 담당한다.
-     * 이미 종료된 요청은 다시 끝내지 않는다.
-     */
-    @Transactional
-    void markFailed(Long turnRequestId, String failureCode) {
-        AiChatTurnRequest turnRequest = find(turnRequestId);
-        if (turnRequest.isTerminal()) {
-            log.warn("이미 종료된 요청의 실패 기록 생략 turnRequestId={} status={}",
-                    turnRequestId, turnRequest.getStatus());
-            return;
-        }
-        turnRequest.markFailed(failureCode);
     }
 
     private AiChatTurnRequest find(Long turnRequestId) {
