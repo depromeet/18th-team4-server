@@ -64,6 +64,12 @@ public class MessageStreamSseDelivery {
      */
     private static final Duration EMITTER_TIMEOUT_MARGIN = Duration.ofSeconds(10);
 
+    /** 전달이 끝난 사유 — 한 줄 형식을 공유하고 사유만 갈아 끼운다(같은 종료를 두 가지 문장으로 남기지 않기 위해서다). */
+    private static final String END_CHANNEL_CLOSED = "채널 종료";
+    private static final String END_DEADLINE_BEFORE_POLL = "전달 기한 소진 — 새 쓰기를 시작하지 않는다";
+    private static final String END_DEADLINE_WHILE_WAITING = "전달 기한 소진 — 이벤트를 기다리다 기한이 끝났다";
+    private static final String END_DEADLINE_BEFORE_WRITE = "전달 기한 소진 — 꺼낸 이벤트를 쓰지 않고 끝낸다";
+
     private final MessageStreamSseSerializer messageStreamSseSerializer;
     private final ExecutorService aiChatDeliveryExecutor;
     private final AiChatProperties aiChatProperties;
@@ -117,15 +123,25 @@ public class MessageStreamSseDelivery {
             while (true) {
                 Duration remaining = deliveryChannel.remainingDeliveryTime();
                 if (remaining.isZero()) {
-                    log.info("SSE 전달 기한 초과 — 새 쓰기를 시작하지 않는다 sessionId={}", sessionId);
+                    logDeliveryEnd(END_DEADLINE_BEFORE_POLL, deliveryChannel, sessionId);
                     break;
                 }
                 MessageStreamEvent event = deliveryChannel.poll(remaining);
                 if (event == null) {
                     // 채널이 닫혔거나 기다릴 시간을 다 썼다 — 어느 쪽이든 전달은 여기서 끝난다.
+                    // 다만 원인이 다르다(앞은 emitter 종료·클라이언트 이탈, 뒤는 생성이 기한 안에 끝나지 않음).
+                    // 구분해 남기지 않으면 기한으로 끝난 연결이 로그에 아무 흔적도 남기지 않는다.
+                    logDeliveryEnd(
+                            deliveryChannel.isClosed() ? END_CHANNEL_CLOSED : END_DEADLINE_WHILE_WAITING,
+                            deliveryChannel, sessionId);
                     break;
                 }
-                if (deliveryChannel.isClosed() || deliveryChannel.remainingDeliveryTime().isZero()) {
+                if (deliveryChannel.isClosed()) {
+                    logDeliveryEnd(END_CHANNEL_CLOSED, deliveryChannel, sessionId);
+                    break;
+                }
+                if (deliveryChannel.remainingDeliveryTime().isZero()) {
+                    logDeliveryEnd(END_DEADLINE_BEFORE_WRITE, deliveryChannel, sessionId);
                     break;
                 }
                 emitter.send(messageStreamSseSerializer.toSseEvent(event));
@@ -147,6 +163,17 @@ public class MessageStreamSseDelivery {
             deliveryChannel.close();
             completeQuietly(emitter, sessionId);
         }
+    }
+
+    /**
+     * 전달이 끝난 사유를 한 줄로 남긴다. 채널 상태(아직 못 보낸 델타 수·완성본 대기 모드)를 함께 실어,
+     * 기한으로 끝난 연결이 <b>무엇을 못 보내고</b> 끝났는지 로그만으로 구분할 수 있게 한다.
+     * 두 값을 읽느라 채널 잠금을 잠깐 더 잡지만, 그 안에서 하는 일은 필드 읽기뿐이다.
+     */
+    private void logDeliveryEnd(String reason, ChatDeliveryChannel deliveryChannel, Long sessionId) {
+        log.info("SSE 전달 종료({}) sessionId={} queuedDeltaCount={} waitingForFinalAnswer={}",
+                reason, sessionId, deliveryChannel.queuedDeltaCount(),
+                deliveryChannel.isWaitingForFinalAnswer());
     }
 
     /**
