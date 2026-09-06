@@ -32,14 +32,20 @@ public class OpenAiHttpClientConfig {
      * ({@code ai-chat.streaming.prepare-allowance-seconds}) 안에 들어야 하는 값이라
      * 상수로 노출해 기동 시 대조한다({@code AiChatTimeBudgetValidator}).
      */
-    public static final Duration MODERATION_CONNECT_TIMEOUT = Duration.ofSeconds(3);
+    public static final Duration MODERATION_CONNECT_TIMEOUT = Duration.ofSeconds(2);
 
     /** moderation 호출의 응답 읽기 상한. 위와 같은 이유로 노출한다. */
-    public static final Duration MODERATION_READ_TIMEOUT = Duration.ofSeconds(5);
+    public static final Duration MODERATION_READ_TIMEOUT = Duration.ofSeconds(4);
 
     /**
      * moderation 호출 하나가 쓸 수 있는 최대 시간 — 연결 + 읽기. 선행 처리 여유가 이 값보다 커야 한다.
      * 두 값을 따로 더하는 곳이 생기지 않도록 여기 한 번만 더해 둔다.
+     *
+     * <p>연결 2초 + 읽기 4초 = 6초다. 3 + 5 = 8초에서 내렸다 — 선행 처리 여유 10초에는 moderation 말고도
+     * 폭주 가드와 전역 게이트의 Redis 호출 둘이 들어가고, Redis 명령 기한을 1초로 못박으면서
+     * 그 둘이 최악 2초를 쓰게 됐기 때문이다. 6 + 2 = 8초라 DB(이력 조회·예약·USER 저장) 몫 2초가 남는다.
+     * OpenAI moderation 은 짧은 문자열 하나를 판정하는 단순 호출이라 정상 응답이 4초를 넘을 이유가 없다
+     * (계산이며 실측 아님). 이 관계는 기동 시 {@code AiChatTimeBudgetValidator} 가 대조한다.
      */
     public static Duration moderationHttpCeiling() {
         return MODERATION_CONNECT_TIMEOUT.plus(MODERATION_READ_TIMEOUT);

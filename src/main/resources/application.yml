@@ -15,6 +15,18 @@ spring:
   threads:
     virtual:
       enabled: true
+  # Redis 명령·연결 기한 (환경 무관 — 세 프로파일 모두 루프백 Redis 라 값이 갈릴 이유가 없다).
+  # 무엇을 막는가: 폭주 가드와 전역 게이트는 Redis 장애 때 검사 없이 통과시키는데(fail-open),
+  # 그 통과는 "호출이 실패했다는 것을 안 뒤" 일어난다. Redis 가 연결을 거부하면 즉시지만
+  # 응답 없이 매달리면 명령 기한까지 기다린 뒤에야 예외가 나온다 — 기본 60초면 선행 처리의
+  # Redis 호출 둘이 2분을 쓰고, 그 사이 요청은 진행 목록 자리를 차지한 채 요청 만료 40초에 걸려
+  # OpenAI 에 가 보기도 전에 미정산 예약 반환이 닫는다. 1초로 두면 fail-open 이 1초 안에 발동하고,
+  # 두 호출의 실패(최악 2초)가 선행 처리 여유 10초 안에 들어간다.
+  # 루프백 Redis 가 1초 넘게 응답하지 않으면 죽은 것으로 본다.
+  data:
+    redis:
+      timeout: 1s          # 명령 기한 — 명령을 보낸 뒤 응답을 기다리는 최대 시간
+      connect-timeout: 1s  # 연결 기한 — TCP 연결을 맺기까지 기다리는 최대 시간
   ai:
     # chat.observations 블록은 두지 않는다 — 채팅·제목·요약 ChatClient 전부 수동 구성이라
     # 자동 구성의 관측(observation) 연결이 적용되지 않는다. 토큰/지연/실패 관측은 AiPromptAuditLogger 가 담당.
@@ -88,7 +100,7 @@ ai-chat:
     delivery-timeout-seconds: 30           # 전달 기한. 전달 채널 생성 시점(SseEmitter 를 돌려주는 시점)부터. 기한 후에는 새 SSE 쓰기를 시작하지 않는다. 생성 전체 기한 + 10초 — 후처리(저장·정산)는 보통 1초 안이고, 기한이 지나 연결이 닫혀도 저장은 끝나 답변은 이력에 남는다.
     shutdown-wait-seconds: 60              # 종료 대기 상한. shutdown 신호부터 진행 중인 생성·후처리를 기다리는 최대 시간. 초과분은 DB 의 미정산 예약 반환에 맡긴다.
     # 아래 둘은 기한이 아니라 여유 — 요청 기록의 만료 시각(expires_at = 접수 + 선행 여유 + 생성 전체 기한 + 후처리 여유)을 잡는 데만 쓴다.
-    prepare-allowance-seconds: 10          # 선행 처리 여유. moderation HTTP 상한 8초(연결 3 + 읽기 5, OpenAiHttpClientConfig) + 이력 조회·예약·게이트·USER 저장의 DB·Redis 몫 2초. 계산값이며 실측 아님. 두 값이 어긋나면 기동이 막힌다(AiChatTimeBudgetValidator).
+    prepare-allowance-seconds: 10          # 선행 처리 여유 = moderation HTTP 상한 6초(연결 2 + 읽기 4, OpenAiHttpClientConfig) + Redis 몫 2초(폭주 가드·전역 게이트 각 1회 × 명령 기한 1초) + DB 몫 2초(이력 조회·예약·USER 저장). 계산값이며 실측 아님. 값이 어긋나면 기동이 막힌다(AiChatTimeBudgetValidator).
     post-processing-allowance-seconds: 10  # 후처리 여유. Hikari 연결 획득 상한 3초(spring.datasource.hikari.connection-timeout) + 행 잠금 대기 5초(innodb_lock_wait_timeout) + 커밋 몫 2초. 계산값이며 실측 아님 — N=100 실측에서 후처리는 연결 대기를 포함해 0.4~0.6초였다.
     delivery-queue-capacity: 256           # 연결 1개당 전달 큐에 쌓아둘 델타 수. 설정에 적힌 출력 상한 1024 토큰의 1/4 을 버퍼로 잡은 예상치(그 상한은 실제 요청에 걸리지 않으므로 어림잡기용). 실제 청크 크기·누적 답변·동시 요청 메모리를 함께 재서 조정한다.
     # 동시에 진행할 수 있는 채팅 턴 수의 상한(선행 처리 시작 ~ 마지막 후처리). 넘으면 503 AI_CHAT_CAPACITY_EXCEEDED.

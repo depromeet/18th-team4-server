@@ -90,9 +90,10 @@ public record AiChatProperties(
      * 정상적으로 선행 처리·후처리 중인 요청을 미정산 예약 반환이 가로채 환불하게 된다.
      * <ul>
      *   <li>prepareAllowanceSeconds — <b>선행 처리 여유</b>. 요청 행을 넣은 뒤(= 접수) 생성 호출을 시작하기까지
-     *       걸릴 수 있는 시간이다. 가장 긴 몫은 입력 moderation 의 HTTP 상한 8초
-     *       (연결 3초 + 읽기 5초, {@code OpenAiHttpClientConfig})이고, 그 뒤로 이력 조회·예약·전역 게이트·
-     *       USER 저장의 DB·Redis 시간이 더 붙는다. 후보값 10초는 8초에 나머지 몫 2초를 얹은 것이다.</li>
+     *       걸릴 수 있는 시간이다. 가장 긴 몫은 입력 moderation 의 HTTP 상한 6초
+     *       (연결 2초 + 읽기 4초, {@code OpenAiHttpClientConfig})이고, 그 뒤로 폭주 가드·전역 게이트의
+     *       Redis 몫 2초(각 1회 × 명령 기한 1초, {@code spring.data.redis.timeout})와 이력 조회·예약·
+     *       USER 저장의 DB 몫 2초가 더 붙는다. 후보값 10초는 이 셋(6 + 2 + 2)을 더한 것이다.</li>
      *   <li>postProcessingAllowanceSeconds — <b>후처리 여유</b>. 생성이 끝난 뒤 저장·정산·요청 종료 트랜잭션이
      *       끝나기까지 걸릴 수 있는 시간이다. DB 연결을 얻는 데 Hikari {@code connection-timeout} 3초가 들 수 있고,
      *       그 뒤 트랜잭션 안에서 같은 요청 행을 잠그는 대기가 {@code innodb_lock_wait_timeout} 5초까지 갈 수 있다.

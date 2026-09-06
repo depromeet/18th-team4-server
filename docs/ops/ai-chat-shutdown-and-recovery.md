@@ -138,9 +138,10 @@ expires_at = 접수 시각 + (선행 여유 10 + 생성 전체 기한 20 + 후�
 실패한다. 늦게 성공하는 대신 빨리 실패하는 쪽을 택했다. 이 선을 덮지 못하면 정상 처리 중인 요청을
 반환이 가로채 환불하므로, 각 몫은 그 구간의 실제 상한에서 온다.
 
-- **선행 여유 10초** — 가장 긴 몫은 입력 moderation 의 HTTP 상한 8초(연결 3 + 읽기 5,
-  `OpenAiHttpClientConfig`). 그 뒤로 이력 조회·예약·전역 게이트·USER 저장의 DB·Redis 시간이
-  더 붙어 2초를 얹었다.
+- **선행 여유 10초** — 가장 긴 몫은 입력 moderation 의 HTTP 상한 6초(연결 2 + 읽기 4,
+  `OpenAiHttpClientConfig`). 거기에 폭주 가드와 전역 게이트가 매달린 Redis 앞에서 쓸 수 있는
+  최악 2초(각 1회 × 명령 기한 1초, `spring.data.redis.timeout`)와 이력 조회·예약·USER 저장의
+  DB 몫 2초를 얹었다. 6 + 2 + 2 = 10초다.
 - **후처리 여유 10초** — DB 연결을 빌리는 데 Hikari `connection-timeout` 3초가 들 수 있고,
   그 뒤 트랜잭션 안에서 같은 요청 행을 잠그는 대기가 `innodb_lock_wait_timeout` 5초까지 갈 수 있다.
   연결 획득 3초 + 잠금 대기 5초에 커밋 몫 2초를 얹었다. 후처리는 연결 하나를 빌려 저장·정산·요청
@@ -151,8 +152,9 @@ expires_at = 접수 시각 + (선행 여유 10 + 생성 전체 기한 20 + 후�
   다른 환경(인스턴스 간 시계 차이)에서만 의미가 있다.
 
 **구간별 상한이 이 예산 안에 드는지는 기동 시 대조한다.** `AiChatTimeBudgetValidator` 가
-무응답 ≤ 생성 전체, 전달 > 생성 전체, moderation 연결+읽기 < 선행 여유, Hikari 연결 획득 < 후처리 여유
-네 가지를 보고 어긋나면 기동을 막는다. 값들이 서로 다른 파일에 흩어져 있어, 한 곳만 바꿨을 때
+무응답 ≤ 생성 전체, 전달 > 생성 전체, moderation 연결+읽기 < 선행 여유,
+Redis 명령 기한 × 2 + moderation 연결+읽기 < 선행 여유, Hikari 연결 획득 < 후처리 여유
+다섯 가지를 보고 어긋나면 기동을 막는다. 값들이 서로 다른 파일에 흩어져 있어, 한 곳만 바꿨을 때
 "정상으로 끝날 수 있는 최장 시간 > 만료" 가 조용히 생기는 것을 막는 자리다.
 
 **여기 적은 초 단위는 설정값과 라이브러리 기본값에서 읽은 계산이지 측정값이 아니다.** 실제 선행
@@ -271,6 +273,38 @@ RDS 어디서든 같은 값이 보장된다.
 노출한다), `DataSourceLockWaitTimeoutMySqlTest` 는 같은 연결의 `@@innodb_lock_wait_timeout` 이 5 인지
 단언한다. 둘 다 값을 베끼지 않고 `application-local.yml` 에서 읽어 온다.
 
+### Redis 의 대기 제한 — fail-open 이 언제 발동하는가
+
+| 제한 | 값 | 무엇을 재는가 |
+|---|---|---|
+| `spring.data.redis.timeout` | **1초** (`application.yml`) | 명령을 보낸 뒤 **응답을 기다리는** 시간 |
+| `spring.data.redis.connect-timeout` | **1초** (같은 파일) | **TCP 연결을 맺기까지** 기다리는 시간 |
+
+둘 다 환경 무관 상수라 세 프로파일이 아니라 `application.yml` 한 곳에 있다 — 세 환경 모두 루프백
+Redis 를 보므로 값이 갈릴 이유가 없다. 테스트 프로파일은 `src/test/resources/application.yml` 이
+통째로 대신하므로 이 값이 걸리지 않는다.
+
+**Redis 가 죽는 경우와 매달리는 경우는 다르다.** 폭주 가드(`UserMessageRateLimiterRedisAdapter`)와
+전역 게이트(`OpenAiRequestGate`)는 Redis 장애를 만나면 검사 없이 통과시킨다(fail-open) — 차단이
+통과보다 큰 피해라고 봤기 때문이다. 그런데 그 통과는 **호출이 실패했다는 것을 안 뒤에** 일어난다.
+Redis 프로세스가 죽어 연결이 거부되면 그 사실이 즉시 오므로 통과도 즉시다. 하지만 Redis 가 연결은
+받으면서 응답만 하지 않으면 — 프로세스가 살아 있되 멈춘 경우, `SAVE` 같은 명령이 서버를 붙잡은 경우,
+경로 중간이 패킷을 삼키는 경우 — 클라이언트는 **명령 기한까지 기다린 뒤에야** 예외를 받는다.
+**그래서 명령 기한이 곧 fail-open 의 발동 시간이다.**
+
+`spring.data.redis.timeout` 을 두지 않으면 Lettuce 기본 60초가 걸린다. 선행 처리에는 Redis 를 부르는
+자리가 둘(폭주 가드 1회 + 전역 게이트 1회)이라, 매달린 Redis 앞에서 통과까지 2분이 걸린다. 그 사이
+요청은 진행 목록 자리를 차지하고, 한 턴의 시간 예산 40초에 걸려 **OpenAI 에 가 보기도 전에** 미정산
+예약 반환이 그 요청을 닫는다. 1초로 두면 두 호출의 실패가 최악 2초로 끝나 선행 여유 10초 안에
+들어간다. 루프백 Redis 가 1초 넘게 응답하지 않으면 죽은 것으로 본다(사용자 판단).
+
+**Lettuce 의 끊김 동작이 이 기한을 비켜가지 않는다.** Lettuce 는 기본적으로 자동 재연결이 켜져 있고
+(`ClientOptions.DEFAULT_AUTO_RECONNECT = true`), 끊긴 동안 들어온 명령을 거절하지 않고 버퍼에 쌓았다가
+재연결되면 보낸다(`ClientOptions.DEFAULT_DISCONNECTED_BEHAVIOR = DisconnectedBehavior.DEFAULT`,
+큐 상한 `DEFAULT_REQUEST_QUEUE_SIZE = Integer.MAX_VALUE`). 그래도 각 명령은 발행 시점부터 명령 기한을
+재므로, 버퍼에 갇힌 명령도 1초 뒤에 `QueryTimeoutException` 으로 끝난다 — 재연결을 기다리며 무한정
+매달리지 않는다. (jar 로 확인: lettuce-core 6.8.2.RELEASE 의 `ClientOptions` 상수.)
+
 ### 수동 실행 전용 테스트 — `./gradlew mysqlTest`
 
 기본 빌드(`./gradlew test`, `./gradlew build`)의 테스트는 H2(MODE=MySQL)로 돈다. H2 는 MySQL 의
@@ -302,8 +336,9 @@ MYSQL_TEST_PASSWORD=... ./gradlew mysqlTest
   `expires_at` 도 그만큼 늘어난다(산식에 들어 있다). 반대로 여유를 줄일 때는 그 구간의 실제 상한
   (moderation HTTP · Hikari 연결 획득)이 여전히 그 안에 드는지 본다 — 어긋나면 기동이 막힌다.
 - **구간별 상한을 줄일 때는 여유도 함께 본다.** moderation HTTP 상한은
-  `OpenAiHttpClientConfig`, DB 대기 제한은 `application-{local,dev,prod}.yml` 의 Hikari 블록에 있다.
-  둘 다 채팅 밖의 기능에도 걸리는 값이므로, 채팅 예산만 보고 줄이지 않는다.
+  `OpenAiHttpClientConfig`, DB 대기 제한은 `application-{local,dev,prod}.yml` 의 Hikari 블록,
+  Redis 기한은 `application.yml` 의 `spring.data.redis` 에 있다.
+  셋 다 채팅 밖의 기능에도 걸리는 값이므로, 채팅 예산만 보고 줄이지 않는다.
 - **전달 기한을 늘릴 때는 `emitter` 기한이 거기서 파생된다는 것을 기억한다**(전달 기한 + 10초).
   `emitter` 가 먼저 만료되면 컨테이너가 요청을 끊어 전달 기한이 상한 구실을 못 하고, 가장 늦게
   도착하는 이벤트인 완성본 교체(`replace`)가 잘린다.
