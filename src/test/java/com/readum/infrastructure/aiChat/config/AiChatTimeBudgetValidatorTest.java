@@ -23,11 +23,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class AiChatTimeBudgetValidatorTest {
 
     private static final Duration MODERATION_HTTP_CEILING = Duration.ofSeconds(8);
-    private static final Duration CONNECTION_ACQUIRE_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration CONNECTION_ACQUIRE_TIMEOUT = Duration.ofSeconds(3);
 
     @Test
     void 무응답_기한이_생성_전체_기한보다_길면_기동을_막는다() {
-        AiChatProperties.Streaming streaming = streaming(10, 20, 30, 30, 20);
+        AiChatProperties.Streaming streaming = streaming(10, 20, 30, 30, 10);
 
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
                 streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT))
@@ -38,7 +38,7 @@ class AiChatTimeBudgetValidatorTest {
 
     @Test
     void 전달_기한이_생성_전체_기한보다_길지_않으면_기동을_막는다() {
-        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 20, 20);
+        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 20, 10);
 
         // 같으면 완성본 교체(replace)가 나갈 시간이 0 이라 상한 구실을 못 한다.
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
@@ -50,7 +50,7 @@ class AiChatTimeBudgetValidatorTest {
 
     @Test
     void moderation_HTTP_상한이_선행_처리_여유_안에_들지_않으면_기동을_막는다() {
-        AiChatProperties.Streaming streaming = streaming(8, 20, 10, 30, 20);
+        AiChatProperties.Streaming streaming = streaming(8, 20, 10, 30, 10);
 
         // 선행 여유를 moderation 상한과 같게 두면 이력 조회·예약·게이트 몫이 남지 않는다.
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
@@ -62,18 +62,18 @@ class AiChatTimeBudgetValidatorTest {
 
     @Test
     void DB_연결_획득_상한이_후처리_여유_안에_들지_않으면_기동을_막는다() {
-        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 20);
+        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
 
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
                 streaming, MODERATION_HTTP_CEILING, Duration.ofSeconds(30)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("connection-timeout(30000ms)")
-                .hasMessageContaining("post-processing-allowance-seconds(20)");
+                .hasMessageContaining("post-processing-allowance-seconds(10)");
     }
 
     @Test
     void 연결_획득_상한을_읽지_못하면_그_조건만_건너뛰고_통과한다() {
-        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 20);
+        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
 
         assertThatCode(() -> AiChatTimeBudgetValidator.verify(streaming, MODERATION_HTTP_CEILING, null))
                 .doesNotThrowAnyException();
@@ -95,8 +95,8 @@ class AiChatTimeBudgetValidatorTest {
                 productionConnectionAcquireTimeout()))
                 .doesNotThrowAnyException();
 
-        // 한 턴의 시간 예산은 50초다 — 값이 바뀌면 문서(docs/domain/ai-chat.md · docs/ops/…)도 함께 고친다.
-        assertThat(streaming.turnRequestExpiryTimeout()).isEqualTo(Duration.ofSeconds(50));
+        // 한 턴의 시간 예산은 40초다 — 값이 바뀌면 문서(docs/domain/ai-chat.md · docs/ops/…)도 함께 고친다.
+        assertThat(streaming.turnRequestExpiryTimeout()).isEqualTo(Duration.ofSeconds(40));
     }
 
     private static AiChatProperties.Streaming streaming(

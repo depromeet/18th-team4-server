@@ -29,8 +29,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class AiChatPostProcessingRetryTest {
 
-    /** 한 턴의 요청 만료 유예 — 운영 후보값 50초(선행 10 + 생성 20 + 후처리 20). */
-    private static final Duration EXPIRY_TIMEOUT = Duration.ofSeconds(50);
+    /** 한 턴의 요청 만료 유예 — 운영 후보값 40초(선행 10 + 생성 20 + 후처리 10). */
+    private static final Duration EXPIRY_TIMEOUT = Duration.ofSeconds(40);
 
     private static final Instant TURN_STARTED_AT = Instant.parse("2026-09-06T12:00:00Z");
     private static final Long TURN_REQUEST_ID = 4242L;
@@ -117,8 +117,8 @@ class AiChatPostProcessingRetryTest {
 
     @Test
     void 만료_여유를_넘긴_시점이면_다시_시도하지_않는다() {
-        // 지금이 등록 시각 + 48초 — 다음 시도 시작 시각(+49초)이 재시도 마감(+48초)을 넘는다.
-        AiChatPostProcessingRetry retry = retryAt(TURN_STARTED_AT.plusSeconds(48));
+        // 지금이 등록 시각 + 38초 — 다음 시도 시작 시각(+39초)이 재시도 마감(+38초)을 넘는다.
+        AiChatPostProcessingRetry retry = retryAt(TURN_STARTED_AT.plusSeconds(38));
         CannotAcquireLockException lockError = new CannotAcquireLockException("잠금 대기 초과");
         Supplier<AiChatTurnOutcomeWriter.TurnOutcomeResult> finish = finishThat(lockError, SUCCEEDED);
 

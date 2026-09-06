@@ -53,7 +53,7 @@ ai-chat:
     generation-idle-timeout-seconds: 10
     delivery-timeout-seconds: 30
     shutdown-wait-seconds: 60
-    # 여유 둘만 운영(10 / 20)과 다르다. 테스트 프로파일의 DataSource 는 H2 라 Hikari connection-timeout 을
+    # 여유 둘만 운영(10 / 10)과 다르다. 테스트 프로파일의 DataSource 는 H2 라 Hikari connection-timeout 을
     # 걸지 않고 기본 30초를 그대로 쓰는데, 검증 조건 "연결 획득 상한 < 후처리 여유" 를 그 기본값으로 맞춰야 한다.
     # 선행 여유도 같은 이유로 넉넉히 둔다(테스트에는 실제 moderation HTTP 호출이 없다).
     # 운영 값이 맞물리는지는 AiChatTimeBudgetValidatorTest 가 운영 조합을 직접 넣어 확인한다.

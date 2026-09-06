@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  * 저쪽은 <b>한 요청</b>의 기한이고, 이쪽은 <b>훑는 작업</b>의 주기·묶음이다.
  *
  * <p><b>graceSeconds 는 0 이 정본이다.</b> 요청 행의 {@code expires_at} 은 <b>접수 시각 + (선행 처리 여유 +
- * 생성 전체 기한 + 후처리 여유)</b> = 10 + 20 + 20 = 50초로 찍힌다
+ * 생성 전체 기한 + 후처리 여유)</b> = 10 + 20 + 10 = 40초로 찍힌다
  * ({@code AiChatProperties.Streaming#turnRequestExpiryTimeout()}). 한 턴이 정상적으로 끝나기까지 걸릴 수 있는
  * 구간별 상한을 그 산식이 이미 담고 있으므로, 만료로 판정한 행은 곧바로 처리한다.
  *
@@ -29,7 +29,7 @@ import java.time.LocalDateTime;
  * 행 수, 곧 한 묶음이 만드는 순간 부하다.
  *
  * <p><b>반환이 늦어지는 정도.</b> 죽은 요청의 예약이 사용자에게 돌아오기까지 최악
- * {@code expires_at + graceSeconds + scanIntervalMs} 다 — 지금 값으로 접수 후 약 1분 50초다.
+ * {@code expires_at + graceSeconds + scanIntervalMs} 다 — 지금 값으로 접수 후 약 1분 40초다.
  * 그 사이 사용자는 그만큼의 일일 예산을 못 쓴다.
  */
 @Validated
