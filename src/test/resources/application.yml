@@ -8,6 +8,9 @@ spring:
   flyway:
     enabled: false   # 테스트는 H2 + ddl-auto create-drop (MySQL 전용 V1 SQL 은 H2 에 적용 불가)
   datasource:
+    # 운영 프로파일이 URL 에 붙이는 socketTimeout 은 여기 두지 않는다 — H2 는 모르는 설정을 거부한다
+    # (JdbcSQLNonTransientConnectionException: Unsupported connection setting "SOCKETTIMEOUT", h2 2.2.224 로 확인).
+    # 소켓 읽기 기한은 실제 네트워크 연결에만 의미가 있고, 인메모리 H2 에는 기다릴 소켓 자체가 없다.
     url: jdbc:h2:mem:readum;MODE=MySQL;DB_CLOSE_DELAY=-1
     username: sa
     password:

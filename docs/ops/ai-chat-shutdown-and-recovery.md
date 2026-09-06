@@ -130,6 +130,38 @@ expires_at = 접수 시각 + (선행 여유 60 + 생성 전체 기한 120 + 후�
 못 쓴다. 이 지연을 줄이려면 스캔 주기나 grace 를 줄이는데, 정상 처리 중인 요청을 가로챌 위험과
 맞바꾸는 것이므로 실측 없이 줄이지 않는다.
 
+### DB 연결의 대기 제한
+
+후처리에는 전체 타이머가 없다. 무한정 매달리는 일을 막는 몫은 DB 쪽 대기 제한에 있는데,
+이 셋은 서로 다른 구간을 잰다.
+
+| 제한 | 값 | 무엇을 재는가 |
+|---|---|---|
+| `spring.datasource.hikari.connection-timeout` | 미설정(HikariCP 기본 30초) | 풀에서 연결 하나를 **빌리기까지** 기다리는 시간 |
+| JDBC `socketTimeout` | **60초** (`application-{local,dev,prod}.yml` 의 URL 매개변수) | 빌린 연결에서 **응답 한 덩어리를 읽기까지** 기다리는 시간 |
+| `innodb_lock_wait_timeout` | 미설정(MySQL 기본 50초) | 서버가 행 잠금을 **얻기까지** 기다리는 시간 |
+
+**`socketTimeout` 이 막는 것.** 이 값이 없으면 읽기에 기한이 없다. 소켓이 조용히 끊기면
+(네트워크 장비가 유휴 연결을 정리하거나, 상대가 알리지 않고 사라지는 경우) 클라이언트는 오지 않을
+응답을 커널 keepalive 시간(리눅스 기본 약 2시간)까지 기다린다. 그동안 그 호출을 하던 스레드도,
+그 스레드가 쥔 풀 연결도 회수되지 않는다. 채팅 후처리에서 드러난 문제지만 원인은 DataSource 한
+군데라, 앱의 모든 DB 호출에 같은 값을 건다.
+
+**왜 60초인가.** MySQL 의 잠금 대기 기한(기본 50초)보다 길어야 한다. 잠금 대기가 길어졌을 때
+클라이언트가 먼저 소켓을 끊으면 서버 세션은 잠금을 쥔 채로 남을 수 있다. 읽기 기한을 잠금 대기
+기한보다 길게 두면 그 경우가 DB 쪽에서 정상 오류(`Lock wait timeout exceeded`)로 먼저 끝나고
+트랜잭션이 롤백된다. 앱의 질의는 모두 짧아 정상 처리가 60초를 넘길 여지가 없고, 60초는 널리 쓰는
+보편값이다. **이 값은 계산이지 측정이 아니다** — 실제 질의 소요는 재지 않았다.
+
+**Hikari `connection-timeout` 은 함께 건드리지 않았다.** 그것은 "풀에서 빌리기" 구간의 기한이라
+읽기 기한이 대신할 수 없고, 반대도 마찬가지다. 값을 바꾸려면 두 구간을 따로 판단한다.
+
+테스트 프로파일(H2)에는 걸지 않는다. H2 는 모르는 연결 설정을 거부하고
+(`Unsupported connection setting "SOCKETTIMEOUT"`), 인메모리라 기다릴 소켓 자체가 없다.
+실제로 걸렸는지는 `./gradlew mysqlTest` 의 `DataSourceSocketTimeoutMySqlTest` 가 확인한다 —
+풀에서 빌린 연결의 `Connection#getNetworkTimeout()` 이 60,000ms 인지 단언한다(Connector/J 는
+`socketTimeout` 을 이 값으로 노출한다).
+
 ### 수동 실행 전용 테스트 — `./gradlew mysqlTest`
 
 기본 빌드(`./gradlew test`, `./gradlew build`)의 테스트는 H2(MODE=MySQL)로 돈다. H2 는 MySQL 의
