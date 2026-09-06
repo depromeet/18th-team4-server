@@ -220,6 +220,33 @@ class AiChatTurnOutcomeMySqlRowLockTest {
     }
 
     @Test
+    void 만료_복구가_동시에_두_번_돌아도_예약_반환은_한_번만_반영된다() throws Exception {
+        createProbeTable();
+        try {
+            long turnRequestId = insertReservedTurnRequest(3L, "double-recovery-race");
+            CyclicBarrier startTogether = new CyclicBarrier(2);
+
+            // 스캔이 겹치거나(한 프로세스) 여러 대가 같은 주기로 돌면 같은 행을 동시에 집을 수 있다.
+            // 복구에는 선점 표식이 없고, 겹침을 막는 것은 이 행 잠금과 미종료 확인뿐이다.
+            List<Boolean> finalized = runTogether(List.of(
+                    () -> {
+                        startTogether.await();
+                        return finishTurn(turnRequestId, "EXPIRED", true);
+                    },
+                    () -> {
+                        startTogether.await();
+                        return finishTurn(turnRequestId, "EXPIRED", true);
+                    }));
+
+            // 한쪽만 확정한다 — 둘 다 확정하면 예약을 두 번 되돌려 원장이 음수가 된다.
+            assertThat(finalized.stream().filter(Boolean::booleanValue).count()).isEqualTo(1);
+            assertThat(statusOf(turnRequestId)).isEqualTo("EXPIRED");
+        } finally {
+            dropProbeTable();
+        }
+    }
+
+    @Test
     void 잠금_없이_읽으면_둘_다_미종료로_보고_양쪽이_반영된다() throws Exception {
         createProbeTable();
         try {

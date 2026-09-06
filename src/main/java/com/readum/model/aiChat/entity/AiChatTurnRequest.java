@@ -168,6 +168,15 @@ public class AiChatTurnRequest {
     }
 
     /**
+     * 기준 시각에서 볼 때 기한이 지났는가 — 만료 복구가 <b>행을 잠근 뒤</b> 다시 확인하는 조건이다.
+     * expiresAt 은 접수 시각에서 한 번 정해지고 바뀌지 않지만, 목록 조회와 잠금 사이의 시차를 두고
+     * 판단하지 않기 위해 기준 시각을 인자로 받는다 — 훑을 때 쓴 기준을 종료 시점에도 그대로 쓴다.
+     */
+    public boolean isOverdueAt(LocalDateTime overdueBefore) {
+        return expiresAt.isBefore(overdueBefore);
+    }
+
+    /**
      * 되돌릴 예약이 이 행에 남아 있는가. 예약 전(ACCEPTED)에 끝난 요청은 반환할 것이 없다.
      * 예약량과 예산 기간은 함께 커밋되므로 둘 중 하나만 있는 상태는 정상 흐름에서 나오지 않는다.
      */

@@ -50,6 +50,13 @@ ai-chat:
     delivery-timeout-seconds: 150
     shutdown-wait-seconds: 60
     delivery-queue-capacity: 256
+  turn-recovery:
+    # 테스트에서는 배경 스캔이 사실상 돌지 않게 한다. 만료 복구 테스트는 일부러 기한이 지난 행을 커밋해 두는데,
+    # 같은 컨텍스트의 스케줄러가 그 행을 먼저 만료시키면 단언이 시점에 따라 흔들린다.
+    # 복구 동작 자체는 테스트가 판정 기준 시각을 직접 넘겨 확인한다.
+    scan-interval-ms: 3600000
+    grace-seconds: 86400
+    max-rows-per-run: 100
 
 aladin:
   ttb-key: test-ttb-key

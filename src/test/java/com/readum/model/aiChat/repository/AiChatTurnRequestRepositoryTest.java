@@ -5,9 +5,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -21,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Transactional
 class AiChatTurnRequestRepositoryTest {
 
+    private static final ZoneId ZONE_KST = ZoneId.of("Asia/Seoul");
     private static final Duration EXPIRY_TIMEOUT = Duration.ofMinutes(3);
 
     @Autowired
@@ -112,5 +117,91 @@ class AiChatTurnRequestRepositoryTest {
     @Test
     void 없는_요청_id_로_잠금_조회하면_비어_있다() {
         assertThat(aiChatTurnRequestRepository.findByIdForUpdate(9_999_999L)).isEmpty();
+    }
+
+    // ── 만료 복구 대상 조회 ──────────────────────────────────────────────
+
+    @Test
+    void 기한이_지난_미종료_요청만_복구_대상으로_조회된다() {
+        // 이 테스트의 트랜잭션은 롤백되므로, 앞선 테스트가 커밋해 둔 행이 남아 있어도 여기서만 비운다.
+        aiChatTurnRequestRepository.deleteAll();
+        Long overdueAccepted = save(accepted("overdue-accepted", Duration.ofMinutes(-5)));
+        Long overdueReserved = save(reserved(accepted("overdue-reserved", Duration.ofMinutes(-4))));
+        save(reserved(accepted("still-running", Duration.ofMinutes(5))));
+        save(succeeded(accepted("overdue-succeeded", Duration.ofMinutes(-5))));
+        save(failed(accepted("overdue-failed", Duration.ofMinutes(-5))));
+        save(expired(accepted("overdue-expired", Duration.ofMinutes(-5))));
+
+        List<Long> found = aiChatTurnRequestRepository.findOverdueUnfinishedIds(
+                LocalDateTime.now(ZONE_KST), PageRequest.of(0, 100));
+
+        // 종료된 행은 되돌릴 것이 없고, 기한 전 행은 아직 정상 진행 중일 수 있다.
+        assertThat(found).containsExactly(overdueAccepted, overdueReserved);
+    }
+
+    @Test
+    void 복구_대상은_기한이_이른_순서로_상한만큼만_돌려준다() {
+        aiChatTurnRequestRepository.deleteAll();
+        Long oldest = save(reserved(accepted("overdue-oldest", Duration.ofMinutes(-30))));
+        Long middle = save(reserved(accepted("overdue-middle", Duration.ofMinutes(-20))));
+        save(reserved(accepted("overdue-newest", Duration.ofMinutes(-10))));
+
+        List<Long> found = aiChatTurnRequestRepository.findOverdueUnfinishedIds(
+                LocalDateTime.now(ZONE_KST), PageRequest.of(0, 2));
+
+        // 한 번에 다 처리하지 못할 때는 오래 묶여 있던 예약부터 돌려준다.
+        assertThat(found).containsExactly(oldest, middle);
+    }
+
+    @Test
+    void 기준_시각보다_기한이_뒤인_요청은_복구_대상이_아니다() {
+        aiChatTurnRequestRepository.deleteAll();
+        AiChatTurnRequest turnRequest = persist(reserved(accepted("grace-boundary", Duration.ofMinutes(-1))));
+
+        // 복구는 expires_at 을 넘긴 뒤에도 안전 여유만큼 더 기다린 행만 집는다 —
+        // 기준 시각을 여유만큼 앞당겨 넘기는 것이 그 규칙이다.
+        LocalDateTime beforeExpiry = turnRequest.getExpiresAt().minusSeconds(1);
+        assertThat(aiChatTurnRequestRepository.findOverdueUnfinishedIds(beforeExpiry, PageRequest.of(0, 100)))
+                .isEmpty();
+        LocalDateTime afterExpiry = turnRequest.getExpiresAt().plusSeconds(1);
+        assertThat(aiChatTurnRequestRepository.findOverdueUnfinishedIds(afterExpiry, PageRequest.of(0, 100)))
+                .containsExactly(turnRequest.getId());
+    }
+
+    // ── 도우미 ──────────────────────────────────────────────────────────
+
+    /** 음수 유예를 넣으면 접수 시점에 이미 기한이 지난 행이 된다 — 시간을 기다리지 않고 대상을 만든다. */
+    private static AiChatTurnRequest accepted(String requestId, Duration expiryTimeout) {
+        return AiChatTurnRequest.createAccepted(nextUserId(), 7L, requestId, expiryTimeout);
+    }
+
+    private static AiChatTurnRequest reserved(AiChatTurnRequest turnRequest) {
+        turnRequest.markReserved(20260906, 300);
+        return turnRequest;
+    }
+
+    private static AiChatTurnRequest succeeded(AiChatTurnRequest turnRequest) {
+        reserved(turnRequest).markSucceeded(1L);
+        return turnRequest;
+    }
+
+    private static AiChatTurnRequest failed(AiChatTurnRequest turnRequest) {
+        reserved(turnRequest).markFailed("AI_STREAM_INTERRUPTED");
+        return turnRequest;
+    }
+
+    private static AiChatTurnRequest expired(AiChatTurnRequest turnRequest) {
+        reserved(turnRequest).markExpired("EXPIRED_BY_RECOVERY");
+        return turnRequest;
+    }
+
+    /** 저장하고 id 만 필요할 때. */
+    private Long save(AiChatTurnRequest turnRequest) {
+        return persist(turnRequest).getId();
+    }
+
+    /** 저장하고 기한 등 저장된 값을 확인해야 할 때. */
+    private AiChatTurnRequest persist(AiChatTurnRequest turnRequest) {
+        return aiChatTurnRequestRepository.saveAndFlush(turnRequest);
     }
 }

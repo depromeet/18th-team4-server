@@ -22,6 +22,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -46,6 +47,8 @@ class AiChatTurnOutcomeWriterTest {
 
     private static final ZoneId ZONE_KST = ZoneId.of("Asia/Seoul");
     private static final Duration EXPIRY_TIMEOUT = Duration.ofMinutes(3);
+    /** 음수 유예로 만들면 접수 시점에 이미 기한이 지난 행이 된다 — 만료 복구 대상을 시간 대기 없이 만든다. */
+    private static final Duration ALREADY_OVERDUE_TIMEOUT = Duration.ofMinutes(-3);
     private static final long SESSION_ID = 7L;
     private static final int RESERVED_TOKENS = 300;
     private static final int ESTIMATED_MESSAGE_INPUT_TOKENS = 40;
@@ -245,6 +248,111 @@ class AiChatTurnOutcomeWriterTest {
         assertThat(userTokenBudgetRepository.findByUserIdAndPeriodKey(userId, todayPeriodKey())).isEmpty();
     }
 
+    // ── 만료 복구가 들어오는 입구 ────────────────────────────────────────
+
+    @Test
+    void 기한이_지난_미종료_요청을_만료로_끝내고_예약을_되돌린다() {
+        long userId = nextUserId();
+        Long turnRequestId = overdueReservedTurnRequest(userId, "request-overdue");
+
+        AiChatTurnOutcomeWriter.TurnOutcomeResult result = aiChatTurnOutcomeWriter.expireIfOverdue(
+                turnRequestId, LocalDateTime.now(ZONE_KST), "EXPIRED_BY_RECOVERY");
+
+        assertThat(result).isEqualTo(new AiChatTurnOutcomeWriter.TurnOutcomeResult.FinishedWithoutCharge(
+                AiChatTurnRequest.Status.EXPIRED, RESERVED_TOKENS));
+        assertThat(messagesOf(SESSION_ID)).isEmpty();
+        assertThat(usedTokensOf(userId)).isZero();
+        AiChatTurnRequest turnRequest = aiChatTurnRequestRepository.findById(turnRequestId).orElseThrow();
+        assertThat(turnRequest.getStatus()).isEqualTo(AiChatTurnRequest.Status.EXPIRED);
+        assertThat(turnRequest.getFailureCode()).isEqualTo("EXPIRED_BY_RECOVERY");
+    }
+
+    @Test
+    void 잠그고_보니_아직_기한_전인_요청은_건드리지_않는다() {
+        long userId = nextUserId();
+        Long turnRequestId = reservedTurnRequest(userId, "request-not-overdue");
+
+        // 대상 목록에 잘못 실려 들어온 상황을 흉내 낸다 — 판정 근거를 잠근 행에서 다시 읽어 막아야 한다.
+        AiChatTurnOutcomeWriter.TurnOutcomeResult result = aiChatTurnOutcomeWriter.expireIfOverdue(
+                turnRequestId, LocalDateTime.now(ZONE_KST), "EXPIRED_BY_RECOVERY");
+
+        assertThat(result).isEqualTo(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
+                AiChatTurnRequest.Status.RESERVED));
+        assertThat(aiChatTurnRequestRepository.findById(turnRequestId).orElseThrow().getStatus())
+                .isEqualTo(AiChatTurnRequest.Status.RESERVED);
+        // 정상 후처리 중인 요청의 예약을 복구가 가로채 되돌리지 않는다.
+        assertThat(usedTokensOf(userId)).isEqualTo(RESERVED_TOKENS);
+    }
+
+    @Test
+    void 성공_커밋_직후_기한이_지나도_만료_복구는_그_요청을_건너뛴다() {
+        long userId = nextUserId();
+        Long turnRequestId = overdueReservedTurnRequest(userId, "request-succeeded-then-overdue");
+        aiChatTurnOutcomeWriter.finishSuccessfully(
+                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS);
+        long chargedTokens = ESTIMATED_MESSAGE_INPUT_TOKENS + 260;
+
+        AiChatTurnOutcomeWriter.TurnOutcomeResult result = aiChatTurnOutcomeWriter.expireIfOverdue(
+                turnRequestId, LocalDateTime.now(ZONE_KST), "EXPIRED_BY_RECOVERY");
+
+        assertThat(result).isInstanceOf(AiChatTurnOutcomeWriter.TurnOutcomeResult.AlreadyFinished.class);
+        assertThat(aiChatTurnRequestRepository.findById(turnRequestId).orElseThrow().getStatus())
+                .isEqualTo(AiChatTurnRequest.Status.SUCCEEDED);
+        // 이미 정산된 청구를 복구가 되돌리지 않는다.
+        assertThat(usedTokensOf(userId)).isEqualTo(chargedTokens);
+    }
+
+    @Test
+    void 만료로_확정한_뒤_늦게_도착한_성공은_DB_에_반영되지_않는다() {
+        long userId = nextUserId();
+        Long turnRequestId = overdueReservedTurnRequest(userId, "request-recovered-then-success");
+        aiChatTurnOutcomeWriter.expireIfOverdue(
+                turnRequestId, LocalDateTime.now(ZONE_KST), "EXPIRED_BY_RECOVERY");
+
+        // 기한이 지났다고 실행이 사라진 것은 아니다 — 살아남은 생성이 뒤늦게 성공을 들고 온다.
+        AiChatTurnOutcomeWriter.TurnOutcomeResult lateSuccess = aiChatTurnOutcomeWriter.finishSuccessfully(
+                turnRequestId, successfulGeneration("늦게 도착한 답변", 1_200, 260),
+                ESTIMATED_MESSAGE_INPUT_TOKENS);
+
+        assertThat(lateSuccess).isEqualTo(new AiChatTurnOutcomeWriter.TurnOutcomeResult.AlreadyFinished(
+                AiChatTurnRequest.Status.EXPIRED, null));
+        assertThat(messagesOf(SESSION_ID)).isEmpty();
+        assertThat(usedTokensOf(userId)).isZero();
+    }
+
+    @Test
+    void 만료_복구가_두_번_돌아도_예약은_한_번만_돌아온다() {
+        long userId = nextUserId();
+        Long turnRequestId = overdueReservedTurnRequest(userId, "request-double-recovery");
+        aiChatTurnOutcomeWriter.expireIfOverdue(
+                turnRequestId, LocalDateTime.now(ZONE_KST), "EXPIRED_BY_RECOVERY");
+
+        AiChatTurnOutcomeWriter.TurnOutcomeResult second = aiChatTurnOutcomeWriter.expireIfOverdue(
+                turnRequestId, LocalDateTime.now(ZONE_KST), "EXPIRED_BY_RECOVERY");
+
+        assertThat(second).isEqualTo(new AiChatTurnOutcomeWriter.TurnOutcomeResult.AlreadyFinished(
+                AiChatTurnRequest.Status.EXPIRED, null));
+        // 두 번째 스캔이 또 되돌렸다면 원장이 음수가 된다.
+        assertThat(usedTokensOf(userId)).isZero();
+    }
+
+    @Test
+    void 예약_반환이_실패하면_만료_상태도_함께_롤백된다() {
+        long userId = nextUserId();
+        Long turnRequestId = overdueReservedTurnRequest(userId, "request-refund-fail");
+        willThrow(new DataIntegrityViolationException("원장 갱신 충돌"))
+                .given(userTokenBudgetWriter).refund(anyLong(), anyInt(), anyInt());
+
+        assertThatThrownBy(() -> aiChatTurnOutcomeWriter.expireIfOverdue(
+                turnRequestId, LocalDateTime.now(ZONE_KST), "EXPIRED_BY_RECOVERY"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        // 반환하지 못했는데 종료로만 표시되면 그 예약은 영영 돌아오지 못한다 — 둘은 같이 롤백돼야 한다.
+        AiChatTurnRequest turnRequest = aiChatTurnRequestRepository.findById(turnRequestId).orElseThrow();
+        assertThat(turnRequest.getStatus()).isEqualTo(AiChatTurnRequest.Status.RESERVED);
+        assertThat(usedTokensOf(userId)).isEqualTo(RESERVED_TOKENS);
+    }
+
     // ── 성공과 종료의 경쟁 ───────────────────────────────────────────────
 
     @Test
@@ -305,6 +413,14 @@ class AiChatTurnOutcomeWriterTest {
     }
 
     // ── 도우미 ──────────────────────────────────────────────────────────
+
+    /** 접수 시점에 이미 기한이 지난, 예약까지 마친 요청 — 복구가 집어야 할 행이다. */
+    private Long overdueReservedTurnRequest(long userId, String requestId) {
+        Long turnRequestId =
+                aiChatTurnRequestWriter.claim(userId, SESSION_ID, requestId, ALREADY_OVERDUE_TIMEOUT);
+        aiChatTurnRequestWriter.reserveWithRecord(turnRequestId, userId, RESERVED_TOKENS);
+        return turnRequestId;
+    }
 
     private Long reservedTurnRequest(long userId, String requestId) {
         Long turnRequestId = aiChatTurnRequestWriter.claim(userId, SESSION_ID, requestId, EXPIRY_TIMEOUT);
