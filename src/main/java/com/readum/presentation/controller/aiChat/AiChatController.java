@@ -162,9 +162,19 @@ public class AiChatController {
                     - 끊긴 요청의 결과는 메시지 이력 조회로 확인한다.
 
                     SSE 이벤트 종류:
-                    - **token**: 응답 텍스트 조각. payload `{"delta": "..."}`
-                    - **done**: 스트림 정상 종료. payload `{"tokenCount": {...}, "createdAt": "..."}`
+                    - **token**: 응답 텍스트 조각. payload `{"delta": "..."}` — 클라이언트는 받은 순서대로 이어붙인다.
+                    - **done**: 조각을 끝까지 보낸 연결의 정상 종료. payload `{"tokenCount": {...}, "createdAt": "..."}`
+                      본문을 싣지 않는다 — 이어붙인 부분 답변이 곧 최종 답변이다.
+                    - **replace**: 전달이 밀려 조각 전송을 포기한 연결의 정상 종료.
+                      payload `{"content": "...", "tokenCount": {...}, "createdAt": "..."}`
+                      **클라이언트는 지금까지 표시한 부분 답변을 이어붙이지 말고 content 로 통째로 교체한다.**
+                      중간 조각을 버렸기 때문에 화면의 부분 답변은 최종 답변과 다르다. 이 이벤트는 답변 저장·정산이
+                      커밋된 뒤에만 나가므로, 여기 실린 본문은 이력 조회 결과와 같다.
                     - **error**: 스트림 비정상 종료. payload `{"code": "...", "message": "...", "rateLimit": {...}?}`
+                      이때는 답변을 저장하지 않고 예약한 토큰도 되돌린다 — 부분 답변은 이력에 남지 않는다.
+
+                    연결이 done/replace/error 없이 끊기면 결과는 메시지 이력 조회로 확인한다.
+                    서버는 끊긴 연결을 다시 잇거나 이미 보낸 조각을 재생해 주지 않는다.
 
                     error 이벤트의 code:
                     - `AI_RATE_LIMIT_BURST`: OpenAI 의 일시적 한도 초과 (RPM/TPM). rateLimit payload 포함, 클라이언트 자동 재시도 가능.
@@ -192,10 +202,16 @@ public class AiChatController {
                     """
     )
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "SSE 스트림 시작 (이후 token/done/error 이벤트 흐름)"),
+            @ApiResponse(responseCode = "200", description = "SSE 스트림 시작 (이후 token/done/replace/error 이벤트 흐름)"),
             @ApiResponse(responseCode = "400", description = "본문 검증 실패 / 감상문 생성 중(SESSION_LOCKED) 또는 완성·종료된(SESSION_ALREADY_SUMMARIZED) 세션"),
             @ApiResponse(responseCode = "401", description = "인증되지 않은 요청"),
             @ApiResponse(responseCode = "404", description = "세션 없음 또는 소유권 없음"),
+            @ApiResponse(
+                    responseCode = "503",
+                    description = """
+                            입력 검사를 할 수 없거나(GUARDRAIL_MODERATION_UNAVAILABLE),
+                            서버가 종료 절차에 들어가 새 요청을 받지 않는 상태(SERVER_SHUTTING_DOWN).
+                            둘 다 SSE 가 시작되기 전이라 JSON 으로 응답한다."""),
             @ApiResponse(
                     responseCode = "409",
                     description = """
