@@ -38,7 +38,7 @@ class MessageStreamSseDeliveryTest {
                 new AiChatProperties.MessageRule(1000),
                 new AiChatProperties.RateLimit(10, 5),
                 new AiChatProperties.TokenBudget(120000, 512),
-                new AiChatProperties.Streaming(120, 30, deliveryTimeoutSeconds, 60, 2)
+                new AiChatProperties.Streaming(120, 30, deliveryTimeoutSeconds, 60, 60, 60, 2)
         );
     }
 

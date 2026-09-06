@@ -49,6 +49,8 @@ ai-chat:
     generation-idle-timeout-seconds: 30
     delivery-timeout-seconds: 150
     shutdown-wait-seconds: 60
+    prepare-allowance-seconds: 60
+    post-processing-allowance-seconds: 60
     delivery-queue-capacity: 256
   turn-recovery:
     # 테스트에서는 배경 스캔이 사실상 돌지 않게 한다. 만료 복구 테스트는 일부러 기한이 지난 행을 커밋해 두는데,

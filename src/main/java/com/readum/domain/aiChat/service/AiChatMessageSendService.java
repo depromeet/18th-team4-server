@@ -165,14 +165,13 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 만료 유예 = 생성 전체 기한 + 종료 대기 상한. 생성이 전체 기한까지 늘어지고 그 뒤 후처리가
-     * 종료 대기 상한만큼 더 걸려도 정상 요청을 만료로 오판하지 않는 하한이다.
-     * <b>후보값</b>이며, 만료 시각과 후처리 대기 정책의 관계는 만료 복구 작업에서 확정한다.
+     * 이 요청 행에 찍을 만료 유예. 산식은 설정 쪽에 있다
+     * ({@link AiChatProperties.Streaming#turnRequestExpiryTimeout()}) — 선행 처리 여유 + 생성 전체 기한 +
+     * 후처리 여유로, 접수 시각부터 한 턴이 정상적으로 끝나기까지 걸릴 수 있는 구간을 모두 덮는다.
+     * 값은 모두 <b>후보값</b>이다.
      */
     private Duration turnRequestExpiryTimeout() {
-        AiChatProperties.Streaming streaming = aiChatProperties.streaming();
-        return Duration.ofSeconds(
-                (long) streaming.generationTotalTimeoutSeconds() + streaming.shutdownWaitSeconds());
+        return aiChatProperties.streaming().turnRequestExpiryTimeout();
     }
 
     /**

@@ -72,7 +72,7 @@ class AiChatMessageSendServiceTest {
     private static final LocalDateTime SAVED_AT = LocalDateTime.of(2026, 9, 6, 12, 0, 0);
     /** 기한 넷과 큐 상한 — 운영 후보값 그대로. 기한을 짧게 둬야 하는 테스트는 따로 서비스를 만든다. */
     private static final AiChatProperties.Streaming STREAMING =
-            new AiChatProperties.Streaming(120, 30, 150, 60, 256);
+            new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 256);
 
     @Mock
     private AiChatMessagePersistService persistService;
@@ -318,6 +318,25 @@ class AiChatMessageSendServiceTest {
         gateOrder.verify(aiChatTurnRequestWriter)
                 .claim(eq(USER_ID), eq(7L), eq(REQUEST_ID), any(Duration.class));
         gateOrder.verify(userMessageRateLimiter).tryConsume(USER_ID);
+    }
+
+    @Test
+    void 요청_기록의_만료_유예는_선행_처리_여유와_생성_전체_기한과_후처리_여유의_합이다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 1, 1, 2));
+        givenCommittedSuccess(1L, 1, 1, 2);
+
+        executeTurn(command);
+
+        // 접수 시각부터 한 턴이 정상적으로 끝나기까지 걸릴 수 있는 구간을 모두 덮어야, 정상 처리 중인 요청을
+        // 만료 복구가 가로채 환불하지 않는다. 종료 대기 상한은 여기 들어가지 않는다 — 그것은 배포 때
+        // 얼마나 기다려 줄지를 정하는 값이지 한 턴이 얼마나 걸리는지가 아니다.
+        ArgumentCaptor<Duration> expiryTimeout = ArgumentCaptor.forClass(Duration.class);
+        verify(aiChatTurnRequestWriter)
+                .claim(eq(USER_ID), eq(7L), eq(REQUEST_ID), expiryTimeout.capture());
+        assertThat(expiryTimeout.getValue()).isEqualTo(Duration.ofSeconds(60 + 120 + 60));
     }
 
     @Test
@@ -1023,7 +1042,7 @@ class AiChatMessageSendServiceTest {
         givenCommittedSuccess(42L, 10, 5, 15);
 
         ChatDeliveryChannel deliveryChannel =
-                ChatDeliveryChannel.open(new AiChatProperties.Streaming(120, 30, 150, 60, 1));
+                ChatDeliveryChannel.open(new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 1));
         executeTurn(command, service, deliveryChannel);
         List<MessageStreamEvent> events = drain(deliveryChannel);
 
@@ -1045,7 +1064,7 @@ class AiChatMessageSendServiceTest {
         givenFinishedWithoutCharge();
 
         AiChatMessageSendService shortIdleService =
-                serviceWith(propertiesWith(new AiChatProperties.Streaming(120, 1, 150, 60, 256)));
+                serviceWith(propertiesWith(new AiChatProperties.Streaming(120, 1, 150, 60, 60, 60, 256)));
         executeTurn(command, shortIdleService);
 
         verify(aiChatTurnOutcomeWriter, timeout(3_000)).finishWithoutCharge(
@@ -1064,7 +1083,7 @@ class AiChatMessageSendServiceTest {
         givenFinishedWithoutCharge();
 
         AiChatMessageSendService shortTotalService =
-                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 256)));
+                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 60, 60, 256)));
         executeTurn(command, shortTotalService);
 
         verify(aiChatTurnOutcomeWriter, timeout(3_000)).finishWithoutCharge(
@@ -1087,7 +1106,7 @@ class AiChatMessageSendServiceTest {
                 });
 
         AiChatMessageSendService shortTotalService =
-                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 256)));
+                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 60, 60, 256)));
         List<MessageStreamEvent> events = executeTurn(command, shortTotalService);
 
         // 후처리는 리액티브 체인 밖 VT 에서 돌아 기한의 영향을 받지 않는다 — 성공으로 끝난다.

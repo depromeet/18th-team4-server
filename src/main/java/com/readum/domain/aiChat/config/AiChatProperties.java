@@ -5,6 +5,8 @@ import jakarta.validation.constraints.Positive;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import java.time.Duration;
+
 // 잘못된 yml 값(0 / 음수) 으로 인한 런타임 오류를 부팅 시점에 차단하기 위해 @Validated.
 // nested record 에는 @Valid 로 전파해야 안쪽 필드의 @Positive 가 검증된다.
 @Validated
@@ -63,7 +65,7 @@ public record AiChatProperties(
     }
 
     /**
-     * 스트리밍 한 턴의 기한과 전달 버퍼 크기. 아래 네 기한은 재는 대상과 시작점이 서로 달라 하나로 합치지 않는다.
+     * 스트리밍 한 턴의 기한·여유와 전달 버퍼 크기. 아래 기한들은 재는 대상과 시작점이 서로 달라 하나로 합치지 않는다.
      * 값은 모두 <b>후보값</b>이며 부하 측정 뒤 조정한다.
      *
      * <p>기한별 시작점(무엇을 언제부터 재는가):
@@ -82,6 +84,23 @@ public record AiChatProperties(
      *       SSE 전달의 종료는 이 대기 조건에 넣지 않는다.</li>
      * </ul>
      *
+     * <p>아래 둘은 기한이 아니라 <b>여유</b>다 — 무엇을 끊는 값이 아니라, 요청 기록의 만료 시각
+     * ({@code ai_chat_turn_request.expires_at})을 접수 시각으로부터 계산할 때 더하는 상한 몫이다.
+     * 만료 시각은 "이 시각까지는 아직 정상 처리 중일 수 있다" 는 선이라, 생성 기한만으로 잡으면
+     * 정상적으로 선행 처리·후처리 중인 요청을 복구가 가로채 환불하게 된다.
+     * <ul>
+     *   <li>prepareAllowanceSeconds — <b>선행 처리 여유</b>. 요청 행을 넣은 뒤(= 접수) 생성 호출을 시작하기까지
+     *       걸릴 수 있는 시간이다. 가장 긴 몫은 입력 moderation 의 HTTP 상한 40초
+     *       (연결 10초 + 읽기 30초, {@code OpenAiHttpClientConfig})이고, 그 뒤로 이력 조회·예약·전역 게이트·
+     *       USER 저장의 DB·Redis 시간이 더 붙는다. 후보값 60초는 40초에 나머지 몫 20초를 얹은 것이다.</li>
+     *   <li>postProcessingAllowanceSeconds — <b>후처리 여유</b>. 생성이 끝난 뒤 저장·정산·요청 종료 트랜잭션이
+     *       끝나기까지 걸릴 수 있는 시간이다. DB 연결을 얻는 데만 HikariCP 기본 상한 30초가 들 수 있고,
+     *       같은 요청 행을 잠그는 대기가 MySQL 기본 {@code innodb_lock_wait_timeout} 50초까지 갈 수 있다.
+     *       후보값 60초는 그 둘 중 큰 쪽(50초)에 질의 시간 몫을 얹은 것이다.</li>
+     * </ul>
+     * 여기 적은 초 단위는 설정값과 코드·기본값에서 읽은 상한을 더한 <b>계산</b>이지 측정값이 아니다.
+     * 실제 선행 처리·후처리 소요는 재지 않았다.
+     *
      * <p>deliveryQueueCapacity — 연결 1개당 전달 큐에 쌓아둘 델타 개수의 상한이다. 큐가 차면 완성본 대기 모드로
      * 바꾸고 이후 델타는 큐에 넣지 않는다(생성은 계속 누적한다). 초기값은 예상치다:
      * 답변 1건의 델타 수를 설정에 적힌 출력 상한(readum.guardrail.output.max-response-tokens = 1024) 언저리로 잡고,
@@ -95,8 +114,24 @@ public record AiChatProperties(
             @Positive int generationIdleTimeoutSeconds,
             @Positive int deliveryTimeoutSeconds,
             @Positive int shutdownWaitSeconds,
+            @Positive int prepareAllowanceSeconds,
+            @Positive int postProcessingAllowanceSeconds,
             @Positive int deliveryQueueCapacity
     ) {
+
+        /**
+         * 요청 기록의 만료 유예 — 접수 시각에 이만큼을 더한 값이 {@code expires_at} 이 된다.
+         * 한 턴이 정상적으로 끝나기까지 걸릴 수 있는 시간을 구간별 상한의 합으로 잡는다:
+         * <b>선행 처리 여유 + 생성 전체 기한 + 후처리 여유</b>.
+         *
+         * <p>종료 대기 상한(shutdownWaitSeconds)은 여기 들어가지 않는다 — 그 값은 배포 때
+         * <b>얼마나 기다려 줄지</b>를 정하는 값이지 한 턴이 <b>얼마나 걸리는지</b>가 아니다.
+         * 후처리에 드는 시간은 postProcessingAllowanceSeconds 가 따로 재고 있다.
+         */
+        public Duration turnRequestExpiryTimeout() {
+            return Duration.ofSeconds(
+                    (long) prepareAllowanceSeconds + generationTotalTimeoutSeconds + postProcessingAllowanceSeconds);
+        }
     }
 
 }
