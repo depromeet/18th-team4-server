@@ -33,7 +33,8 @@ import java.time.LocalDateTime;
  *
  * <p><b>실패 시 부분 본문을 저장하지 않는다</b>(설계 정본 §6.3). 받은 데까지의 조각은 정상 답변이 아니라
  * 사용자에게 완결된 답변으로 보일 위험이 있고, 청구하지 않는 실패에 저장·집계만 남길 이유가 없다.
- * 기존 {@link AiChatMessagePersistService#saveAssistantFailed} 는 이 경로에서 쓰지 않는다.
+ * 부분 본문을 {@code FAILED} 로 남기던 예전 저장 메서드는 부르는 곳이 없어져 함께 지웠다 —
+ * 다만 그때 쌓인 {@code FAILED} 행은 DB 에 남아 있고, 컨텍스트 조회는 지금도 그 상태를 제외한다.
  *
  * <p><b>후속 작업 접점:</b>
  * <ul>

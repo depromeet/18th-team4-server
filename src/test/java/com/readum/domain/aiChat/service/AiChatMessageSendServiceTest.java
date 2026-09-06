@@ -809,7 +809,6 @@ class AiChatMessageSendServiceTest {
         verify(persistService, never()).recordRejectedUserMessage(anyLong(), anyString());
         // ASSISTANT 저장은 요청 종료 트랜잭션 안에서 일어난다 — 서비스가 따로 저장하지 않는다.
         verify(persistService, never()).saveAssistantSuccess(anyLong(), anyString(), any());
-        verify(persistService, never()).saveAssistantFailed(anyLong(), anyString(), any());
     }
 
     @Test
@@ -833,8 +832,8 @@ class AiChatMessageSendServiceTest {
                 .extracting(MessageStreamEvent.Error::code)
                 .isEqualTo(AiChatErrorCode.AI_STREAM_INTERRUPTED.name());
 
-        // 받은 데까지의 조각은 정상 답변이 아니므로 어떤 형태로도 저장하지 않는다.
-        verify(persistService, never()).saveAssistantFailed(anyLong(), anyString(), any());
+        // 받은 데까지의 조각은 정상 답변이 아니므로 어떤 형태로도 저장하지 않는다
+        // (본문 없이 끝내는 경로 자체의 단언은 AiChatTurnOutcomeWriterTest 가 맡는다).
         verify(persistService, never()).saveAssistantSuccess(anyLong(), anyString(), any());
     }
 
