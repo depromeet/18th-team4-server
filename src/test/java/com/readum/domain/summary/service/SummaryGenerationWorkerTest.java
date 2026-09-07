@@ -8,6 +8,7 @@ import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.domain.summary.out.AiQuotaCooldown;
+import com.readum.domain.summary.out.ShutdownSignal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +38,7 @@ class SummaryGenerationWorkerTest {
     @Mock SummaryJobLifecycleService lifecycleService;
     @Mock AiSummaryClient aiSummaryClient;
     @Mock AiQuotaCooldown quotaCooldown;
+    @Mock ShutdownSignal shutdownSignal;
     @Mock SummaryTokenEstimator tokenEstimator;
     @Mock SummaryJobProperties properties;
 
@@ -48,6 +50,7 @@ class SummaryGenerationWorkerTest {
     @BeforeEach
     void setup() {
         when(quotaCooldown.isCoolingDown()).thenReturn(false);
+        when(shutdownSignal.isShuttingDown()).thenReturn(false);
         when(lifecycleService.claimOne(anyString())).thenReturn(1L);
         when(lifecycleService.prepareGeneration(eq(1L), anyString())).thenReturn(CONTEXT);
         when(properties.estimatedOutputTokens()).thenReturn(1024);
@@ -63,6 +66,33 @@ class SummaryGenerationWorkerTest {
 
         org.assertj.core.api.Assertions.assertThat(processed).isFalse();
         verify(lifecycleService, never()).claimOne(anyString());
+    }
+
+    @Test
+    void 종료_중이면_선점하지_않고_종료한다() {
+        when(shutdownSignal.isShuttingDown()).thenReturn(true);
+
+        boolean processed = worker.processOne();
+
+        org.assertj.core.api.Assertions.assertThat(processed).isFalse();
+        verify(lifecycleService, never()).claimOne(anyString());
+    }
+
+    @Test
+    void 처리_도중_종료_신호가_오면_손에_든_작업은_마치고_새로_선점하지_않는다() throws Exception {
+        // 첫 선점 직전엔 종료 중이 아니고, 그 작업을 처리하는 사이에 종료 신호가 도착한 상황.
+        // 이미 집은 작업은 끝까지 마치고(recordSuccess 1회), 다음 작업은 집지 않아야 한다(claimOne 1회).
+        when(shutdownSignal.isShuttingDown()).thenReturn(false, true);
+        SummaryDraftResult result = new SummaryDraftResult("제목", "본문");
+        when(aiSummaryClient.generate(any())).thenReturn(result);
+
+        worker.processUntilEmpty();
+
+        verify(lifecycleService, org.mockito.Mockito.times(1)).claimOne(anyString());
+        verify(lifecycleService, org.mockito.Mockito.times(1))
+                .recordSuccess(eq(1L), anyString(), eq(200L), eq(result));
+        verify(lifecycleService, never())
+                .recordFailure(anyLong(), anyString(), anyBoolean(), anyString(), anyString(), any());
     }
 
     @Test
