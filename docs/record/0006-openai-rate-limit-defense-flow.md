@@ -13,7 +13,7 @@ OpenAI 계정 429 를 **두 겹으로** 막는다: (1) 호출 **전** 전역 게
 
 | 요소 | 계층 | 책임 | 일부러 **안** 하는 것 |
 |---|---|---|---|
-| `OpenAiRequestGate` | infra | 분당 예산(Redis 고정 창) 판정 → `Permitted`/`Rejected`. quota 쿨다운 진입·조회 | **정책 없음** — 거절 시 무엇을 할지 안 정함 |
+| `OpenAiRequestGate` | infra | 토큰 버킷(프로젝트 × 모델별) 판정 → `Permitted`/`Rejected`. quota 쿨다운 진입·조회 | **정책 없음** — 거절 시 무엇을 할지 안 정함 |
 | `OpenAiRateLimitGuard` | infra | 게이트 `Rejected` → `TooManyRequestsException`(QUOTA/BURST) **번역** | 토큰 추정·호출 실행 안 함 |
 | `RateLimitInfo` | domain | 재시도 메타(Retry-After 등) **운반**. 출처 무관 단일 형태 | 어느 출처인지 구분 안 함 |
 | `OpenAiResponseErrorHandler` | infra | OpenAI **실제 429** 분류(quota vs burst) + 쿨다운 진입 + 번역 | 예방 안 함(사후 대응) |
@@ -90,3 +90,18 @@ OpenAI 계정 429 를 **두 겹으로** 막는다: (1) 호출 **전** 전역 게
 
 - 게이트 설계 의도(정책 없음·근사·fail-open): `OpenAiRequestGate` 클래스 주석.
 - 전역 게이트 도입 맥락: [[project_token_limit_and_context_compression]] 스펙(로컬 `docs/superpowers/specs`, gitignore).
+
+## 2026-09-08 개정 — 고정 분 창 → 토큰 버킷, 프로젝트 분리
+
+**왜 바꿨나.** OpenAI 한도는 분 정각에 리셋되는 창이 아니라 계속 보충되는 버킷이다. 고정 분 창은 분 초반에 한 분치를 한꺼번에 내보내는데 OpenAI 쪽에는 그만큼의 자리가 없어, 그 몫이 그대로 429 로 돌아온다. 부하가 한도에 닿는 순간 예방 게이트가 제 일을 못 한다는 뜻이라, 내보내는 모양이 OpenAI 의 보충과 같아지도록 토큰 버킷으로 바꿨다.
+
+**무엇이 바뀌었나.**
+
+- 판정 방식: 프로젝트 × 모델별 Redis 토큰 버킷(Lua 스크립트 `redis/openai-token-bucket.lua`). 보충 속도 = 한도 ÷ 60초, 버킷 크기 = 보충 속도 × `openai.gate.burst-seconds`(후보 10초치).
+- 거절 대신 **기다릴 시간(ms)**: 자리가 없으면 아무것도 빼지 않고 그 시간을 돌려준다. 그 시간을 어떻게 쓸지는 `OpenAiRateLimitGuard` 가 정한다 — 채팅만 `openai.gate.chat-max-wait-millis`(후보 1초) 안에서 기다렸다 다시 확보하고, 나머지 경로는 기다리지 않고 바로 던진다.
+- 기능 간 격리 방법: 우리 코드가 몫을 나누지 않는다. OpenAI 한도는 키가 아니라 프로젝트 단위라, 다섯 경로(채팅·입력 moderation·감상문·컨텍스트 요약·제목)를 각각의 OpenAI 프로젝트와 키로 나눠 격리를 얻는다. 설정의 한도 값은 그 프로젝트에 OpenAI 가 건 값을 그대로 적는다.
+- moderation 은 키만 나누고 게이트는 거치지 않는다(`OpenAiProject#gated()` 가 `false`). 거치기로 한 프로젝트에 모델 한도가 없으면 기동을 막는다.
+
+**바뀌지 않은 것.** 두 겹 구조(호출 전 예방 게이트 + 실제 429 를 잡는 사후 핸들러), 판정 → 번역 → 행동의 분리, 계정 quota 쿨다운이 모델 하나를 키로 전역이라는 점(어느 프로젝트도 기다리지 않는다), 거절 이후 호출자별 행동(채팅 429 · 워커는 재시도 횟수를 올리지 않고 대기열로 되돌림 · 제목 생략), Redis 장애·한도 미설정 시 ERROR 로그를 남기고 통과(fail-open).
+
+**읽을 때 주의.** 위 "요청 흐름" 도식과 **5)**·**A)** 절은 개정 전(고정 분 창) 설계를 적은 기록이다 — 지금 동작은 이 절이 정본이고, 구성 요소 표의 `OpenAiRequestGate` 행만 지금 구조에 맞춰 고쳤다.

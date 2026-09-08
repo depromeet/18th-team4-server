@@ -140,8 +140,9 @@ expires_at = 접수 시각 + (선행 여유 10 + 생성 전체 기한 20 + 후�
 
 - **선행 여유 10초** — 가장 긴 몫은 입력 moderation 의 HTTP 상한 6초(연결 2 + 읽기 4,
   `OpenAiHttpClientConfig`). 거기에 폭주 가드와 전역 게이트가 매달린 Redis 앞에서 쓸 수 있는
-  최악 2초(각 1회 × 명령 기한 1초, `spring.data.redis.timeout`)와 이력 조회·예약·USER 저장의
-  DB 몫 2초를 얹었다. 6 + 2 + 2 = 10초다.
+  최악 2초(각 1회 × 명령 기한 1초, `spring.data.redis.timeout`), 채팅이 전역 게이트 버킷 자리를
+  기다려 주는 상한 1초(`openai.gate.chat-max-wait-millis`), 이력 조회·예약·USER 저장의
+  DB 몫 1초를 얹었다. 6 + 2 + 1 + 1 = 10초다.
 - **후처리 여유 10초** — DB 연결을 빌리는 데 Hikari `connection-timeout` 3초가 들 수 있고,
   그 뒤 트랜잭션 안에서 같은 요청 행을 잠그는 대기가 `innodb_lock_wait_timeout` 5초까지 갈 수 있다.
   연결 획득 3초 + 잠금 대기 5초에 커밋 몫 2초를 얹었다. 후처리는 연결 하나를 빌려 저장·정산·요청
@@ -153,7 +154,8 @@ expires_at = 접수 시각 + (선행 여유 10 + 생성 전체 기한 20 + 후�
 
 **구간별 상한이 이 예산 안에 드는지는 기동 시 대조한다.** `AiChatTimeBudgetValidator` 가
 무응답 ≤ 생성 전체, 전달 > 생성 전체, moderation 연결+읽기 < 선행 여유,
-Redis 명령 기한 × 2 + moderation 연결+읽기 < 선행 여유, Hikari 연결 획득 < 후처리 여유
+Redis 명령 기한 × 2 + moderation 연결+읽기 + 채팅 게이트 대기 상한 < 선행 여유,
+Hikari 연결 획득 < 후처리 여유
 다섯 가지를 보고 어긋나면 기동을 막는다. 값들이 서로 다른 파일에 흩어져 있어, 한 곳만 바꿨을 때
 "정상으로 끝날 수 있는 최장 시간 > 만료" 가 조용히 생기는 것을 막는 자리다.
 
