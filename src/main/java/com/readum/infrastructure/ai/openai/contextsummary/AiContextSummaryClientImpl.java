@@ -72,7 +72,7 @@ public class AiContextSummaryClientImpl implements AiContextSummaryClient {
     public ContextSummaryResult generate(String previousSummary, List<AiChatMessage> deltaMessages) {
         String userMessage = promptAssembler.buildUserMessage(previousSummary, deltaMessages);
 
-        // 전역 게이트: 포화면 burst 429, quota 소진이면 쿨다운으로 던진다 — 워커가 각각 무벌점 반납/재큐로 처리한다.
+        // 전역 게이트: 포화면 burst 429, quota 소진이면 쿨다운으로 던진다 — 워커가 각각 재시도 횟수를 올리지 않고 대기열로 되돌리거나 재큐로 처리한다.
         // 계상은 실제 전송량(시스템 프롬프트 + 사용자 메시지 + 예약 출력). 사용자 예산에는 미계상(시스템이 시키는 호출).
         int estimatedTokens = tokenCounter.count(promptAssembler.systemPrompt())
                 + tokenCounter.count(userMessage)
