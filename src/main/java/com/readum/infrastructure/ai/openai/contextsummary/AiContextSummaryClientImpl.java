@@ -7,6 +7,7 @@ import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import lombok.extern.slf4j.Slf4j;
@@ -76,7 +77,7 @@ public class AiContextSummaryClientImpl implements AiContextSummaryClient {
         int estimatedTokens = tokenCounter.count(promptAssembler.systemPrompt())
                 + tokenCounter.count(userMessage)
                 + aiChatProperties.context().summaryEstimatedOutputTokens();
-        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
+        rateLimitGuard.acquireOrThrow(OpenAiProject.CONTEXT_SUMMARY, chatModel, estimatedTokens);
 
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(deltaMessages),

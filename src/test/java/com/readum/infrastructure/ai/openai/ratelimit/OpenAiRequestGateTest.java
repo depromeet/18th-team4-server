@@ -7,31 +7,37 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class OpenAiRequestGateTest {
 
     private static final String MODEL = "gpt-4o-mini";
+    private static final int BURST_SECONDS = 10;
+    private static final String CHAT_REQUEST_BUCKET_KEY = "ai:global:chat:" + MODEL + ":bucket:rpm";
+    private static final String CHAT_TOKEN_BUCKET_KEY = "ai:global:chat:" + MODEL + ":bucket:tpm";
 
     @Mock
     private StringRedisTemplate stringRedisTemplate;
@@ -39,165 +45,195 @@ class OpenAiRequestGateTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
+    @Mock
+    private HashOperations<String, Object, Object> hashOperations;
+
     private OpenAiRequestGate gate;
 
     @BeforeEach
     void setUp() {
         lenient().when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
-        gate = new OpenAiRequestGate(stringRedisTemplate,
-                new OpenAiGateProperties(Map.of(MODEL, new OpenAiGateProperties.ModelLimit(9000, 180000L)), 300));
+        lenient().when(stringRedisTemplate.opsForHash()).thenReturn(hashOperations);
+        gate = new OpenAiRequestGate(stringRedisTemplate, properties());
+    }
+
+    /** 9000 rpm · 180000 tpm · burst 10초 — 다섯 프로젝트 모두 같은 한도, moderation 은 한도 없음. */
+    private static OpenAiProjectProperties properties() {
+        Map<String, OpenAiProjectProperties.ModelLimit> limits =
+                Map.of(MODEL, new OpenAiProjectProperties.ModelLimit(9000, 180000L));
+        return new OpenAiProjectProperties(
+                Map.of(
+                        OpenAiProject.CHAT, new OpenAiProjectProperties.Project("chat-key", limits),
+                        OpenAiProject.MODERATION, new OpenAiProjectProperties.Project("moderation-key", Map.of()),
+                        OpenAiProject.SUMMARY, new OpenAiProjectProperties.Project("summary-key", limits),
+                        OpenAiProject.CONTEXT_SUMMARY, new OpenAiProjectProperties.Project("context-summary-key", limits),
+                        OpenAiProject.TITLE, new OpenAiProjectProperties.Project("title-key", limits)
+                ),
+                new OpenAiProjectProperties.Gate(BURST_SECONDS, 1000, 300)
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private void givenScriptReturns(Long scriptResult) {
+        given(stringRedisTemplate.execute(
+                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any()))
+                .willReturn(scriptResult);
     }
 
     @Test
-    void 예산_이내면_계상_내역을_담은_Permitted() {
-        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(10L);
-        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(5000L);
-        long minuteBefore = Instant.now().getEpochSecond() / 60;
+    void 스크립트가_0_을_반환하면_프로젝트_모델_토큰을_담은_계상_내역과_함께_Permitted() {
+        givenScriptReturns(0L);
 
-        OpenAiRequestGate.Decision decision = gate.tryAcquire(MODEL, 5000);
+        OpenAiRequestGate.Decision decision = gate.tryAcquire(OpenAiProject.CHAT, MODEL, 5000);
 
-        long minuteAfter = Instant.now().getEpochSecond() / 60;
         assertThat(decision).isInstanceOf(OpenAiRequestGate.Decision.Permitted.class);
         OpenAiRequestGate.GateReservation reservation =
                 ((OpenAiRequestGate.Decision.Permitted) decision).reservation();
+        assertThat(reservation.project()).isEqualTo(OpenAiProject.CHAT);
         assertThat(reservation.model()).isEqualTo(MODEL);
         assertThat(reservation.estimatedTokens()).isEqualTo(5000);
-        assertThat(reservation.epochMinute()).isBetween(minuteBefore, minuteAfter);
     }
 
     @Test
-    void TPM_초과면_두_카운터를_되돌리고_Rejected_와_다음_분까지의_RetryAfter() {
-        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(10L);
-        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(180001L);
+    void 스크립트가_양수를_반환하면_그_ms_를_RetryAfter_로_담아_RATE_BUDGET_으로_거절한다() {
+        givenScriptReturns(750L);
 
-        OpenAiRequestGate.Decision decision = gate.tryAcquire(MODEL, 5000);
+        OpenAiRequestGate.Decision decision = gate.tryAcquire(OpenAiProject.CHAT, MODEL, 5000);
 
         assertThat(decision).isInstanceOf(OpenAiRequestGate.Decision.Rejected.class);
-        Duration retryAfter = ((OpenAiRequestGate.Decision.Rejected) decision).retryAfter();
-        assertThat(retryAfter).isPositive();
-        assertThat(retryAfter).isLessThanOrEqualTo(Duration.ofSeconds(60));
-        verify(valueOperations).increment(contains(":rpm:"), eq(-1L));
-        verify(valueOperations).increment(contains(":tpm:"), eq(-5000L));
+        OpenAiRequestGate.Decision.Rejected rejected = (OpenAiRequestGate.Decision.Rejected) decision;
+        assertThat(rejected.retryAfter()).isEqualTo(Duration.ofMillis(750));
+        assertThat(rejected.reason()).isEqualTo(OpenAiRequestGate.RejectReason.RATE_BUDGET);
     }
 
     @Test
-    void RPM_초과도_거절한다() {
-        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(9001L);
-        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(100L);
+    void 스크립트_응답이_없으면_계상_내역_없이_허용한다() {
+        givenScriptReturns(null);
 
-        assertThat(gate.tryAcquire(MODEL, 100)).isInstanceOf(OpenAiRequestGate.Decision.Rejected.class);
+        assertThat(gate.tryAcquire(OpenAiProject.CHAT, MODEL, 5000))
+                .isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
     }
 
     @Test
-    void 창의_첫_기록이면_TTL_을_건다() {
-        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(1L);   // == delta → 첫 기록
-        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(5000L);
-
-        gate.tryAcquire(MODEL, 5000);
-
-        verify(stringRedisTemplate).expire(contains(":rpm:"), eq(Duration.ofMinutes(2)));
-        verify(stringRedisTemplate).expire(contains(":tpm:"), eq(Duration.ofMinutes(2)));
-    }
-
-    @Test
+    @SuppressWarnings("unchecked")
     void Redis_장애면_계상_내역_없이_허용한다() {
-        given(valueOperations.increment(anyString(), anyLong())).willThrow(new QueryTimeoutException("timeout"));
+        given(stringRedisTemplate.execute(
+                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any()))
+                .willThrow(new QueryTimeoutException("timeout"));
 
-        assertThat(gate.tryAcquire(MODEL, 5000))
+        assertThat(gate.tryAcquire(OpenAiProject.CHAT, MODEL, 5000))
                 .isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
     }
 
     @Test
-    void 한도_미설정_모델은_계상_내역_없이_허용한다() {
-        assertThat(gate.tryAcquire("unknown-model", 100))
+    @SuppressWarnings("unchecked")
+    void 프로젝트에_모델_한도가_없으면_스크립트를_부르지_않고_계상_내역_없이_허용한다() {
+        assertThat(gate.tryAcquire(OpenAiProject.MODERATION, MODEL, 100))
                 .isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
-    }
-
-    @Test
-    void INCRBY_응답이_없으면_계상_내역_없이_허용한다() {
-        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(null);
-        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(5000L);
-
-        assertThat(gate.tryAcquire(MODEL, 5000))
+        assertThat(gate.tryAcquire(OpenAiProject.CHAT, "unknown-model", 100))
                 .isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
+
+        verify(stringRedisTemplate, never()).execute(
+                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
-    void 예산_초과_거절의_사유는_RATE_BUDGET() {
-        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(10L);
-        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(180001L);
-
-        OpenAiRequestGate.Decision decision = gate.tryAcquire(MODEL, 5000);
-
-        assertThat(decision).isInstanceOf(OpenAiRequestGate.Decision.Rejected.class);
-        assertThat(((OpenAiRequestGate.Decision.Rejected) decision).reason())
-                .isEqualTo(OpenAiRequestGate.RejectReason.RATE_BUDGET);
-    }
-
-    @Test
-    void quota_쿨다운_중이면_카운터를_세지_않고_QUOTA_COOLDOWN_으로_거절한다() {
+    @SuppressWarnings("unchecked")
+    void quota_쿨다운_중이면_스크립트를_부르지_않고_QUOTA_COOLDOWN_으로_거절한다() {
         given(stringRedisTemplate.getExpire(contains(":quota-cooldown"), eq(TimeUnit.SECONDS))).willReturn(120L);
 
-        OpenAiRequestGate.Decision decision = gate.tryAcquire(MODEL, 5000);
+        OpenAiRequestGate.Decision decision = gate.tryAcquire(OpenAiProject.CHAT, MODEL, 5000);
 
         assertThat(decision).isInstanceOf(OpenAiRequestGate.Decision.Rejected.class);
         OpenAiRequestGate.Decision.Rejected rejected = (OpenAiRequestGate.Decision.Rejected) decision;
         assertThat(rejected.reason()).isEqualTo(OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN);
         assertThat(rejected.retryAfter()).isEqualTo(Duration.ofSeconds(120));
-        verify(valueOperations, never()).increment(contains(":rpm:"), anyLong());
+        verify(stringRedisTemplate, never()).execute(
+                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
-    void enterQuotaCooldown_은_TTL_로_키를_심는다() {
+    @SuppressWarnings("unchecked")
+    void 스크립트에_프로젝트별_버킷_키와_한도에서_계산한_버킷_크기_보충_속도를_전달한다() {
+        givenScriptReturns(0L);
+        long beforeMillis = System.currentTimeMillis();
+
+        gate.tryAcquire(OpenAiProject.CHAT, MODEL, 5000);
+
+        long afterMillis = System.currentTimeMillis();
+        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Object> argsCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(stringRedisTemplate).execute(
+                any(RedisScript.class), keysCaptor.capture(),
+                argsCaptor.capture(), argsCaptor.capture(), argsCaptor.capture(), argsCaptor.capture(),
+                argsCaptor.capture(), argsCaptor.capture(), argsCaptor.capture());
+
+        assertThat(keysCaptor.getValue()).containsExactly(CHAT_REQUEST_BUCKET_KEY, CHAT_TOKEN_BUCKET_KEY);
+        List<Object> scriptArgs = argsCaptor.getAllValues();
+        assertThat(Long.parseLong((String) scriptArgs.get(0))).isBetween(beforeMillis, afterMillis);
+        // 9000 rpm → 0.15 건/ms, 버킷 = 0.15 × 10초 = 1500 건
+        assertThat(scriptArgs.get(1)).isEqualTo("1500");
+        assertThat(Double.parseDouble((String) scriptArgs.get(2))).isCloseTo(0.15, within(1e-9));
+        // 180000 tpm → 3 토큰/ms, 버킷 = 3 × 10초 = 30000 토큰
+        assertThat(scriptArgs.get(3)).isEqualTo("30000");
+        assertThat(Double.parseDouble((String) scriptArgs.get(4))).isCloseTo(3.0, within(1e-9));
+        assertThat(scriptArgs.get(5)).isEqualTo("5000");
+        // TTL = burst 의 두 배
+        assertThat(scriptArgs.get(6)).isEqualTo(String.valueOf(Duration.ofSeconds(BURST_SECONDS * 2L).toMillis()));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 프로젝트가_다르면_같은_모델이라도_다른_버킷_키를_쓴다() {
+        givenScriptReturns(0L);
+
+        gate.tryAcquire(OpenAiProject.CONTEXT_SUMMARY, MODEL, 5000);
+
+        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
+        verify(stringRedisTemplate).execute(
+                any(RedisScript.class), keysCaptor.capture(), any(), any(), any(), any(), any(), any(), any());
+        assertThat(keysCaptor.getValue()).containsExactly(
+                "ai:global:context-summary:" + MODEL + ":bucket:rpm",
+                "ai:global:context-summary:" + MODEL + ":bucket:tpm");
+    }
+
+    @Test
+    void 보상은_두_버킷_hash_의_tokens_필드에_요청_1_과_추정_토큰을_더하고_TTL_을_다시_건다() {
+        gate.compensate(new OpenAiRequestGate.GateReservation(OpenAiProject.CHAT, MODEL, 5000));
+
+        verify(hashOperations).increment(CHAT_REQUEST_BUCKET_KEY, "tokens", 1.0d);
+        verify(hashOperations).increment(CHAT_TOKEN_BUCKET_KEY, "tokens", 5000.0d);
+        verify(stringRedisTemplate).expire(CHAT_REQUEST_BUCKET_KEY, Duration.ofSeconds(BURST_SECONDS * 2L));
+        verify(stringRedisTemplate).expire(CHAT_TOKEN_BUCKET_KEY, Duration.ofSeconds(BURST_SECONDS * 2L));
+    }
+
+    @Test
+    void 보상_중_Redis_장애는_던지지_않고_삼킨다() {
+        given(hashOperations.increment(anyString(), any(), anyDouble()))
+                .willThrow(new QueryTimeoutException("timeout"));
+
+        assertThatCode(() -> gate.compensate(new OpenAiRequestGate.GateReservation(OpenAiProject.CHAT, MODEL, 5000)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void enterQuotaCooldown_은_프로젝트와_무관한_모델_키에_TTL_로_심는다() {
         gate.enterQuotaCooldown(MODEL, Duration.ofSeconds(300));
 
-        verify(valueOperations).set(contains(":quota-cooldown"), eq("1"), eq(Duration.ofSeconds(300)));
+        verify(valueOperations).set("ai:global:" + MODEL + ":quota-cooldown", "1", Duration.ofSeconds(300));
     }
 
     @Test
     void isInQuotaCooldown_은_키_존재를_반영한다() {
-        given(stringRedisTemplate.hasKey(contains(":quota-cooldown"))).willReturn(true);
+        given(stringRedisTemplate.hasKey("ai:global:" + MODEL + ":quota-cooldown")).willReturn(true);
 
         assertThat(gate.isInQuotaCooldown(MODEL)).isTrue();
     }
 
     @Test
-    void 확보가_쓴_분_키에_그대로_보상_차감해_순증분이_0_이_된다() {
-        given(valueOperations.increment(contains(":rpm:"), anyLong())).willReturn(10L);
-        given(valueOperations.increment(contains(":tpm:"), anyLong())).willReturn(5000L);
+    void isInQuotaCooldown_은_Redis_장애면_false_로_통과시킨다() {
+        given(stringRedisTemplate.hasKey(anyString())).willThrow(new QueryTimeoutException("timeout"));
 
-        OpenAiRequestGate.Decision decision = gate.tryAcquire(MODEL, 5000);
-        gate.compensate(((OpenAiRequestGate.Decision.Permitted) decision).reservation());
-
-        // 확보(rpm, tpm) → 보상(rpm, tpm) 네 번의 INCRBY 를 잡아, 보상이 확보와 같은 키를 쓰고
-        // 증분의 합이 0 이 되는지 본다 — 분이 넘어가도 확보 당시의 창을 되돌린다는 계약.
-        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Long> deltaCaptor = ArgumentCaptor.forClass(Long.class);
-        verify(valueOperations, times(4)).increment(keyCaptor.capture(), deltaCaptor.capture());
-        List<String> keys = keyCaptor.getAllValues();
-        List<Long> deltas = deltaCaptor.getAllValues();
-        assertThat(keys.get(2)).isEqualTo(keys.get(0));
-        assertThat(keys.get(3)).isEqualTo(keys.get(1));
-        assertThat(deltas.get(0) + deltas.get(2)).isZero();
-        assertThat(deltas.get(1) + deltas.get(3)).isZero();
-    }
-
-    @Test
-    void 보상_차감_후에는_두_분_키에_TTL_을_다시_건다() {
-        // 만료된 분 키에 DECRBY 하면 TTL 없는 음수 키가 새로 생기므로, 잔존 방지용 TTL 재설정을 검증한다.
-        long reservedMinute = 29_000_000L;
-
-        gate.compensate(new OpenAiRequestGate.GateReservation(MODEL, reservedMinute, 5000));
-
-        verify(stringRedisTemplate).expire("ai:global:" + MODEL + ":rpm:" + reservedMinute, Duration.ofMinutes(2));
-        verify(stringRedisTemplate).expire("ai:global:" + MODEL + ":tpm:" + reservedMinute, Duration.ofMinutes(2));
-    }
-
-    @Test
-    void 보상_차감_중_Redis_장애는_던지지_않고_삼킨다() {
-        given(valueOperations.increment(anyString(), anyLong())).willThrow(new QueryTimeoutException("timeout"));
-
-        assertThatCode(() -> gate.compensate(new OpenAiRequestGate.GateReservation(MODEL, 29_000_000L, 5000)))
-                .doesNotThrowAnyException();
+        assertThat(gate.isInQuotaCooldown(MODEL)).isFalse();
     }
 }

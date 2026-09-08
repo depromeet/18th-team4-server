@@ -70,7 +70,7 @@ class AiChatMessageSendServiceTest {
     private static final UserTokenBudgetWriter.ReserveResult.Granted GRANTED =
             new UserTokenBudgetWriter.ReserveResult.Granted(20260904, 100);
     private static final AiChatClient.RateLimitPermit GATE_PERMIT =
-            new AiChatClient.RateLimitPermit.Counted("gpt-4o-mini", 29_000_000L, 1000);
+            new AiChatClient.RateLimitPermit.Counted("CHAT", "gpt-4o-mini", 1000);
     private static final LocalDateTime SAVED_AT = LocalDateTime.of(2026, 9, 6, 12, 0, 0);
     /** 기한 넷과 큐 상한 — 운영 후보값 그대로. 기한을 짧게 둬야 하는 테스트는 따로 서비스를 만든다. */
     /** 진행 중 턴 상한 — 운영 값. 상한 거절을 보는 테스트는 상한 1짜리 진행 목록을 따로 만든다. */

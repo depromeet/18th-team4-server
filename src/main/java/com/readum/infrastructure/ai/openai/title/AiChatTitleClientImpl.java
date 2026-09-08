@@ -4,6 +4,7 @@ import com.readum.domain.aiChat.out.AiChatTitleClient;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
@@ -62,7 +63,7 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
         // error consumer 가 삼킨다 — 기존 제목 생성 실패 처리와 동일한 경로다 (저빈도·실패 허용).
         int estimatedTokens = tokenCounter.count(systemPrompt) + tokenCounter.count(chatHistory)
                 + ESTIMATED_OUTPUT_TOKENS;
-        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
+        rateLimitGuard.acquireOrThrow(OpenAiProject.TITLE, chatModel, estimatedTokens);
 
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(messages),

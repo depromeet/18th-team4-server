@@ -11,6 +11,7 @@ import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.guardrail.ChatInputGuardrail;
 import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,10 +87,10 @@ class AiChatClientImplTest {
     @Test
     void 계상된_permit_의_release_는_확보_시점의_분_키_내역으로_게이트_보상_차감을_호출한다() {
         aiChatClient.releaseRateLimitPermit(
-                new AiChatClient.RateLimitPermit.Counted("gpt-4o-mini", 29_000_000L, 4500));
+                new AiChatClient.RateLimitPermit.Counted("CHAT", "gpt-4o-mini", 4500));
 
         verify(rateLimitGuard).compensate(
-                new OpenAiRequestGate.GateReservation("gpt-4o-mini", 29_000_000L, 4500));
+                new OpenAiRequestGate.GateReservation(OpenAiProject.CHAT, "gpt-4o-mini", 4500));
     }
 
     @Test

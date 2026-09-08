@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -36,7 +38,7 @@ public class AiContextSummaryClientConfig {
     @Bean
     public ChatClient contextSummaryChatClient(
             ResponseErrorHandler openAiResponseErrorHandler,
-            @Value("${spring.ai.openai.api-key}") String apiKey,
+            OpenAiProjectProperties projectProperties,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
             @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}") String chatModelName
     ) {
@@ -45,7 +47,7 @@ public class AiContextSummaryClientConfig {
                 .requestFactory(new ReactorClientHttpRequestFactory(httpClient));
 
         OpenAiApi openAiApi = OpenAiApi.builder()
-                .apiKey(apiKey)
+                .apiKey(projectProperties.apiKeyOf(OpenAiProject.CONTEXT_SUMMARY))
                 .baseUrl(baseUrl)
                 .restClientBuilder(restClientBuilder)
                 .webClientBuilder(WebClient.builder())

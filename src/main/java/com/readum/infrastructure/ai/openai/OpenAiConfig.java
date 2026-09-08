@@ -7,7 +7,7 @@ import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import com.readum.infrastructure.ai.openai.guardrail.ModerationOutputAdvisor;
 import com.readum.infrastructure.ai.openai.guardrail.PromptInjectionPatternAdvisor;
 import com.readum.infrastructure.ai.openai.moderation.OpenAiInputModerationClientImpl;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiGateProperties;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SafeGuardAdvisor;
@@ -265,10 +265,10 @@ public class OpenAiConfig {
     public ResponseErrorHandler openAiResponseErrorHandler(
             ObjectMapper objectMapper,
             OpenAiRequestGate requestGate,
-            OpenAiGateProperties gateProperties,
+            OpenAiProjectProperties projectProperties,
             @Value("${spring.ai.openai.chat.options.model}") String chatModel
     ) {
         return new OpenAiResponseErrorHandler(objectMapper, requestGate, chatModel,
-                gateProperties.quotaCooldownSeconds());
+                projectProperties.gate().quotaCooldownSeconds());
     }
 }

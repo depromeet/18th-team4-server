@@ -6,6 +6,7 @@ import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
@@ -79,7 +80,7 @@ public class AiSummaryClientImpl implements AiSummaryClient {
         // "브레이커 잠깐 차단(Retry-After 만큼) + 무벌점 반납" 으로 처리한다 (기존 경로 재사용).
         int estimatedTokens = tokenCounter.count(promptAssembler.systemPrompt()) + tokenCounter.count(chatHistory)
                 + summaryJobProperties.estimatedOutputTokens();
-        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
+        rateLimitGuard.acquireOrThrow(OpenAiProject.SUMMARY, chatModel, estimatedTokens);
 
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(messages),

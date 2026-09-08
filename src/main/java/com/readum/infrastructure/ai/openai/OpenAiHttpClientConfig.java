@@ -1,6 +1,8 @@
 package com.readum.infrastructure.ai.openai;
 
 import lombok.extern.slf4j.Slf4j;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import org.springframework.ai.moderation.ModerationModel;
 import org.springframework.ai.openai.OpenAiModerationModel;
 import org.springframework.ai.openai.api.OpenAiModerationApi;
@@ -62,7 +64,7 @@ public class OpenAiHttpClientConfig {
     @Primary
     public ModerationModel moderationModel(
             ResponseErrorHandler openAiResponseErrorHandler,
-            @Value("${spring.ai.openai.api-key}") String apiKey,
+            OpenAiProjectProperties projectProperties,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl
     ) {
         HttpClient jdkHttpClient = HttpClient.newBuilder()
@@ -75,7 +77,7 @@ public class OpenAiHttpClientConfig {
         requestFactory.setReadTimeout(MODERATION_READ_TIMEOUT); // moderation 이 매달리지 않게 상한(② read 타임아웃)
         RestClient.Builder restClientBuilder = RestClient.builder().requestFactory(requestFactory);
         OpenAiModerationApi api = OpenAiModerationApi.builder()
-                .apiKey(apiKey)
+                .apiKey(projectProperties.apiKeyOf(OpenAiProject.MODERATION))
                 .baseUrl(baseUrl)
                 .restClientBuilder(restClientBuilder)
                 .responseErrorHandler(openAiResponseErrorHandler)

@@ -12,6 +12,7 @@ import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.guardrail.ChatInputGuardrail;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.domain.aiChat.out.TokenCounter;
@@ -81,8 +82,8 @@ public class AiChatClientImpl implements AiChatClient {
     @Override
     public RateLimitPermit acquireRateLimitPermit(AiChatStreamCommand command) {
         String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
-        // 분당 예산에서 "요청 1 + 추정 토큰" 확보. 사전 단계(요청 스레드)에서 호출되어
-        // 거절은 GlobalExceptionHandler 가 429 JSON 으로 변환한다.
+        // 채팅 프로젝트 버킷에서 "요청 1 + 추정 토큰" 확보. 사전 단계(요청 스레드)에서 호출되어
+        // 자리가 곧 나면 가드가 짧게 기다렸다 진행하고, 거절은 GlobalExceptionHandler 가 429 JSON 으로 변환한다.
         // 계상은 실제 전송량 전체(시스템 프롬프트 + 이력 + 예약 출력) — 사용자 예산과 달리 오버헤드 포함.
         int payloadTokens = tokenCounter.count(systemPrompt);
         for (HistoryMessage historyMessage : command.history()) {
@@ -91,9 +92,9 @@ public class AiChatClientImpl implements AiChatClient {
         int estimatedTokens = payloadTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
         // 게이트 계상 내역을 도메인이 들고 다닐 permit 으로 변환한다 — 도메인이 인프라 타입을
         // 모르게 하는 경계 번역. fail-open 통과(계상 없음)는 release 가 no-op 인 Uncounted.
-        return rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens)
+        return rateLimitGuard.acquireOrThrow(OpenAiProject.CHAT, chatModel, estimatedTokens)
                 .<RateLimitPermit>map(reservation -> new RateLimitPermit.Counted(
-                        reservation.model(), reservation.epochMinute(), reservation.estimatedTokens()))
+                        reservation.project().name(), reservation.model(), reservation.estimatedTokens()))
                 .orElseGet(RateLimitPermit.Uncounted::new);
     }
 
@@ -101,7 +102,7 @@ public class AiChatClientImpl implements AiChatClient {
     public void releaseRateLimitPermit(RateLimitPermit permit) {
         if (permit instanceof RateLimitPermit.Counted counted) {
             rateLimitGuard.compensate(new OpenAiRequestGate.GateReservation(
-                    counted.model(), counted.epochMinute(), counted.estimatedTokens()));
+                    OpenAiProject.valueOf(counted.project()), counted.model(), counted.estimatedTokens()));
         }
     }
 

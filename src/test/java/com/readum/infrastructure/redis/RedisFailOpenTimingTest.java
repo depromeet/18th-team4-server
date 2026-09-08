@@ -2,7 +2,8 @@ package com.readum.infrastructure.redis;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.out.UserMessageRateLimiter;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiGateProperties;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.SocketOptions;
@@ -86,7 +87,7 @@ class RedisFailOpenTimingTest {
         StringRedisTemplate template = templateFor(silentRedis.port());
 
         Measured<OpenAiRequestGate.Decision> measured =
-                measure(() -> gate(template).tryAcquire("gpt-4o-mini", 512));
+                measure(() -> gate(template).tryAcquire(OpenAiProject.CHAT, "gpt-4o-mini", 512));
 
         assertThat(measured.value()).isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
         assertThat(measured.elapsed())
@@ -104,7 +105,7 @@ class RedisFailOpenTimingTest {
 
         Measured<UserMessageRateLimiter.Result> rateLimit = measure(() -> rateLimiter(template).tryConsume(7L));
         Measured<OpenAiRequestGate.Decision> gateDecision =
-                measure(() -> gate(template).tryAcquire("gpt-4o-mini", 512));
+                measure(() -> gate(template).tryAcquire(OpenAiProject.CHAT, "gpt-4o-mini", 512));
 
         assertThat(rateLimit.value()).isInstanceOf(UserMessageRateLimiter.Result.Bypassed.class);
         assertThat(gateDecision.value()).isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
@@ -123,7 +124,7 @@ class RedisFailOpenTimingTest {
 
         Measured<UserMessageRateLimiter.Result> rateLimit = measure(() -> rateLimiter(template).tryConsume(7L));
         Measured<OpenAiRequestGate.Decision> gateDecision =
-                measure(() -> gate(template).tryAcquire("gpt-4o-mini", 512));
+                measure(() -> gate(template).tryAcquire(OpenAiProject.CHAT, "gpt-4o-mini", 512));
 
         // Redis 가 죽는 경우와 매달리는 경우의 차이가 여기서 드러난다 — 거부는 즉시 오므로 기한을 기다리지 않는다.
         assertThat(rateLimit.value()).isInstanceOf(UserMessageRateLimiter.Result.Bypassed.class);
@@ -170,8 +171,18 @@ class RedisFailOpenTimingTest {
     }
 
     private OpenAiRequestGate gate(StringRedisTemplate template) {
-        OpenAiGateProperties properties = new OpenAiGateProperties(
-                Map.of("gpt-4o-mini", new OpenAiGateProperties.ModelLimit(9000, 180000L)), 300);
+        Map<String, OpenAiProjectProperties.ModelLimit> limits =
+                Map.of("gpt-4o-mini", new OpenAiProjectProperties.ModelLimit(9000, 180000L));
+        OpenAiProjectProperties properties = new OpenAiProjectProperties(
+                Map.of(
+                        OpenAiProject.CHAT, new OpenAiProjectProperties.Project("chat-key", limits),
+                        OpenAiProject.MODERATION, new OpenAiProjectProperties.Project("moderation-key", Map.of()),
+                        OpenAiProject.SUMMARY, new OpenAiProjectProperties.Project("summary-key", limits),
+                        OpenAiProject.CONTEXT_SUMMARY, new OpenAiProjectProperties.Project("context-summary-key", limits),
+                        OpenAiProject.TITLE, new OpenAiProjectProperties.Project("title-key", limits)
+                ),
+                new OpenAiProjectProperties.Gate(10, 1000, 300)
+        );
         return new OpenAiRequestGate(template, properties);
     }
 

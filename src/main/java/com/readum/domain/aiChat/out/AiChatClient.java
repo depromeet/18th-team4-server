@@ -11,8 +11,11 @@ public interface AiChatClient {
      * {@link #releaseRateLimitPermit(RateLimitPermit)} 에 그대로 돌려준다.
      */
     sealed interface RateLimitPermit {
-        /** 분당 예산에 계상된 확보 — 생성이 실패해 토큰 소모가 없으면 release 로 보상 차감한다. */
-        record Counted(String model, long epochMinute, int estimatedTokens) implements RateLimitPermit {
+        /**
+         * 버킷에 계상된 확보 — 생성이 실패해 토큰 소모가 없으면 release 로 되돌린다.
+         * {@code project} 는 어느 OpenAI 프로젝트 버킷에서 뺐는지의 이름이다(도메인은 해석하지 않는다).
+         */
+        record Counted(String project, String model, int estimatedTokens) implements RateLimitPermit {
         }
 
         /** 게이트가 검사 없이 통과시킨 경우 — 계상된 것이 없으므로 release 는 아무것도 하지 않는다. */

@@ -4,6 +4,7 @@ import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.model.aiChat.entity.AiChatSession;
@@ -122,9 +123,9 @@ class AiChatStreamGuardrailTest {
 
     @BeforeEach
     void setUp() {
-        given(openAiRequestGate.tryAcquire(anyString(), anyInt()))
+        given(openAiRequestGate.tryAcquire(any(), anyString(), anyInt()))
                 .willReturn(new OpenAiRequestGate.Decision.Permitted(
-                        new OpenAiRequestGate.GateReservation("gpt-4o-mini", 29_000_000L, 1000)));
+                        new OpenAiRequestGate.GateReservation(OpenAiProject.CHAT, "gpt-4o-mini", 1000)));
         // AiChatClient 자체가 mock 이므로 게이트 확보도 여기서 직접 통과시킨다 (계상 없는 permit).
         given(aiChatClient.acquireRateLimitPermit(any(AiChatStreamCommand.class)))
                 .willReturn(new AiChatClient.RateLimitPermit.Uncounted());
