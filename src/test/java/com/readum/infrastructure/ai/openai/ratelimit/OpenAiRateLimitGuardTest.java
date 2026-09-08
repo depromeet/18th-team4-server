@@ -177,6 +177,27 @@ class OpenAiRateLimitGuardTest {
     }
 
     @Test
+    void 잠들다_인터럽트되면_인터럽트_표시를_되살리고_AI_RATE_LIMIT_BURST_로_던진다() {
+        OpenAiRateLimitGuard interruptedGuard = new OpenAiRateLimitGuard(gate, properties(), duration -> {
+            throw new InterruptedException("대기 중 인터럽트");
+        }, () -> fakeNanoTime);
+        given(gate.tryAcquire(OpenAiProject.CHAT, MODEL, ESTIMATED_TOKENS)).willReturn(rateBudgetRejected(400));
+
+        try {
+            assertThatThrownBy(() -> interruptedGuard.acquireOrThrow(OpenAiProject.CHAT, MODEL, ESTIMATED_TOKENS))
+                    .isInstanceOfSatisfying(TooManyRequestsException.class, thrown -> {
+                        assertThat(thrown.getErrorCode()).isEqualTo(AiChatErrorCode.AI_RATE_LIMIT_BURST);
+                        assertThat(thrown.getRateLimitInfo().retryAfter()).isEqualTo(Duration.ofMillis(400));
+                    });
+            // 확인하면서 표시를 지운다 — 남겨 두면 같은 스레드를 쓰는 다음 테스트가 영향을 받는다.
+            assertThat(Thread.interrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+        assertThat(recordedSleeps).isEmpty();
+    }
+
+    @Test
     void 보상은_게이트에_그대로_위임한다() {
         guard.compensate(CHAT_RESERVATION);
 

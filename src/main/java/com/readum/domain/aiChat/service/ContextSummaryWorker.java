@@ -27,12 +27,12 @@ import java.util.UUID;
  * 감상문 워커(SummaryGenerationWorker)와 같은 골격 — 공통 추상화로 묶지 않는다(두 큐의 생명주기가 다름).
  *
  * 실패 분류:
- * - 추정 토큰 > maxRequestTokens → 호출 전 즉시 FAILED(fail-fast). 채팅은 최근 원문 최대 토큰 안에서 원문으로 계속 동작.
- * - burst 429(버킷 자리 없음 — 게이트 포화) → 무벌점 반납 + 이번 드레인 사이클 중단
+ * - 추정 토큰 > maxRequestTokens → 호출 전 즉시 실패 처리(FAILED). 채팅은 최근 원문 최대 토큰 안에서 원문으로 계속 동작.
+ * - burst 429(버킷 자리 없음 — 게이트 포화) → 재시도 횟수를 올리지 않고 대기열로 되돌림 + 이번 드레인 사이클 중단
  * - quota 429(게이트 쿨다운) → 재시도 가능 실패로 기록 + 이번 드레인 사이클 중단. 쿨다운은 게이트가 관리
  * - 5xx → 재시도 / 4xx → 즉시 FAILED
  *
- * burst/quota 는 계정 전역 신호다 — 게이트는 HTTP 전에(버킷 확인만으로) 429 를 던지므로, 무벌점 반납한 작업을
+ * burst/quota 는 계정 전역 신호다 — 게이트는 HTTP 전에(버킷 확인만으로) 429 를 던지므로, 재시도 횟수를 올리지 않고 대기열로 되돌린 작업을
  * 같은 사이클에서 다시 선점하면 버킷이 보충될 때까지 claim→반납을 무한 반복하며 DB 를 두드린다. 그래서 quota 쿨다운
  * 조기 반환과 같은 취지로, 전역 게이트가 포화면 이번 드레인 사이클을 멈추고 다음 dispatch 주기에 다시 시도한다.
  */
@@ -129,7 +129,7 @@ public class ContextSummaryWorker {
                     e.getErrorCode().name(), e.getMessage(), retryAtFrom(e.getRateLimitInfo()));
             return false;
         }
-        // burst — 버킷 자리 없음(게이트 포화, backpressure). 무벌점 반납(가짜 실패 방지).
+        // burst — 버킷 자리 없음(게이트 포화, backpressure). 재시도 횟수를 올리지 않고 대기열로 되돌린다(가짜 실패 방지).
         lifecycleService.releaseWithoutPenalty(jobId, owner);
         return false;
     }

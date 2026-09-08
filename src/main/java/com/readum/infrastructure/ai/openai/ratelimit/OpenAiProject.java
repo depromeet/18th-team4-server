@@ -28,7 +28,14 @@ public enum OpenAiProject {
         this.gated = gated;
     }
 
-    /** 전역 게이트를 거치는 프로젝트인가 — 거치면 모델 한도가 하나 이상 있어야 기동한다. */
+    /**
+     * 전역 게이트를 거치는 프로젝트인가 — 거치면 모델 한도가 하나 이상 있어야 기동한다.
+     *
+     * <p>이 값을 보는 곳은 기동 시 설정 검사({@link OpenAiProjectProperties} 생성자) 한 곳뿐이다.
+     * 게이트({@link OpenAiRequestGate#tryAcquire})는 이 값을 보지 않고 그 프로젝트·모델의 한도가 있는지만 본다 —
+     * 한도가 없으면 ERROR 로그를 남기고 검사 없이 통과시킨다(fail-open). 그래서 거치기로 해 놓고 한도를 빠뜨린
+     * 설정은 조용히 통과하는 대신 기동에서 막는다.
+     */
     public boolean gated() {
         return gated;
     }

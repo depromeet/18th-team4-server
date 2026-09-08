@@ -102,7 +102,7 @@ ai-chat:
     delivery-timeout-seconds: 30           # 전달 기한. 전달 채널 생성 시점(SseEmitter 를 돌려주는 시점)부터. 기한 후에는 새 SSE 쓰기를 시작하지 않는다. 생성 전체 기한 + 10초 — 후처리(저장·정산)는 보통 1초 안이고, 기한이 지나 연결이 닫혀도 저장은 끝나 답변은 이력에 남는다.
     shutdown-wait-seconds: 60              # 종료 대기 상한. shutdown 신호부터 진행 중인 생성·후처리를 기다리는 최대 시간. 초과분은 DB 의 미정산 예약 반환에 맡긴다.
     # 아래 둘은 기한이 아니라 여유 — 요청 기록의 만료 시각(expires_at = 접수 + 선행 여유 + 생성 전체 기한 + 후처리 여유)을 잡는 데만 쓴다.
-    prepare-allowance-seconds: 10          # 선행 처리 여유 = moderation HTTP 상한 6초(연결 2 + 읽기 4, OpenAiHttpClientConfig) + Redis 몫 2초(폭주 가드·전역 게이트 각 1회 × 명령 기한 1초) + 채팅 게이트 대기 상한 1초(openai.gate.chat-max-wait-millis) + DB 몫 1초(이력 조회·예약·USER 저장). 계산값이며 실측 아님. 값이 어긋나면 기동이 막힌다(AiChatTimeBudgetValidator). Redis 몫과 게이트 대기는 함께 일어나지 않는다 — 매달린 Redis 앞에서는 게이트가 검사 없이 통과해 기다리지 않는다. 그래서 합산은 보수적 상한이고, DB 가 실제로 쓸 수 있는 시간은 1초보다 넉넉하다.
+    prepare-allowance-seconds: 10          # 선행 처리 여유 = moderation HTTP 상한 6초(연결 2 + 읽기 4, OpenAiHttpClientConfig) + Redis 몫 2초(폭주 가드·전역 게이트 각 1회 × 명령 기한 1초) + 채팅 게이트 대기 상한 1초(openai.gate.chat-max-wait-millis) + DB 몫 1초(이력 조회·예약·USER 저장). 계산값이며 실측 아님. 값이 어긋나면 기동이 막힌다(AiChatTimeBudgetValidator). Redis 가 아예 응답하지 않으면 게이트는 검사 없이 통과해 기다리지 않으므로 Redis 몫과 게이트 대기가 동시에 최대가 되지는 않는다. 다만 기한 안에서 느리게 응답하는 Redis 라면 둘의 합에 가까워질 수 있어, 합산을 상한으로 잡는다.
     post-processing-allowance-seconds: 10  # 후처리 여유. Hikari 연결 획득 상한 3초(spring.datasource.hikari.connection-timeout) + 행 잠금 대기 5초(innodb_lock_wait_timeout) + 커밋 몫 2초. 계산값이며 실측 아님 — N=100 실측에서 후처리는 연결 대기를 포함해 0.4~0.6초였다.
     delivery-queue-capacity: 256           # 연결 1개당 전달 큐에 쌓아둘 델타 수. 설정에 적힌 출력 상한 1024 토큰의 1/4 을 버퍼로 잡은 예상치(그 상한은 실제 요청에 걸리지 않으므로 어림잡기용). 실제 청크 크기·누적 답변·동시 요청 메모리를 함께 재서 조정한다.
     # 동시에 진행할 수 있는 채팅 턴 수의 상한(선행 처리 시작 ~ 마지막 후처리). 넘으면 503 AI_CHAT_CAPACITY_EXCEEDED.
