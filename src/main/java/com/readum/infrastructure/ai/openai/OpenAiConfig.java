@@ -7,6 +7,7 @@ import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import com.readum.infrastructure.ai.openai.guardrail.ModerationOutputAdvisor;
 import com.readum.infrastructure.ai.openai.guardrail.PromptInjectionPatternAdvisor;
 import com.readum.infrastructure.ai.openai.moderation.OpenAiInputModerationClientImpl;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import org.springframework.ai.chat.client.ChatClient;
@@ -71,7 +72,7 @@ public class OpenAiConfig {
             GuardrailProperties guardrailProperties,
             ObjectProvider<ModerationModel> moderationModelProvider,
             ResponseErrorHandler openAiResponseErrorHandler,
-            @Value("${spring.ai.openai.api-key}") String apiKey,
+            OpenAiProjectProperties projectProperties,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
             @Value("${spring.ai.openai.chat.options.model}") String chatModelName,
             @Value("classpath:prompts/reading-assistant-system.st") Resource systemPromptResource
@@ -88,7 +89,7 @@ public class OpenAiConfig {
         RestClient.Builder restClientBuilder = RestClient.builder().requestFactory(requestFactory);
 
         OpenAiApi openAiApi = OpenAiApi.builder()
-                .apiKey(apiKey)
+                .apiKey(projectProperties.apiKeyOf(OpenAiProject.SUMMARY))
                 .baseUrl(baseUrl)
                 .restClientBuilder(restClientBuilder)
                 .webClientBuilder(WebClient.builder()) // OpenAiApi 빌더 필수 인자 — call 경로에서는 사용되지 않음
@@ -172,7 +173,7 @@ public class OpenAiConfig {
     public OpenAiChatModel streamingChatModel(
             ConnectionProvider openAiStreamingConnectionProvider,
             ResponseErrorHandler openAiResponseErrorHandler,
-            @Value("${spring.ai.openai.api-key}") String apiKey,
+            OpenAiProjectProperties projectProperties,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
             @Value("${spring.ai.openai.chat.options.model}") String chatModelName
     ) {
@@ -186,7 +187,7 @@ public class OpenAiConfig {
         requestFactory.setReadTimeout(CHAT_READ_TIMEOUT);
 
         OpenAiApi openAiApi = OpenAiApi.builder()
-                .apiKey(apiKey)
+                .apiKey(projectProperties.apiKeyOf(OpenAiProject.CHAT))
                 .baseUrl(baseUrl)
                 .restClientBuilder(RestClient.builder().requestFactory(requestFactory))
                 .webClientBuilder(WebClient.builder().clientConnector(new ReactorClientHttpConnector(

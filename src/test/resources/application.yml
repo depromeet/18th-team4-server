@@ -80,12 +80,40 @@ aladin:
   request-timeout: PT1S
   search-result-limit: 200
 
-openai-gate:
-  models:
-    gpt-4o-mini:
-      requests-per-minute: 9000
-      tokens-per-minute: 180000
-  quota-cooldown-seconds: 300
+# OpenAI 프로젝트 — 테스트는 다섯 키 모두 리터럴 값을 쓴다(환경변수 없이도 컨텍스트가 뜨게).
+openai:
+  projects:
+    chat:
+      api-key: test-openai-key
+      models:
+        gpt-4o-mini:
+          requests-per-minute: 9000
+          tokens-per-minute: 180000
+    moderation:
+      api-key: test-openai-key
+      models: {}
+    summary:
+      api-key: test-openai-key
+      models:
+        gpt-4o-mini:
+          requests-per-minute: 9000
+          tokens-per-minute: 180000
+    context-summary:
+      api-key: test-openai-key
+      models:
+        gpt-4o-mini:
+          requests-per-minute: 9000
+          tokens-per-minute: 180000
+    title:
+      api-key: test-openai-key
+      models:
+        gpt-4o-mini:
+          requests-per-minute: 9000
+          tokens-per-minute: 180000
+  gate:
+    burst-seconds: 10
+    chat-max-wait-millis: 1000
+    quota-cooldown-seconds: 300
 
 summary-job:
   pool-size: 3

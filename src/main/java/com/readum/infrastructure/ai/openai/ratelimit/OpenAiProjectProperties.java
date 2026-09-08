@@ -40,12 +40,17 @@ public record OpenAiProjectProperties(
 
     /**
      * @param apiKey 이 프로젝트의 OpenAI API 키.
-     * @param models 모델별 분당 한도. 게이트를 거치지 않는 프로젝트는 비어 있어도 된다.
+     * @param models 모델별 분당 한도. 게이트를 거치지 않는 프로젝트는 비어 있어도 된다
+     *               (yml 의 {@code models: {}} 는 값 없음으로 들어와 {@code null} 이 되므로 빈 지도로 바꾼다).
      */
     public record Project(
             @NotBlank String apiKey,
             @NotNull Map<String, @Valid ModelLimit> models
     ) {
+
+        public Project {
+            models = (models == null) ? Map.of() : models;
+        }
     }
 
     public record ModelLimit(

@@ -26,13 +26,15 @@ class AiChatTimeBudgetValidatorTest {
     private static final Duration MODERATION_HTTP_CEILING = Duration.ofSeconds(6);
     private static final Duration CONNECTION_ACQUIRE_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration REDIS_COMMAND_TIMEOUT = Duration.ofSeconds(1);
+    private static final Duration CHAT_GATE_MAX_WAIT = Duration.ofSeconds(1);
 
     @Test
     void 무응답_기한이_생성_전체_기한보다_길면_기동을_막는다() {
         AiChatProperties.Streaming streaming = streaming(10, 20, 30, 30, 10);
 
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
-                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, REDIS_COMMAND_TIMEOUT))
+                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, REDIS_COMMAND_TIMEOUT,
+                CHAT_GATE_MAX_WAIT))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("generation-idle-timeout-seconds(30)")
                 .hasMessageContaining("generation-total-timeout-seconds(20)");
@@ -44,7 +46,8 @@ class AiChatTimeBudgetValidatorTest {
 
         // 같으면 완성본 교체(replace)가 나갈 시간이 0 이라 상한 구실을 못 한다.
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
-                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, REDIS_COMMAND_TIMEOUT))
+                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, REDIS_COMMAND_TIMEOUT,
+                CHAT_GATE_MAX_WAIT))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("delivery-timeout-seconds(20)")
                 .hasMessageContaining("generation-total-timeout-seconds(20)");
@@ -56,7 +59,8 @@ class AiChatTimeBudgetValidatorTest {
 
         // 선행 여유를 moderation 상한과 같게 두면 Redis·DB 몫이 남지 않는다.
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
-                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, REDIS_COMMAND_TIMEOUT))
+                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, REDIS_COMMAND_TIMEOUT,
+                CHAT_GATE_MAX_WAIT))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("연결+읽기(6초)")
                 .hasMessageContaining("prepare-allowance-seconds(6)");
@@ -67,12 +71,27 @@ class AiChatTimeBudgetValidatorTest {
         AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
 
         // 매달린 Redis 앞에서 fail-open 은 명령 기한만큼 기다린 뒤에야 발동한다 — 그 몫이 선행 여유에 들어야 한다.
-        // 명령 기한 2초면 호출 둘이 4초, moderation 6초와 합쳐 10초라 선행 여유 10초를 그대로 다 쓴다.
+        // 명령 기한 2초면 호출 둘이 4초, moderation 6초·게이트 대기 1초와 합쳐 11초라 선행 여유 10초를 넘는다.
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
-                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, Duration.ofSeconds(2)))
+                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, Duration.ofSeconds(2),
+                CHAT_GATE_MAX_WAIT))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("spring.data.redis.timeout(2000ms)")
                 .hasMessageContaining("Redis 호출 2회")
+                .hasMessageContaining("prepare-allowance-seconds(10)");
+    }
+
+    @Test
+    void 채팅_게이트_대기_상한까지_더하면_선행_처리_여유를_넘길_때_기동을_막는다() {
+        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
+
+        // 채팅은 버킷 자리가 없으면 이 상한만큼 기다렸다 진행하므로 그 시간도 선행 처리 안에서 쓰인다.
+        // Redis 몫 2초 + moderation 6초까지는 여유 10초 안이지만, 게이트 대기 2.5초를 더하면 10.5초로 넘어간다.
+        assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
+                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, REDIS_COMMAND_TIMEOUT,
+                Duration.ofMillis(2500)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("chat-max-wait-millis(2500ms)")
                 .hasMessageContaining("prepare-allowance-seconds(10)");
     }
 
@@ -81,7 +100,7 @@ class AiChatTimeBudgetValidatorTest {
         AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
 
         assertThatCode(() -> AiChatTimeBudgetValidator.verify(
-                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, null))
+                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, null, CHAT_GATE_MAX_WAIT))
                 .doesNotThrowAnyException();
     }
 
@@ -90,7 +109,8 @@ class AiChatTimeBudgetValidatorTest {
         AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
 
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
-                streaming, MODERATION_HTTP_CEILING, Duration.ofSeconds(30), REDIS_COMMAND_TIMEOUT))
+                streaming, MODERATION_HTTP_CEILING, Duration.ofSeconds(30), REDIS_COMMAND_TIMEOUT,
+                CHAT_GATE_MAX_WAIT))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("connection-timeout(30000ms)")
                 .hasMessageContaining("post-processing-allowance-seconds(10)");
@@ -101,7 +121,7 @@ class AiChatTimeBudgetValidatorTest {
         AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
 
         assertThatCode(() -> AiChatTimeBudgetValidator.verify(
-                streaming, MODERATION_HTTP_CEILING, null, REDIS_COMMAND_TIMEOUT))
+                streaming, MODERATION_HTTP_CEILING, null, REDIS_COMMAND_TIMEOUT, CHAT_GATE_MAX_WAIT))
                 .doesNotThrowAnyException();
     }
 
@@ -119,7 +139,8 @@ class AiChatTimeBudgetValidatorTest {
                 streaming,
                 OpenAiHttpClientConfig.moderationHttpCeiling(),
                 productionConnectionAcquireTimeout(),
-                productionRedisCommandTimeout()))
+                productionRedisCommandTimeout(),
+                productionChatGateMaxWait()))
                 .doesNotThrowAnyException();
 
         // 한 턴의 시간 예산은 40초다 — 값이 바뀌면 문서(docs/domain/ai-chat.md · docs/ops/…)도 함께 고친다.
@@ -175,6 +196,18 @@ class AiChatTimeBudgetValidatorTest {
             Object timeout = redis.get("timeout");
             assertThat(timeout).as("application.yml 의 spring.data.redis.timeout").isNotNull();
             return DurationStyle.detectAndParse(timeout.toString());
+        }
+    }
+
+    /** 채팅 게이트 대기 상한도 환경 무관 상수라 {@code application.yml} 한 곳에 있다. */
+    @SuppressWarnings("unchecked")
+    private static Duration productionChatGateMaxWait() throws Exception {
+        try (InputStream applicationYaml = Files.newInputStream(Path.of("src/main/resources/application.yml"))) {
+            Map<String, Object> root = new Yaml().load(applicationYaml);
+            Map<String, Object> gate = (Map<String, Object>) ((Map<String, Object>) root.get("openai")).get("gate");
+            Object chatMaxWaitMillis = gate.get("chat-max-wait-millis");
+            assertThat(chatMaxWaitMillis).as("application.yml 의 openai.gate.chat-max-wait-millis").isNotNull();
+            return Duration.ofMillis(((Number) chatMaxWaitMillis).longValue());
         }
     }
 
