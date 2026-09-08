@@ -85,7 +85,7 @@ class AiChatClientImplTest {
     // 단위 수준으로 구성할 수 없다. 확보 쪽은 OpenAiRateLimitGuardTest(Optional 반환)가 받친다.
 
     @Test
-    void 계상된_permit_의_release_는_확보_시점의_분_키_내역으로_게이트_보상_차감을_호출한다() {
+    void 계상된_permit_의_release_는_확보_때_받은_프로젝트_모델_토큰_내역으로_게이트에_되돌린다() {
         aiChatClient.releaseRateLimitPermit(
                 new AiChatClient.RateLimitPermit.Counted("CHAT", "gpt-4o-mini", 4500));
 

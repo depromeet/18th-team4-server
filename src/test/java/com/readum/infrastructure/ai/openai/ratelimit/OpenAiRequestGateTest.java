@@ -73,11 +73,47 @@ class OpenAiRequestGateTest {
         );
     }
 
+    // --- 스크립트 호출 도우미 — RedisScript 제네릭 때문에 붙는 unchecked 경고를 여기 모아 둔다 ---------------
+
     @SuppressWarnings("unchecked")
     private void givenScriptReturns(Long scriptResult) {
         given(stringRedisTemplate.execute(
                 any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any()))
                 .willReturn(scriptResult);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void givenScriptFails(RuntimeException failure) {
+        given(stringRedisTemplate.execute(
+                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any()))
+                .willThrow(failure);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void verifyScriptNeverCalled() {
+        verify(stringRedisTemplate, never()).execute(
+                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    /** 스크립트에 넘어간 KEYS 를 꺼낸다. */
+    @SuppressWarnings("unchecked")
+    private List<String> captureScriptKeys() {
+        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
+        verify(stringRedisTemplate).execute(
+                any(RedisScript.class), keysCaptor.capture(), any(), any(), any(), any(), any(), any(), any());
+        return keysCaptor.getValue();
+    }
+
+    /** 스크립트에 넘어간 ARGV 를 순서대로 꺼낸다. */
+    @SuppressWarnings("unchecked")
+    private List<Object> captureScriptArguments() {
+        ArgumentCaptor<Object> argumentsCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(stringRedisTemplate).execute(
+                any(RedisScript.class), anyList(),
+                argumentsCaptor.capture(), argumentsCaptor.capture(), argumentsCaptor.capture(),
+                argumentsCaptor.capture(), argumentsCaptor.capture(), argumentsCaptor.capture(),
+                argumentsCaptor.capture());
+        return argumentsCaptor.getAllValues();
     }
 
     @Test
@@ -115,30 +151,24 @@ class OpenAiRequestGateTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void Redis_장애면_계상_내역_없이_허용한다() {
-        given(stringRedisTemplate.execute(
-                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any()))
-                .willThrow(new QueryTimeoutException("timeout"));
+        givenScriptFails(new QueryTimeoutException("timeout"));
 
         assertThat(gate.tryAcquire(OpenAiProject.CHAT, MODEL, 5000))
                 .isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void 프로젝트에_모델_한도가_없으면_스크립트를_부르지_않고_계상_내역_없이_허용한다() {
         assertThat(gate.tryAcquire(OpenAiProject.MODERATION, MODEL, 100))
                 .isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
         assertThat(gate.tryAcquire(OpenAiProject.CHAT, "unknown-model", 100))
                 .isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
 
-        verify(stringRedisTemplate, never()).execute(
-                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any());
+        verifyScriptNeverCalled();
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void quota_쿨다운_중이면_스크립트를_부르지_않고_QUOTA_COOLDOWN_으로_거절한다() {
         given(stringRedisTemplate.getExpire(contains(":quota-cooldown"), eq(TimeUnit.SECONDS))).willReturn(120L);
 
@@ -148,12 +178,11 @@ class OpenAiRequestGateTest {
         OpenAiRequestGate.Decision.Rejected rejected = (OpenAiRequestGate.Decision.Rejected) decision;
         assertThat(rejected.reason()).isEqualTo(OpenAiRequestGate.RejectReason.QUOTA_COOLDOWN);
         assertThat(rejected.retryAfter()).isEqualTo(Duration.ofSeconds(120));
-        verify(stringRedisTemplate, never()).execute(
-                any(RedisScript.class), anyList(), any(), any(), any(), any(), any(), any(), any());
+        verifyScriptNeverCalled();
     }
 
+    /** 게이트가 Lua 스크립트에 넘기는 KEYS·ARGV 의 순서와 값 — 스크립트가 읽는 자리와 맞는지 지킨다. */
     @Test
-    @SuppressWarnings("unchecked")
     void 스크립트에_프로젝트별_버킷_키와_한도에서_계산한_버킷_크기_보충_속도를_전달한다() {
         givenScriptReturns(0L);
         long beforeMillis = System.currentTimeMillis();
@@ -161,15 +190,8 @@ class OpenAiRequestGateTest {
         gate.tryAcquire(OpenAiProject.CHAT, MODEL, 5000);
 
         long afterMillis = System.currentTimeMillis();
-        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
-        ArgumentCaptor<Object> argsCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(stringRedisTemplate).execute(
-                any(RedisScript.class), keysCaptor.capture(),
-                argsCaptor.capture(), argsCaptor.capture(), argsCaptor.capture(), argsCaptor.capture(),
-                argsCaptor.capture(), argsCaptor.capture(), argsCaptor.capture());
-
-        assertThat(keysCaptor.getValue()).containsExactly(CHAT_REQUEST_BUCKET_KEY, CHAT_TOKEN_BUCKET_KEY);
-        List<Object> scriptArgs = argsCaptor.getAllValues();
+        assertThat(captureScriptKeys()).containsExactly(CHAT_REQUEST_BUCKET_KEY, CHAT_TOKEN_BUCKET_KEY);
+        List<Object> scriptArgs = captureScriptArguments();
         assertThat(Long.parseLong((String) scriptArgs.get(0))).isBetween(beforeMillis, afterMillis);
         // 9000 rpm → 0.15 건/ms, 버킷 = 0.15 × 10초 = 1500 건
         assertThat(scriptArgs.get(1)).isEqualTo("1500");
@@ -178,21 +200,17 @@ class OpenAiRequestGateTest {
         assertThat(scriptArgs.get(3)).isEqualTo("30000");
         assertThat(Double.parseDouble((String) scriptArgs.get(4))).isCloseTo(3.0, within(1e-9));
         assertThat(scriptArgs.get(5)).isEqualTo("5000");
-        // TTL = burst 의 두 배
+        // 최소 TTL = burst 의 두 배
         assertThat(scriptArgs.get(6)).isEqualTo(String.valueOf(Duration.ofSeconds(BURST_SECONDS * 2L).toMillis()));
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void 프로젝트가_다르면_같은_모델이라도_다른_버킷_키를_쓴다() {
         givenScriptReturns(0L);
 
         gate.tryAcquire(OpenAiProject.CONTEXT_SUMMARY, MODEL, 5000);
 
-        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
-        verify(stringRedisTemplate).execute(
-                any(RedisScript.class), keysCaptor.capture(), any(), any(), any(), any(), any(), any(), any());
-        assertThat(keysCaptor.getValue()).containsExactly(
+        assertThat(captureScriptKeys()).containsExactly(
                 "ai:global:context-summary:" + MODEL + ":bucket:rpm",
                 "ai:global:context-summary:" + MODEL + ":bucket:tpm");
     }

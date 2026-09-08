@@ -51,6 +51,7 @@ public class OpenAiRequestGate {
         this.properties = properties;
         // 버킷이 비어 있어도 burstSeconds 면 가득 찬다. 그 두 배가 지나도록 아무도 안 두드렸으면 키를 지운다 —
         // 키가 없으면 스크립트가 가득 찬 버킷으로 본다.
+        // 이 값은 최소 TTL 이다 — 버킷이 빚(음수)을 졌으면 스크립트가 다 갚고 가득 찰 때까지로 TTL 을 늘린다.
         this.bucketKeyTtl = Duration.ofSeconds(properties.gate().burstSeconds() * 2L);
     }
 

@@ -76,9 +76,8 @@ public record OpenAiProjectProperties(
         return projects.get(project).apiKey();
     }
 
-    /** 해당 프로젝트에 이 모델의 한도가 없으면 {@code null}. */
+    /** 해당 프로젝트에 이 모델의 한도가 없으면 {@code null}. 프로젝트 자체는 생성자가 다섯 개 모두 있음을 보장한다. */
     public ModelLimit limitOf(OpenAiProject project, String model) {
-        Project found = projects.get(project);
-        return found == null ? null : found.models().get(model);
+        return projects.get(project).models().get(model);
     }
 }

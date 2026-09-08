@@ -30,5 +30,13 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # 토큰 버킷 Lua 스크립트 테스트는 자기 몫의 redis-server 를 빈 포트에 직접 띄운다 —
+      # 바이너리가 없으면 조용히 건너뛰므로, CI 에서도 실제로 돌도록 여기서 설치한다.
+      # 우분투 패키지는 설치와 동시에 6379 에 서비스를 띄우므로, 테스트가 띄운 것만 남게 그 서비스는 내린다.
+      - name: Redis 설치 (토큰 버킷 Lua 스크립트 테스트용)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
+          sudo systemctl stop redis-server || true
+
       - name: 빌드 + 전체 테스트
         run: ./gradlew build
