@@ -44,8 +44,9 @@ public class OpenAiHttpClientConfig {
      * 두 값을 따로 더하는 곳이 생기지 않도록 여기 한 번만 더해 둔다.
      *
      * <p>연결 2초 + 읽기 4초 = 6초다. 3 + 5 = 8초에서 내렸다 — 선행 처리 여유 10초에는 moderation 말고도
-     * 폭주 가드와 전역 게이트의 Redis 호출 둘이 들어가고, Redis 명령 기한을 1초로 못박으면서
-     * 그 둘이 최악 2초를 쓰게 됐기 때문이다. 6 + 2 = 8초라 DB(이력 조회·예약·USER 저장) 몫 2초가 남는다.
+     * 폭주 가드와 전역 게이트의 Redis 호출 둘(명령 기한 1초씩 최악 2초)과, 채팅이 버킷 자리를 기다려 주는
+     * 상한 1초({@code openai.gate.chat-max-wait-millis})가 들어가기 때문이다.
+     * moderation 6 + Redis 2 + 채팅 게이트 대기 1 = 9초라 DB(이력 조회·예약·USER 저장) 몫 1초가 남는다.
      * OpenAI moderation 은 짧은 문자열 하나를 판정하는 단순 호출이라 정상 응답이 4초를 넘을 이유가 없다
      * (계산이며 실측 아님). 이 관계는 기동 시 {@code AiChatTimeBudgetValidator} 가 대조한다.
      */

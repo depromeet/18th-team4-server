@@ -18,8 +18,9 @@ import java.util.Map;
  *
  * <p>한도 값은 그 프로젝트에 실제로 걸린 OpenAI 한도(또는 그 안전 비율)를 그대로 적는다. 우리가 기능 간 몫을
  * 나누는 값이 아니다 — 격리는 프로젝트 분리가 하고, 여기 적힌 값은 전역 게이트 토큰 버킷의 보충 속도가 된다.
- * {@link OpenAiProject} 다섯 개 모두 설정돼 있어야 기동한다. 게이트를 거치지 않는 프로젝트(moderation)는
- * 모델 한도 없이 키만 적어도 된다.
+ * {@link OpenAiProject} 다섯 개 모두 설정돼 있어야 기동한다. 게이트를 거치는 프로젝트({@link OpenAiProject#gated()}
+ * 가 {@code true}) 는 모델 한도가 하나 이상 있어야 하고, 거치지 않는 프로젝트(지금은 moderation)만 키만 적어도 된다.
+ * 게이트를 거치는데 한도가 비어 있으면 그 프로젝트의 호출이 검사 없이 통과하므로(fail-open), 기동에서 막는다.
  */
 @Validated
 @ConfigurationProperties(prefix = "openai")
@@ -36,16 +37,29 @@ public record OpenAiProjectProperties(
         if (!missing.isEmpty()) {
             throw new IllegalStateException("openai.projects 에 설정되지 않은 프로젝트가 있습니다: " + missing);
         }
+
+        EnumSet<OpenAiProject> withoutModelLimit = EnumSet.noneOf(OpenAiProject.class);
+        for (Map.Entry<OpenAiProject, Project> entry : projects.entrySet()) {
+            Project project = entry.getValue();
+            if (entry.getKey().gated() && (project == null || project.models().isEmpty())) {
+                withoutModelLimit.add(entry.getKey());
+            }
+        }
+        if (!withoutModelLimit.isEmpty()) {
+            throw new IllegalStateException(
+                    "전역 게이트를 거치는 프로젝트에 모델 한도(models)가 없습니다: " + withoutModelLimit);
+        }
     }
 
     /**
      * @param apiKey 이 프로젝트의 OpenAI API 키.
-     * @param models 모델별 분당 한도. 게이트를 거치지 않는 프로젝트는 비어 있어도 된다
+     * @param models 모델별 분당 한도. {@link OpenAiProject#gated()} 가 {@code false} 인 프로젝트만 비어 있어도 된다
      *               (yml 의 {@code models: {}} 는 값 없음으로 들어와 {@code null} 이 되므로 빈 지도로 바꾼다).
+     *               게이트를 거치는 프로젝트가 비어 있으면 바깥 생성자가 기동을 막는다.
      */
     public record Project(
             @NotBlank String apiKey,
-            @NotNull Map<String, @Valid ModelLimit> models
+            Map<String, @Valid ModelLimit> models
     ) {
 
         public Project {

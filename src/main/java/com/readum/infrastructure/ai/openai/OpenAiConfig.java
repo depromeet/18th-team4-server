@@ -251,7 +251,7 @@ public class OpenAiConfig {
         if (moderationModel == null) {
             throw new IllegalStateException(
                     "ModerationModel 빈이 등록되어 있지 않습니다. "
-                            + "spring.ai.openai.api-key 와 spring.ai.openai.moderation 설정을 확인하세요."
+                            + "openai.projects.moderation.api-key 와 spring.ai.openai.moderation 설정을 확인하세요."
             );
         }
         return moderationModel;

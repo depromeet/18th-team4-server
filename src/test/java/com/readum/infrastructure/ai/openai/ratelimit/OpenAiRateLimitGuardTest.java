@@ -34,14 +34,21 @@ class OpenAiRateLimitGuardTest {
     @Mock
     private OpenAiRequestGate gate;
 
-    /** 실제로 잠들지 않고 요청받은 대기 시간만 기록한다. */
+    /** 실제로 잠들지 않고 요청받은 대기 시간만 기록한다 — 대신 가짜 시계를 그만큼 앞으로 돌린다. */
     private final List<Duration> recordedSleeps = new ArrayList<>();
+
+    /** 가짜 시계. 잠들면 잠든 만큼, 게이트를 두드리는 데 시간이 걸리는 경우는 테스트가 직접 앞으로 돌린다. */
+    private long fakeNanoTime;
 
     private OpenAiRateLimitGuard guard;
 
     @BeforeEach
     void setUp() {
-        guard = new OpenAiRateLimitGuard(gate, properties(), recordedSleeps::add);
+        fakeNanoTime = 0;
+        guard = new OpenAiRateLimitGuard(gate, properties(), duration -> {
+            recordedSleeps.add(duration);
+            fakeNanoTime += duration.toNanos();
+        }, () -> fakeNanoTime);
     }
 
     private static OpenAiProjectProperties properties() {
@@ -134,6 +141,24 @@ class OpenAiRateLimitGuardTest {
                 });
         assertThat(recordedSleeps).containsExactly(Duration.ofMillis(600), Duration.ofMillis(300));
         verify(gate, times(3)).tryAcquire(OpenAiProject.CHAT, MODEL, ESTIMATED_TOKENS);
+    }
+
+    @Test
+    void Redis_호출에_시간이_흘러_마감을_넘기면_더_잠들지_않고_던진다() {
+        // 잠들지 않아도 게이트를 두드리는 사이 대기 상한이 지날 수 있다(매달린 Redis). 벽시계 마감으로 재므로
+        // 남은 대기 시간이 0 이 되어, 기다릴 시간이 상한보다 짧아도 기다리지 않고 던진다.
+        given(gate.tryAcquire(OpenAiProject.CHAT, MODEL, ESTIMATED_TOKENS)).willAnswer(invocation -> {
+            fakeNanoTime += Duration.ofMillis(CHAT_MAX_WAIT_MILLIS + 1).toNanos();
+            return rateBudgetRejected(300);
+        });
+
+        assertThatThrownBy(() -> guard.acquireOrThrow(OpenAiProject.CHAT, MODEL, ESTIMATED_TOKENS))
+                .isInstanceOfSatisfying(TooManyRequestsException.class, thrown -> {
+                    assertThat(thrown.getErrorCode()).isEqualTo(AiChatErrorCode.AI_RATE_LIMIT_BURST);
+                    assertThat(thrown.getRateLimitInfo().retryAfter()).isEqualTo(Duration.ofMillis(300));
+                });
+        assertThat(recordedSleeps).isEmpty();
+        verify(gate, times(1)).tryAcquire(OpenAiProject.CHAT, MODEL, ESTIMATED_TOKENS);
     }
 
     @Test

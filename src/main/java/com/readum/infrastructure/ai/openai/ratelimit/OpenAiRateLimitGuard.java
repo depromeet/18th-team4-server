@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.function.LongSupplier;
 
 /**
  * OpenAI 호출 전에 전역 게이트 통과를 확보한다 — 막히면 {@link TooManyRequestsException} 으로 번역해 던진다.
@@ -17,8 +18,10 @@ import java.util.Optional;
  * {@link OpenAiProject#CHAT} 은 t 가 설정된 상한 안이면 그만큼 기다렸다 다시 확보한다 — 사용자에게는 첫 토큰이
  * 조금 늦는 것으로만 보인다. 나머지 프로젝트(감상문·컨텍스트 요약·제목)는 기다리지 않고 바로 던진다 —
  * 워커는 반납하고 다음 주기에 다시 선점하는 편이, 잠든 채 작업 소유권을 쥐는 것보다 단순하다.
- * 기다렸다 다시 두드리는 사이 다른 호출이 먼저 가져갈 수 있으므로, 기다린 시간의 합이 상한을 넘지 않는
- * 범위에서 반복한다. quota 쿨다운은 분 단위라 어느 프로젝트도 기다리지 않는다.
+ * 기다렸다 다시 두드리는 사이 다른 호출이 먼저 가져갈 수 있으므로, 상한 안에서 반복한다.
+ * 상한은 벽시계 마감으로 잰다 — 잠든 시간뿐 아니라 다시 두드리는 Redis 호출에 걸린 시간도 마감에서 빠지므로,
+ * 이 메서드 전체는 "대기 상한 + 마지막 Redis 호출 하나" 안에 끝난다(매달린 Redis 앞에서도 마찬가지다).
+ * quota 쿨다운은 분 단위라 어느 프로젝트도 기다리지 않는다.
  * 거절 이후 무엇을 할지(429 응답·재큐·재시도 횟수를 올리지 않고 대기열로 되돌리기·스킵)는 이 예외를 받는 각 호출자가 정한다.
  */
 @Component
@@ -34,15 +37,20 @@ public class OpenAiRateLimitGuard {
     private final Duration chatMaxWait;
     private final Sleeper sleeper;
 
+    /** 마감을 재는 시계 — 테스트가 시간이 흐른 상황을 실제로 기다리지 않고 만들 수 있게 바꿔 끼운다. */
+    private final LongSupplier nanoTime;
+
     @Autowired
     public OpenAiRateLimitGuard(OpenAiRequestGate gate, OpenAiProjectProperties properties) {
-        this(gate, properties, Thread::sleep);
+        this(gate, properties, Thread::sleep, System::nanoTime);
     }
 
-    OpenAiRateLimitGuard(OpenAiRequestGate gate, OpenAiProjectProperties properties, Sleeper sleeper) {
+    OpenAiRateLimitGuard(
+            OpenAiRequestGate gate, OpenAiProjectProperties properties, Sleeper sleeper, LongSupplier nanoTime) {
         this.gate = gate;
         this.chatMaxWait = properties.gate().chatMaxWait();
         this.sleeper = sleeper;
+        this.nanoTime = nanoTime;
     }
 
     /**
@@ -56,7 +64,8 @@ public class OpenAiRateLimitGuard {
      */
     public Optional<OpenAiRequestGate.GateReservation> acquireOrThrow(
             OpenAiProject project, String model, int estimatedTokens) {
-        Duration remainingWait = project == OpenAiProject.CHAT ? chatMaxWait : Duration.ZERO;
+        long deadlineNanos = nanoTime.getAsLong()
+                + (project == OpenAiProject.CHAT ? chatMaxWait.toNanos() : 0L);
         while (true) {
             switch (gate.tryAcquire(project, model, estimatedTokens)) {
                 case OpenAiRequestGate.Decision.Permitted(OpenAiRequestGate.GateReservation reservation) -> {
@@ -66,7 +75,7 @@ public class OpenAiRateLimitGuard {
                     return Optional.empty();
                 }
                 case OpenAiRequestGate.Decision.Rejected rejected -> {
-                    if (!canWait(rejected, remainingWait)) {
+                    if (!canWait(rejected, remainingWait(deadlineNanos))) {
                         throw toTooManyRequests(rejected);
                     }
                     try {
@@ -75,7 +84,6 @@ public class OpenAiRateLimitGuard {
                         Thread.currentThread().interrupt();
                         throw toTooManyRequests(rejected);
                     }
-                    remainingWait = remainingWait.minus(rejected.retryAfter());
                 }
             }
         }
@@ -88,6 +96,12 @@ public class OpenAiRateLimitGuard {
      */
     public void compensate(OpenAiRequestGate.GateReservation reservation) {
         gate.compensate(reservation);
+    }
+
+    /** 마감까지 남은 시간. 이미 지났으면 0 — 게이트를 두드리는 데 시간을 다 썼다는 뜻이다. */
+    private Duration remainingWait(long deadlineNanos) {
+        long remainingNanos = deadlineNanos - nanoTime.getAsLong();
+        return remainingNanos <= 0 ? Duration.ZERO : Duration.ofNanos(remainingNanos);
     }
 
     private static boolean canWait(OpenAiRequestGate.Decision.Rejected rejected, Duration remainingWait) {

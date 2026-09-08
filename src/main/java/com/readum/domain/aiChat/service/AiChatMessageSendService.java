@@ -587,15 +587,16 @@ public class AiChatMessageSendService {
             aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
         } catch (RuntimeException userMessagePersistError) {
             // 게이트 확보 이후·생성 이전의 실패 — 생성이 일어나지 않아 OpenAI 토큰 소모가 없으므로
-            // 분당 계상을 보상 차감한다. 예약 반환은 prepare() 의 공통 종료 경로가 담당한다.
+            // 버킷에 계상했던 몫을 보상 차감한다. 예약 반환은 prepare() 의 공통 종료 경로가 담당한다.
             releaseRateLimitPermitQuietly(rateLimitPermit, sessionId);
             throw userMessagePersistError;
         }
     }
 
     /**
-     * 게이트 보상 차감 실패는 삼킨다 — 분 창 만료(최대 60초)가 안전망이라 실패가
-     * 응답 경로(선행 처리의 원래 예외 전파·생성 단계의 error 이벤트 전달)를 막을 이유가 없다.
+     * 게이트 보상 차감 실패는 잡아 로그만 남기고 밖으로 던지지 않는다 — 버킷 보충과 키 TTL 이 안전망이라
+     * (되돌리지 못한 계상도 보충 속도만큼 곧 회복되고, 조용한 뒤에는 키가 만료돼 사라진다)
+     * 실패가 응답 경로(선행 처리의 원래 예외 전파·생성 단계의 error 이벤트 전달)를 막을 이유가 없다.
      */
     private void releaseRateLimitPermitQuietly(AiChatClient.RateLimitPermit rateLimitPermit, Long sessionId) {
         try {

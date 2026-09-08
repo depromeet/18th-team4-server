@@ -16,11 +16,22 @@ import java.util.Locale;
  * </ul>
  */
 public enum OpenAiProject {
-    CHAT,
-    MODERATION,
-    SUMMARY,
-    CONTEXT_SUMMARY,
-    TITLE;
+    CHAT(true),
+    MODERATION(false),
+    SUMMARY(true),
+    CONTEXT_SUMMARY(true),
+    TITLE(true);
+
+    private final boolean gated;
+
+    OpenAiProject(boolean gated) {
+        this.gated = gated;
+    }
+
+    /** 전역 게이트를 거치는 프로젝트인가 — 거치면 모델 한도가 하나 이상 있어야 기동한다. */
+    public boolean gated() {
+        return gated;
+    }
 
     /** Redis 키·로그에 쓰는 소문자 이름 — 밑줄은 하이픈으로 바꾼다({@code context-summary}). */
     public String key() {

@@ -20,18 +20,18 @@ import java.util.UUID;
 
 /**
  * 동기 감상문 생성 워커. 트랜잭션 없이, 각 트랜잭션 단계(SummaryJobLifecycleService)를 순서대로 호출하고
- * 그 사이(트랜잭션 밖)에서 외부 AI(OpenAI)를 부른다. 분당 예산·quota 쿨다운은 모두 전역 게이트가
+ * 그 사이(트랜잭션 밖)에서 외부 AI(OpenAI)를 부른다. 버킷 자리·quota 쿨다운은 모두 전역 게이트가
  * AiSummaryClientImpl 안에서 검사한다 — 포화 시 burst 429, quota 소진 시 쿨다운(Redis)으로 던져진다.
  * 워커는 쿨다운 중엔 job 을 선점하지 않아(헛선점·attempt 소진 방지), 계정 전역 백오프가 전 경로 공통이다.
  *
  * 실패 분류:
  * - 세션 과대(추정 토큰 > maxRequestTokens) → 호출 전 즉시 FAILED (fail-fast)
- * - burst 429(게이트 분당 예산 포화) → 무벌점 반납(우리 과속이지 작업 잘못 아님) + 이번 드레인 사이클 중단
+ * - burst 429(버킷 자리 없음 — 게이트 포화) → 무벌점 반납(우리 과속이지 작업 잘못 아님) + 이번 드레인 사이클 중단
  * - quota 429(게이트 쿨다운) → 재시도 가능 실패로 기록(상한 도달 시 FAILED) + 이번 드레인 사이클 중단. 쿨다운은 게이트가 관리
  * - 5xx → 재시도 / 4xx → 즉시 FAILED
  *
- * burst/quota 는 계정 전역 신호다 — 게이트는 HTTP 전에(로컬 예산 검사만으로) 429 를 던지므로, 무벌점 반납한 작업을
- * 같은 사이클에서 다시 선점하면 예산이 찰 때까지 claim→반납을 무한 반복하며 DB 를 두드린다. 그래서 quota 쿨다운
+ * burst/quota 는 계정 전역 신호다 — 게이트는 HTTP 전에(버킷 확인만으로) 429 를 던지므로, 무벌점 반납한 작업을
+ * 같은 사이클에서 다시 선점하면 버킷이 보충될 때까지 claim→반납을 무한 반복하며 DB 를 두드린다. 그래서 quota 쿨다운
  * 조기 반환과 같은 취지로, 전역 게이트가 포화면 이번 드레인 사이클을 멈추고 다음 dispatch 주기에 다시 시도한다.
  */
 @Slf4j
@@ -122,7 +122,7 @@ public class SummaryGenerationWorker {
                     e.getErrorCode().name(), e.getMessage(), retryAtFrom(e.getRateLimitInfo()));
             return false;
         }
-        // burst — 게이트 분당 예산 포화(backpressure). 무벌점 반납(가짜 실패 방지).
+        // burst — 버킷 자리 없음(게이트 포화, backpressure). 무벌점 반납(가짜 실패 방지).
         lifecycleService.releaseWithoutPenalty(jobId, owner);
         return false;
     }

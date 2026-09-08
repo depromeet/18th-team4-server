@@ -33,7 +33,13 @@ import java.time.Duration;
 @Component
 public class AiChatTimeBudgetValidator {
 
-    /** 선행 처리가 Redis 를 부르는 횟수 — 폭주 가드 1회 + 전역 게이트 1회. 매달린 Redis 앞에서 각각 명령 기한만큼 쓴다. */
+    /**
+     * 선행 처리가 Redis 를 부르는 횟수 — 폭주 가드 1회 + 전역 게이트 1회. 매달린 Redis 앞에서 각각 명령 기한만큼 쓴다.
+     *
+     * <p>채팅이 버킷 자리를 기다렸다 게이트를 다시 두드리면 Redis 호출이 더 늘 수 있지만, 그 호출들의 Redis 시간은
+     * 대기 상한에서 차감된다(가드가 벽시계 마감으로 잰다). 마감 직전에 시작한 마지막 호출 1회만 명령 기한만큼
+     * 넘칠 수 있어, 여기서 세는 횟수는 ×2 로 충분하다.
+     */
     static final int PREPARE_REDIS_CALL_COUNT = 2;
 
     private final AiChatProperties.Streaming streaming;
@@ -112,7 +118,7 @@ public class AiChatTimeBudgetValidator {
         }
 
         // 4) 선행 처리가 쓰는 최악 시간 — moderation 상한에 Redis 호출 둘의 명령 기한과 채팅 게이트 대기 상한이 더 붙는다.
-        //    매달린 Redis 앞에서 fail-open 은 예외를 받은 뒤에야 발동하므로, 명령 기한이 곧 통과까지 걸리는 시간이다.
+        //    매달린 Redis 앞에서 검사 없이 통과(fail-open)는 예외를 받은 뒤에야 일어나므로, 명령 기한이 곧 통과까지 걸리는 시간이다.
         //    채팅은 버킷 자리가 없으면 그 상한만큼 기다렸다 진행하므로 그 시간도 선행 처리 안에서 쓰인다.
         //    이 합이 선행 처리 여유를 다 쓰면 정상 처리 중인 요청을 미정산 예약 반환이 가로챈다.
         if (redisCommandTimeout == null) {
