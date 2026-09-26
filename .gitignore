@@ -47,5 +47,6 @@ out/
 docs/superpowers/
 /TODO.md
 
-### 부하 테스트 하네스 (throwaway, 커밋 제외) ###
+### 부하 테스트 하네스 (로컬 전용, 커밋 제외) ###
 /loadtest/
+/load-test/

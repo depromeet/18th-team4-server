@@ -10,6 +10,7 @@ import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.summary.out.AiQuotaCooldown;
+import com.readum.domain.summary.out.ShutdownSignal;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,7 @@ import java.util.UUID;
  * 동기 컨텍스트 요약 워커. 트랜잭션 없이 각 트랜잭션 단계(ContextSummaryJobLifecycleService)를 순서대로 호출하고
  * 그 사이(트랜잭션 밖)에서 LLM 을 부른다. 분당 예산·quota 쿨다운은 전역 게이트가 AiContextSummaryClientImpl 안에서 검사한다.
  * 워커는 쿨다운 중엔 job 을 선점하지 않아(헛선점·attempt 소진 방지), 계정 전역 백오프가 전 경로 공통이다.
+ * 종료 중에도 같은 이유로 선점하지 않는다 — 마칠 시간이 없는 작업을 집으면 점유 상태로 갇히기 때문(ShutdownSignal).
  * 감상문 워커(SummaryGenerationWorker)와 같은 골격 — 공통 추상화로 묶지 않는다(두 큐의 생명주기가 다름).
  *
  * 실패 분류:
@@ -46,6 +48,7 @@ public class ContextSummaryWorker {
     private final ContextSummaryJobLifecycleService lifecycleService;
     private final AiContextSummaryClient aiContextSummaryClient;
     private final AiQuotaCooldown quotaCooldown;
+    private final ShutdownSignal shutdownSignal;
     private final TokenCounter tokenCounter;
     private final ContextSummaryJobProperties jobProperties;
     private final AiChatProperties aiChatProperties;
@@ -59,6 +62,11 @@ public class ContextSummaryWorker {
 
     /** 작업 하나를 시도. 처리했으면 true, 없거나 차단 중이면 false. */
     public boolean processOne() {
+        if (shutdownSignal.isShuttingDown()) {
+            // 종료 중 — 새 작업을 집지 않는다. 지금 집으면 마칠 시간이 없어 점유 상태로 갇힌다.
+            // 이미 손에 든 작업은 이 검사를 지났으므로 끝까지 마친다.
+            return false;
+        }
         if (quotaCooldown.isCoolingDown()) {
             // 계정 quota 쿨다운 중 — job 을 선점하지 않는다(헛선점·attempt 소진 방지). 다음 dispatch 때 재확인.
             return false;
