@@ -1,0 +1,22 @@
+# readum 운영 서버 MySQL 컨테이너 설정. 원본은 repo 의 infra/mysql/my.prod.cnf 이고,
+# 서버의 /opt/readum/prod/mysql/my.cnf 로 복사해 컨테이너에 마운트한다 (docker-compose.prod.yml).
+#
+# 개발 MySQL(infra/mysql/my.cnf)과의 차이는 "메모리 예산"뿐이다 — 형태(버전 8.4·문자셋·격리수준)는 같게 유지해
+# 개발에서 검증한 동작이 운영에서 그대로 재현되게 한다.
+#   - performance_schema OFF: 운영과 개발이 한 t3.small(2GB)에 공존하는 동안 mysqld 고정 오버헤드(~100~200M)를
+#     한 번이라도 줄이려는 조치. 관측이 필요하면 slow_query_log(아래)로 대체하고, 정밀 관측이 필요할 때만 잠시 켠다.
+#   - innodb_buffer_pool_size 128M: 개발(256M)보다 작게 시작한다. 인스턴스 증설(t3.medium+) 시 상향한다.
+
+[mysqld]
+# ---- 관측 (개발과 동일한 기본값, perf_schema 만 제외) ----
+slow_query_log = ON
+log_output = TABLE
+long_query_time = 1
+performance_schema = OFF
+
+# ---- 문자셋 (개발과 동일) ----
+character-set-server = utf8mb4
+collation-server = utf8mb4_0900_ai_ci
+
+# ---- 메모리 (t3.small 공존 기준, 증설 시 상향) ----
+innodb_buffer_pool_size = 128M

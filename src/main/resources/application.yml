@@ -1,0 +1,229 @@
+spring:
+  application:
+    name: readum
+  # 긴 외부 호출(AI 스트림) 동안 DB 커넥션을 요청 내내 붙잡지 않도록 OSIV 를 끈다 (#103).
+  # 엔티티에 JPA 연관관계가 0개라 트랜잭션 밖 LAZY 접근이 없어 LazyInitializationException 위험이 없다.
+  jpa:
+    open-in-view: false
+    # 스키마 정본은 Flyway. Hibernate 는 엔티티와 대조만 한다(환경 무관). 테스트는 자체 yml 에서 create-drop.
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+  # 블로킹 I/O(입력 moderation 동기 호출 등)를 값싸게 대량 동시 처리 (#103). Java 25 라 synchronized 핀닝은 사실상 해소됨.
+  threads:
+    virtual:
+      enabled: true
+  # Redis 명령·연결 기한 (환경 무관 — 세 프로파일 모두 루프백 Redis 라 값이 갈릴 이유가 없다).
+  # 무엇을 막는가: 폭주 가드와 전역 게이트는 Redis 장애 때 검사 없이 통과시키는데(fail-open),
+  # 그 통과는 "호출이 실패했다는 것을 안 뒤" 일어난다. Redis 가 연결을 거부하면 즉시지만
+  # 응답 없이 매달리면 명령 기한까지 기다린 뒤에야 예외가 나온다 — 기본 60초면 선행 처리의
+  # Redis 호출 둘이 2분을 쓰고, 그 사이 요청은 진행 목록 자리를 차지한 채 요청 만료 40초에 걸려
+  # OpenAI 에 가 보기도 전에 미정산 예약 반환이 닫는다. 1초로 두면 fail-open 이 1초 안에 발동하고,
+  # 두 호출의 실패(최악 2초)가 선행 처리 여유 10초 안에 들어간다.
+  # 루프백 Redis 가 1초 넘게 응답하지 않으면 죽은 것으로 본다.
+  data:
+    redis:
+      timeout: 1s          # 명령 기한 — 명령을 보낸 뒤 응답을 기다리는 최대 시간
+      connect-timeout: 1s  # 연결 기한 — TCP 연결을 맺기까지 기다리는 최대 시간
+  ai:
+    # chat.observations 블록은 두지 않는다 — 채팅·제목·요약 ChatClient 전부 수동 구성이라
+    # 자동 구성의 관측(observation) 연결이 적용되지 않는다. 토큰/지연/실패 관측은 AiPromptAuditLogger 가 담당.
+    # 모델·옵션은 환경 무관(코드 동작). api-key 만 환경변수. (프로파일별로 다르지 않다)
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4o-mini
+          # max-tokens 를 두지 않는다 — 응답을 중간에 자르는 하드 스톱이라 어느 경로에도 걸지 않는다.
+          # 특히 컨텍스트 누적 요약은 잘리면 정보가 유실되므로 절대 금지(압축 스펙 8절).
+          # 비용 상한은 truncation 이 아니라 사용자 토큰 예산(Redis 4h/20k) + 전역 게이트가 담당한다.
+      moderation:
+        options:
+          model: omni-moderation-latest
+  # @Scheduled 3개(6시 적재 · dispatch · reaper)가 단일 스레드에서 직렬화되지 않도록 풀 분리.
+  task:
+    scheduling:
+      pool:
+        size: 3
+  # graceful shutdown 시 진행 중 HTTP 요청을 기다려 주는 시간 (#108).
+  # AI 채팅 SSE 스트림이 가장 긴 요청이라 기본값 30초 대신 60초.
+  # 배포 시 nginx 가 새 요청을 먼저 새 프로세스로 돌린 뒤 종료하므로, 이 대기는 배포 소요 시간만 늘릴 뿐 사용자 영향이 없다.
+  lifecycle:
+    timeout-per-shutdown-phase: 60s
+
+server:
+  forward-headers-strategy: framework
+  # SIGTERM 을 받으면 새 요청은 즉시 거부하고 진행 중 요청만 위 대기 시간 안에서 마무리한다 (#108).
+  # Spring Boot 3.4+ 기본값이지만, 배포 절차(구 프로세스 종료 단계)가 이 동작에 의존하므로 명시해 둔다.
+  shutdown: graceful
+
+auth:
+  access-token-ttl: PT30M
+  refresh-token-ttl: P14D
+  refresh-grace-period: PT3S
+
+jwt:
+  secret: ${JWT_SECRET:}
+  issuer: readum
+  refresh-cookie-secure: true
+  blacklist-max-size: 10000
+
+user:
+  session-cookie-secure: true
+
+ai-chat:
+  context:
+    assembly-recent-raw-max-tokens: 8000      # 조립기가 한 호출에 실어보낼 최근 원문 대화의 최대 토큰(안전핀). 요약이 밀렸을 때 초과분은 오래된 턴부터 제외. (keep-recent-raw-tokens 이상이어야 함)
+    keep-recent-raw-tokens: 2000              # 워커가 요약하지 않고 항상 원문으로 남겨둘 최근 원문 대화 크기(품질 장치). 요약 범위 계산의 하한.
+    summarize-trigger-token-threshold: 4000   # 요약 반영 지점 이후 최근 원문 대화 토큰 합이 이를 넘으면 요약 job 적재.
+    summary-estimated-output-tokens: 800      # 요약 갱신 호출 출력 추정값 — 게이트 예약 계상용(프롬프트 길이 지시 아님).
+  message:
+    max-content-length: 1000
+  rate-limit:
+    count-period-seconds: 10 # 메시지 전송 시도 카운트 기간 (초). Redis ZSET 슬라이딩 윈도우 길이.
+    max-message-count: 5     # 기간 안에 허용되는 전송 시도 수. 초과 시 HTTP 429.
+  token-budget:
+    daily-tokens: 120000         # 일일(KST 자정 리셋) 토큰 예산. 잠정값: 기존 4시간/20,000 의 산술 등가(6창 × 20,000). 재산정 예정.
+    estimated-output-tokens: 512 # 예약 시 더하는 출력 추정값 (실측 도착 시 보정)
+  streaming:
+    # 아래 일곱 값은 모두 후보값 — 실측 분포로 조정. 기한 넷은 재는 대상과 시작점이 서로 달라 하나로 합치지 않는다.
+    # 기한 셋(무응답·생성 전체·전달)은 "실제 생성은 길어야 10~15초" 라는 사용자 판단에 맞춘 값이다.
+    # 그 판단은 아직 실측이 아니다 — 감사 로그에서 생성 소요 분포를 뽑아 확인하는 것이 다음 일이다.
+    # 한 턴의 시간 예산: 접수부터 40초(= 선행 여유 10 + 생성 전체 20 + 후처리 여유 10) 안에 끝내거나
+    # 어느 구간에서든 명시적으로 실패한다. 늦게 성공하는 대신 빨리 실패한다.
+    # 구간별 상한(moderation HTTP · Hikari 연결 획득 · innodb_lock_wait_timeout)이 이 예산 안에 드는지는
+    # 기동 시 AiChatTimeBudgetValidator 가 대조하고, 어긋나면 기동을 막는다.
+    generation-total-timeout-seconds: 20   # 생성 전체 기한. 외부 API(OpenAI) 호출 시작부터. 청크가 계속 와도 적용하는 절대 상한. 자원 보호 상한이다 — 관측 최대 15초(사용자 판단, 실측 아님)에 여유 3분의 1 을 얹었다. 걸리면 살아 있던 생성을 끊고 본문을 버리며 예약을 되돌린다(OpenAI 과금은 남는다). 도중에 멈춘 경우는 무응답 기한이 먼저 잡는다.
+    generation-idle-timeout-seconds: 10    # 무응답 기한. 스트림 시작 또는 마지막으로 인정한 수신부터 다음 데이터를 기다리는 시간. 사용자가 느끼는 값 — 첫 토큰 대기와 중간 멈춤을 여기서 잡는다. 사용자 판단값.
+    delivery-timeout-seconds: 30           # 전달 기한. 전달 채널 생성 시점(SseEmitter 를 돌려주는 시점)부터. 기한 후에는 새 SSE 쓰기를 시작하지 않는다. 생성 전체 기한 + 10초 — 후처리(저장·정산)는 보통 1초 안이고, 기한이 지나 연결이 닫혀도 저장은 끝나 답변은 이력에 남는다.
+    shutdown-wait-seconds: 60              # 종료 대기 상한. shutdown 신호부터 진행 중인 생성·후처리를 기다리는 최대 시간. 초과분은 DB 의 미정산 예약 반환에 맡긴다.
+    # 아래 둘은 기한이 아니라 여유 — 요청 기록의 만료 시각(expires_at = 접수 + 선행 여유 + 생성 전체 기한 + 후처리 여유)을 잡는 데만 쓴다.
+    prepare-allowance-seconds: 10          # 선행 처리 여유 = moderation HTTP 상한 6초(연결 2 + 읽기 4, OpenAiHttpClientConfig) + Redis 몫 2초(폭주 가드·전역 게이트 각 1회 × 명령 기한 1초) + DB 몫 2초(이력 조회·예약·USER 저장). 계산값이며 실측 아님. 값이 어긋나면 기동이 막힌다(AiChatTimeBudgetValidator).
+    post-processing-allowance-seconds: 10  # 후처리 여유. Hikari 연결 획득 상한 3초(spring.datasource.hikari.connection-timeout) + 행 잠금 대기 5초(innodb_lock_wait_timeout) + 커밋 몫 2초. 계산값이며 실측 아님 — N=100 실측에서 후처리는 연결 대기를 포함해 0.4~0.6초였다.
+    delivery-queue-capacity: 256           # 연결 1개당 전달 큐에 쌓아둘 델타 수. 설정에 적힌 출력 상한 1024 토큰의 1/4 을 버퍼로 잡은 예상치(그 상한은 실제 요청에 걸리지 않으므로 어림잡기용). 실제 청크 크기·누적 답변·동시 요청 메모리를 함께 재서 조정한다.
+    # 동시에 진행할 수 있는 채팅 턴 수의 상한(선행 처리 시작 ~ 마지막 후처리). 넘으면 503 AI_CHAT_CAPACITY_EXCEEDED.
+    # 처리량 목표가 아니라 마지막 안전장치다 — 폭주 가드와 전역 게이트는 Redis 가 죽으면 검사 없이 통과시키므로(fail-open),
+    # 그 순간 앱이 자기 자원을 다 태우는 것을 여기서 막는다.
+    # 계산값·임시값이다: 힙(배포 -Xmx256m, 기준 사용량을 절반으로 잡아 여유 128MB ÷ 턴당 400KB ≈ 327턴)이 가장 낮은
+    # 자원 상한이고, 거기서 여유 25% 를 뺐다. 정상 운영에서 게이트가 허용하는 동시 턴(6~38)보다 크다.
+    # 턴당 400KB 에는 답변 쪽뿐 아니라 프롬프트 쪽(이력 원문 · 시스템 프롬프트 · 직렬화한 요청 본문 ≈ 80KB)이
+    # 생성이 끝날 때까지 힙에 남는 몫도 들어 있다.
+    # 산출 과정과 입력값 출처는 docs/architecture/capacity-baseline.md 의 "채팅 진행 중 턴 상한" 절.
+    # 조정은 지표 ai_chat_in_flight_turns 최고치와 ai_chat_in_flight_rejections_total 을 보고 한다.
+    max-in-flight-turns: 240
+  turn-recovery:
+    # 기한 지난 미종료 요청의 미정산 예약 반환(만료 확정 + 예약 반환). 세 값 모두 후보값 — 실제 만료 발생량을 보고 조정.
+    scan-interval-ms: 60000  # 스캔 주기. 컨텍스트 요약 회수기(reaper-interval-ms)와 같은 간격.
+    grace-seconds: 0         # expires_at 을 넘긴 행을 곧바로 처리한다. 유예를 두지 않는 이유: 정확성은 시간 여유가 아니라 행 잠금 + 미종료 확인이 보장한다(늦게 성공한 실행은 같은 잠금에 걸려 반영되지 않는다). 0 이 아닌 값은 예약 반환만 늦춘다. 시계 차이를 흡수해야 하는 환경에서만 올린다.
+    max-rows-per-run: 100    # 한 스캔이 한 묶음으로 처리할 행 수. 상한이 아니라 트랜잭션 묶음의 크기다 — 묶음이 꽉 차면 같은 스캔이 다음 묶음을 이어 읽어 밀린 양을 한 번에 비운다.
+
+# 입출력 가드레일 — 환경 무관 비즈니스 룰. moderation 카테고리 정본은 OpenAiInputModerationClientImpl 레지스트리.
+readum:
+  guardrail:
+    input:
+      max-characters: 4000
+      max-tokens: 1500
+    output:
+      max-response-tokens: 1024
+    moderation:
+      model: omni-moderation-latest
+      # 책 맥락 유무와 무관하게 항상 차단.
+      always-block-categories:
+        - self-harm
+        - self-harm-intent
+        - self-harm-instructions
+        - sexual-minors
+        - dangerous-and-criminal-content
+      # 책 맥락(독서 토론) 이 있을 때만 통과시키는 카테고리.
+      book-context-relaxed-categories:
+        - violence
+        - violence-graphic
+        - harassment
+        - harassment-threatening
+        - sexual
+        - hate
+        - hate-threatening
+      # 외부 Moderation API 장애 시 차단 우선(503). OPEN 은 개발 환경에서만 명시 전환(프로파일에서 override).
+      failure-policy: CLOSED
+
+# 알라딘 도서 검색 API — 외부 스펙이라 환경 무관. ttb-key 만 환경변수.
+aladin:
+  ttb-key: ${ALADIN_TTB_KEY:}
+  base-url: https://www.aladin.co.kr/ttb/api
+  search-target: Book
+  output: JS
+  version: 20131101
+  cover: Big
+  request-timeout: PT3S
+  search-result-limit: 200
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+# 로그 파일 저장 정책 (logback-spring.xml 의 dev/prod 프로파일에서 참조).
+# 운영 서버에서는 path 디렉터리를 미리 만들고 애플리케이션 계정에 쓰기 권한을 줘야 한다.
+log:
+  config:
+    path: /var/log/readum
+    filename: readum
+    max-file-size: 20MB
+    max-history: 7
+    total-size-cap: 500MB
+    ai-audit:
+      max-file-size: 20MB
+      max-history: 7
+      total-size-cap: 300MB
+
+# Actuator 운영 엔드포인트. health/info/prometheus/metrics 만 노출한다.
+# prometheus 엔드포인트는 외부에 공개하지 말고 내부망(127.0.0.1 등)으로만 접근을 제한한다.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+slack:
+  webhook-url: ${SLACK_WEBHOOK_URL}
+
+# OpenAI 전역 게이트 — 모델별 분당 예산 (계정 한도 RPM 10,000 / TPM 200,000 의 90%).
+# 모든 outbound 경로(채팅·제목·감상문)가 호출 전 검사·계상한다. 초과 시 정책은 호출 지점 소유 (채팅 429 / 제목 생략 / 감상문 재큐).
+openai-gate:
+  models:
+    gpt-4o-mini:
+      requests-per-minute: 9000
+      tokens-per-minute: 180000
+  quota-cooldown-seconds: 300   # 계정 quota 소진 감지 시 전 경로를 막을 기본 시간 (Retry-After 없을 때)
+
+summary-job:
+  pool-size: 12
+  dispatch-interval-ms: 2000
+  reaper-interval-ms: 60000
+  lease-seconds: 300        # 5분 lease
+  max-attempts: 5
+  base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
+  max-request-tokens: 120000       # 단일 요청 추정 토큰 상한. 초과 세션은 호출 없이 fail-fast.
+  estimated-output-tokens: 1024    # 토큰 추정 시 호출당 출력 추정값
+
+# 채팅 컨텍스트 요약 작업 큐 (감상문 summary-job 골격 복제, 별도 손잡이).
+context-summary-job:
+  pool-size: 4
+  dispatch-interval-ms: 2000
+  reaper-interval-ms: 60000
+  lease-seconds: 120        # 2분 lease (요약 1회는 감상문보다 짧다)
+  max-attempts: 5
+  base-backoff-seconds: 60  # 1분 → 2분 → 4분 …
+  max-request-tokens: 120000       # 단일 요청 추정 토큰 상한. 초과 세션은 호출 없이 fail-fast.

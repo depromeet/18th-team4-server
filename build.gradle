@@ -2,6 +2,13 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.0.5'
 	id 'io.spring.dependency-management' version '1.1.7'
+	// jar 안에 git.properties 를 생성해 실행 중인 배포 커밋을 식별한다 (Slack 장애 알림의 deploy 필드에 사용)
+	id 'com.gorylenko.gradle-git-properties' version '4.0.1'
+}
+
+gitProperties {
+	// .git 이 없는 환경(소스 아카이브 등)에서도 빌드가 실패하지 않게 한다. 이때 git.properties 는 생성되지 않는다.
+	failOnNoGitDirectory = false
 }
 
 group = 'com'
@@ -15,18 +22,98 @@ java {
 
 repositories {
 	mavenCentral()
+	maven { url 'https://repo.spring.io/milestone' }
+}
+
+ext {
+	set('springAiVersion', "2.0.0-M4")
 }
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'org.springframework.retry:spring-retry:2.0.12'
+	implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+	implementation 'com.knuddels:jtokkit:1.1.0'   // o200k_base(gpt-4o) 토큰 계산
+	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
+	implementation 'com.github.ben-manes.caffeine:caffeine'
+	implementation 'com.bucket4j:bucket4j-core:8.10.1'
+	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+	runtimeOnly 'com.mysql:mysql-connector-j'
+	implementation 'org.springframework.boot:spring-boot-flyway'
+	implementation 'org.flywaydb:flyway-mysql'
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
+	annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+	testImplementation 'com.tngtech.archunit:archunit-junit5:1.4.1'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.springframework.security:spring-security-test'
+	testImplementation 'io.projectreactor:reactor-test'
 	testCompileOnly 'org.projectlombok:lombok'
+	testRuntimeOnly 'com.h2database:h2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'
 }
 
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
+	}
+}
+
 tasks.named('test') {
-	useJUnitPlatform()
+	useJUnitPlatform {
+		// Guardrail 평가 / 벤치마크 테스트는 시간이 오래 걸리거나 외부 API(OpenAI Moderation 등)를
+		// 호출할 수 있으므로 기본 빌드(./gradlew test, ./gradlew build)에서는 실행하지 않는다.
+		// 수동으로 ./gradlew guardrailTest 로만 실행한다.
+		// mysql 태그는 로컬 MySQL 컨테이너가 있어야 도는 테스트라 기본 빌드에서 제외한다
+		// (./gradlew mysqlTest 로만 실행). 기본 테스트는 H2 만 쓴다.
+		excludeTags 'guardrail'
+		excludeTags 'mysql'
+	}
+}
+
+tasks.register('guardrailTest', Test) {
+	group = 'verification'
+	description = '가드레일 / 프롬프트 인젝션 방어 테스트 (수동 실행 전용). CI 빌드에서 자동 실행되지 않음.'
+	useJUnitPlatform {
+		includeTags 'guardrail'
+	}
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	shouldRunAfter tasks.named('test')
+	// `./gradlew check` / `./gradlew build` 에 끌려들어가지 않도록 명시적으로 분리
+
+	testLogging {
+		events 'passed', 'skipped', 'failed'
+		showStandardStreams = true
+	}
+}
+
+tasks.register('mysqlTest', Test) {
+	group = 'verification'
+	description = '운영 DB(MySQL) 의 잠금·유일성 의미를 확인하는 테스트 (수동 실행 전용). 로컬 MySQL 컨테이너 필요, CI 빌드에서 자동 실행되지 않음.'
+	useJUnitPlatform {
+		includeTags 'mysql'
+	}
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	shouldRunAfter tasks.named('test')
+	// `./gradlew check` / `./gradlew build` 에 끌려들어가지 않도록 명시적으로 분리
+
+	testLogging {
+		events 'passed', 'skipped', 'failed'
+		showStandardStreams = true
+	}
+}
+
+tasks.named('bootRun') {
+	systemProperty 'spring.profiles.active', 'dev'
 }

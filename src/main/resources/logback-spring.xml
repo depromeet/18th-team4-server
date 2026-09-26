@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!--
+        파일 로그 패턴: 기본 패턴에 traceId/spanId(MDC) 를 더한다.
+        분산 추적(micrometer-tracing) 미설정 시 두 값은 빈 값('-')으로 표시되며, 추후 추적을 붙이면
+        Slack 알림 / AI 감사 로그와 같은 키로 한 요청을 추적할 수 있다.
+        include 보다 먼저 정의해야 Spring Boot 의 ${FILE_LOG_PATTERN:-기본값} 가 이 값을 채택한다.
+    -->
+    <property name="FILE_LOG_PATTERN" value="[%d{yyyy-MM-dd HH:mm:ss}:%-3relative] %-5level ${PID:-} --- [%15.15thread] traceId=%X{traceId:-} spanId=%X{spanId:-} %-40.40logger{36} : %msg%n"/>
+
+    <!--
+        Spring Boot 가 제공하는 기본 설정을 가져온다.
+        - clr(색상), wEx 등 변환 규칙과 CONSOLE_LOG_PATTERN 기본값을 정의한다.
+        - 변환기 클래스명을 직접 적지 않으므로 Spring Boot 버전 변경에도 안전하다.
+        - 위에서 미리 정의한 FILE_LOG_PATTERN 은 그대로 유지된다.
+    -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- application.yml 값 / 환경 변수 참조 -->
+    <springProperty scope="context" name="LOG_PATH" source="log.config.path"/>
+    <springProperty scope="context" name="LOG_FILE_NAME" source="log.config.filename"/>
+    <springProperty scope="context" name="LOG_MAX_FILE_SIZE" source="log.config.max-file-size"/>
+    <springProperty scope="context" name="LOG_MAX_HISTORY" source="log.config.max-history"/>
+    <springProperty scope="context" name="LOG_TOTAL_SIZE_CAP" source="log.config.total-size-cap"/>
+
+    <springProperty scope="context" name="AI_AUDIT_MAX_FILE_SIZE" source="log.config.ai-audit.max-file-size"/>
+    <springProperty scope="context" name="AI_AUDIT_MAX_HISTORY" source="log.config.ai-audit.max-history"/>
+    <springProperty scope="context" name="AI_AUDIT_TOTAL_SIZE_CAP" source="log.config.ai-audit.total-size-cap"/>
+
+    <springProperty scope="context" name="SLACK_WEBHOOK_URL" source="slack.webhook-url" defaultValue=""/>
+    <!-- 알림 라벨용 환경 이름. 별도 환경변수 대신 활성 프로파일(local/dev/prod)을 그대로 쓴다 —
+         프로파일이 곧 환경이라 진실의 원본이 하나가 된다. 미해석 시 unknown. -->
+    <springProperty scope="context" name="APP_ENV" source="spring.profiles.active" defaultValue="unknown"/>
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name"/>
+
+    <!-- 콘솔 출력 (모든 환경 공통, 색상 포함). 자체 필터 없음 → root 레벨(DEBUG)까지 그대로 출력 -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ================= local : 콘솔만 (파일·Slack 없음 — 로컬 ERROR 가 팀 채널로 가지 않는다) ================= -->
+    <springProfile name="local">
+        <!-- root 는 INFO — dev 와 같은 이유(워커 폴링의 프레임워크 DEBUG 도배).
+             앱 코드 DEBUG 는 application-local.yml 의 logging.level.com.readum 이 살린다. -->
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!-- ================= dev : 콘솔 + 롤링 파일 + Slack + AI 감사 ================= -->
+    <springProfile name="dev">
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_PATH}/${LOG_FILE_NAME}.log</file>
+            <append>true</append>
+            <!-- root 레벨과 무관하게 파일에는 INFO 이상만 남긴다 (로거별 DEBUG 는 콘솔에서만 확인) -->
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>INFO</level>
+            </filter>
+            <encoder>
+                <charset>UTF-8</charset>
+                <pattern>${FILE_LOG_PATTERN}</pattern>
+            </encoder>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_PATH}/%d{yyyy-MM-dd}/${LOG_FILE_NAME}.%i.log.gz</fileNamePattern>
+                <maxFileSize>${LOG_MAX_FILE_SIZE}</maxFileSize>
+                <maxHistory>${LOG_MAX_HISTORY}</maxHistory>
+                <totalSizeCap>${LOG_TOTAL_SIZE_CAP}</totalSizeCap>
+            </rollingPolicy>
+        </appender>
+
+        <!-- ERROR 이상만 Slack 으로 전송. 반드시 AsyncAppender 로 감싼다. -->
+        <appender name="SLACK_ERROR" class="com.readum.infrastructure.logging.SlackWebhookAppender">
+            <webhookUrl>${SLACK_WEBHOOK_URL}</webhookUrl>
+            <appName>${APP_NAME}</appName>
+            <env>${APP_ENV}</env>
+            <duplicateSuppressMillis>60000</duplicateSuppressMillis>
+            <maxStackTraceChars>1800</maxStackTraceChars>
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>ERROR</level>
+            </filter>
+        </appender>
+
+        <appender name="ASYNC_SLACK_ERROR" class="ch.qos.logback.classic.AsyncAppender">
+            <queueSize>512</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <maxFlushTime>3000</maxFlushTime>
+            <neverBlock>true</neverBlock>
+            <appender-ref ref="SLACK_ERROR"/>
+        </appender>
+
+        <!-- AI 호출 감사 로그 전용 파일 (AI_PROMPT_AUDIT 로거로만 기록) -->
+        <appender name="AI_PROMPT_AUDIT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_PATH}/ai-prompt-audit.log</file>
+            <append>true</append>
+            <encoder>
+                <charset>UTF-8</charset>
+                <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %msg%n</pattern>
+            </encoder>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_PATH}/%d{yyyy-MM-dd}/ai-prompt-audit.%i.log.gz</fileNamePattern>
+                <maxFileSize>${AI_AUDIT_MAX_FILE_SIZE}</maxFileSize>
+                <maxHistory>${AI_AUDIT_MAX_HISTORY}</maxHistory>
+                <totalSizeCap>${AI_AUDIT_TOTAL_SIZE_CAP}</totalSizeCap>
+            </rollingPolicy>
+        </appender>
+
+        <logger name="AI_PROMPT_AUDIT" level="INFO" additivity="false">
+            <appender-ref ref="AI_PROMPT_AUDIT_FILE"/>
+        </logger>
+
+        <!--
+            root 는 INFO — 워커 폴링(감상문·컨텍스트 요약, 2초 주기 × 풀 16)이 프레임워크 DEBUG
+            (lettuce·Hibernate·JPA 트랜잭션)를 journald 에 도배해 콘솔 로그를 못 쓰게 만들기 때문.
+            앱 코드 DEBUG 는 application-dev.yml 의 logging.level.com.readum 이 콘솔에 살린다.
+        -->
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="ASYNC_SLACK_ERROR"/>
+        </root>
+    </springProfile>
+
+    <!-- ================= prod : 콘솔(DEBUG) + 롤링 파일(INFO+) + Slack + AI 감사 ================= -->
+    <springProfile name="prod">
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_PATH}/${LOG_FILE_NAME}.log</file>
+            <append>true</append>
+            <!-- root 가 DEBUG 라도 파일에는 INFO 이상만 남긴다 (DEBUG 는 콘솔에서만 확인) -->
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>INFO</level>
+            </filter>
+            <encoder>
+                <charset>UTF-8</charset>
+                <pattern>${FILE_LOG_PATTERN}</pattern>
+            </encoder>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_PATH}/%d{yyyy-MM-dd}/${LOG_FILE_NAME}.%i.log.gz</fileNamePattern>
+                <maxFileSize>${LOG_MAX_FILE_SIZE}</maxFileSize>
+                <maxHistory>${LOG_MAX_HISTORY}</maxHistory>
+                <totalSizeCap>${LOG_TOTAL_SIZE_CAP}</totalSizeCap>
+            </rollingPolicy>
+        </appender>
+
+        <appender name="SLACK_ERROR" class="com.readum.infrastructure.logging.SlackWebhookAppender">
+            <webhookUrl>${SLACK_WEBHOOK_URL}</webhookUrl>
+            <appName>${APP_NAME}</appName>
+            <env>${APP_ENV}</env>
+            <duplicateSuppressMillis>60000</duplicateSuppressMillis>
+            <maxStackTraceChars>1800</maxStackTraceChars>
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>ERROR</level>
+            </filter>
+        </appender>
+
+        <appender name="ASYNC_SLACK_ERROR" class="ch.qos.logback.classic.AsyncAppender">
+            <queueSize>512</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <maxFlushTime>3000</maxFlushTime>
+            <neverBlock>true</neverBlock>
+            <appender-ref ref="SLACK_ERROR"/>
+        </appender>
+
+        <appender name="AI_PROMPT_AUDIT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_PATH}/ai-prompt-audit.log</file>
+            <append>true</append>
+            <encoder>
+                <charset>UTF-8</charset>
+                <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %msg%n</pattern>
+            </encoder>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_PATH}/%d{yyyy-MM-dd}/ai-prompt-audit.%i.log.gz</fileNamePattern>
+                <maxFileSize>${AI_AUDIT_MAX_FILE_SIZE}</maxFileSize>
+                <maxHistory>${AI_AUDIT_MAX_HISTORY}</maxHistory>
+                <totalSizeCap>${AI_AUDIT_TOTAL_SIZE_CAP}</totalSizeCap>
+            </rollingPolicy>
+        </appender>
+
+        <logger name="AI_PROMPT_AUDIT" level="INFO" additivity="false">
+            <appender-ref ref="AI_PROMPT_AUDIT_FILE"/>
+        </logger>
+
+        <root level="DEBUG">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="ASYNC_SLACK_ERROR"/>
+        </root>
+    </springProfile>
+
+    <!-- ===== 그 외(프로파일 미지정: 테스트 등) : 콘솔만 — /var/log 접근 안 함 ===== -->
+    <springProfile name="!local &amp; !dev &amp; !prod">
+        <root level="DEBUG">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+</configuration>

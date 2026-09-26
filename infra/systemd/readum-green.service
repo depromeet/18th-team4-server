@@ -1,0 +1,21 @@
+# readum 백엔드 green 인스턴스 (포트 8082). 설명·설치 절차는 readum-blue.service 와 동일.
+
+[Unit]
+Description=readum backend (green, :8082)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/readum/green
+ExecStart=/usr/bin/java -Xmx256m -jar /opt/readum/green/app.jar
+EnvironmentFile=/opt/readum/.env
+Environment=SERVER_PORT=8082
+
+Restart=on-failure
+RestartSec=5
+
+TimeoutStopSec=75
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

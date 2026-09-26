@@ -1,0 +1,163 @@
+# 운영 장애 분석 워크플로우.
+# Slack 알림의 "분석 이슈 만들기" 버튼 → slack-receiver → repository_dispatch(incident-analysis) 로 발동한다.
+# client_payload 의 배포 커밋을 checkout 해 Claude Code 가 분석하고, 결과를 담아 bug 라벨 이슈를 생성한 뒤
+# 원본 에러 알림 스레드로 회신한다. 배포 파이프라인(deploy.yml)과 완전히 독립이다.
+
+name: incident-analysis
+
+on:
+  repository_dispatch:
+    types: [incident-analysis]
+
+concurrency:
+  group: incident-analysis-${{ github.event.client_payload.fingerprint }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Slack 알림 스크립트 보존
+        run: cp .github/scripts/incident-slack-notify.sh "$RUNNER_TEMP/"
+
+      - name: 배포 커밋 checkout (client_payload.deploy_sha)
+        id: deploy_sha
+        env:
+          SHA: ${{ github.event.client_payload.deploy_sha }}
+        run: |
+          if [ -n "$SHA" ] && git rev-parse --verify --quiet "${SHA}^{commit}" > /dev/null; then
+            git checkout --quiet "$SHA"
+            echo "note=배포 커밋 ${SHA} 기준" >> "$GITHUB_OUTPUT"
+          else
+            echo "note=배포 커밋(${SHA})을 찾지 못해 기본 브랜치 최신 커밋 기준" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 장애 본문 파일 작성
+        id: incident
+        env:
+          FINGERPRINT: ${{ github.event.client_payload.fingerprint }}
+          DEPLOY_SHA: ${{ github.event.client_payload.deploy_sha }}
+          TRACE_ID: ${{ github.event.client_payload.trace_id }}
+          MESSAGE: ${{ github.event.client_payload.message }}
+          STACKTRACE: ${{ github.event.client_payload.stacktrace }}
+        run: |
+          {
+            echo "## 장애 정보"
+            echo "- fingerprint: \`${FINGERPRINT}\`"
+            echo "- 배포 커밋: \`${DEPLOY_SHA}\`"
+            echo "- traceId: \`${TRACE_ID}\`"
+            echo ""
+            echo "## 메시지"
+            echo '```'
+            echo "${MESSAGE}"
+            echo '```'
+            echo ""
+            echo "## Stacktrace"
+            echo '```'
+            echo "${STACKTRACE}"
+            echo '```'
+          } > "$RUNNER_TEMP/incident-body.md"
+          # 제목: fingerprint 앞부분
+          TITLE="[장애] ${FINGERPRINT}"
+          echo "title=${TITLE:0:80}" >> "$GITHUB_OUTPUT"
+
+      - name: 원본 에러 알림 스레드 찾기 + 분석 시작 알림
+        id: slack_thread
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          FINGERPRINT: ${{ github.event.client_payload.fingerprint }}
+        run: |
+          THREAD_TS=""
+          if [ -n "${SLACK_BOT_TOKEN:-}" ] && [ -n "${SLACK_CHANNEL_ID:-}" ] && [ -n "$FINGERPRINT" ]; then
+            HISTORY=$(curl -sS -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              "https://slack.com/api/conversations.history?channel=${SLACK_CHANNEL_ID}&limit=200" || echo '{}')
+            THREAD_TS=$(printf '%s' "$HISTORY" | jq -r --arg fingerprint "$FINGERPRINT" \
+              '[.messages[]? | select(((.text // "") | contains($fingerprint)) and ((.text // "") | contains("ERROR 발생")))] | (first.ts // empty)')
+          fi
+          echo "thread_ts=$THREAD_TS" >> "$GITHUB_OUTPUT"
+          bash "$RUNNER_TEMP/incident-slack-notify.sh" \
+            ":mag: *장애 분석 시작* — \`${FINGERPRINT}\`" \
+            "$THREAD_TS" false
+
+      - name: 이슈 생성 (분석 전 뼈대, bug 라벨)
+        id: create_issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ steps.incident.outputs.title }}
+        run: |
+          URL=$(gh issue create --title "$TITLE" --label bug --body-file "$RUNNER_TEMP/incident-body.md")
+          echo "issue_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "issue_number=$(basename "$URL")" >> "$GITHUB_OUTPUT"
+
+      - name: Claude Code 분석
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*)"'
+          prompt: |
+            너는 운영 장애 분석 담당이다. GitHub 이슈 #${{ steps.create_issue.outputs.issue_number }} 는
+            운영 ERROR 로그에서 만들어진 장애 분석 요청이다.
+            현재 checkout 된 코드는 ${{ steps.deploy_sha.outputs.note }}이다.
+
+            절차:
+            1. `gh issue view ${{ steps.create_issue.outputs.issue_number }}` 로 본문(메시지·stacktrace·fingerprint·traceId)을 읽는다.
+            2. stacktrace 의 com.readum 프레임을 중심으로 관련 코드를 읽고 원인 후보를 찾는다.
+            3. 분석 결과를 파일로 작성해 `gh issue comment ${{ steps.create_issue.outputs.issue_number }} --body-file <파일>` 로 남긴다.
+
+            코멘트 형식 (한국어 본문, 코드 식별자는 영문 유지):
+            - 첫 줄: 한 줄 요약 — Slack 완료 알림에 이 줄이 그대로 실린다
+            - `## 원인 후보` — 가능성 높은 순 최대 3개. 각각 근거 코드 경로(`파일:라인`)와 판단 근거.
+            - `## 재현 조건` — 어떤 상황에서 발생하는지 추정
+            - `## 수정 방향` — 후보별 수정 제안
+            - 분석이 기본 브랜치 기준이면 그 사실을 명시한다
+
+            주의: 코드를 수정하거나 PR 을 만들지 않는다. 분석과 이슈 코멘트만 한다.
+            확신이 없는 부분은 확신이 없다고 적는다.
+
+      - name: Slack 완료 알림 (스레드 우선, 채널에도 노출)
+        if: success()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          THREAD_TS: ${{ steps.slack_thread.outputs.thread_ts }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
+          ISSUE_URL: ${{ steps.create_issue.outputs.issue_url }}
+        run: |
+          SUMMARY=$(gh issue view "$ISSUE_NUMBER" --json comments \
+            --jq '.comments | last | .body' 2>/dev/null | head -n 1 | cut -c1-300 || true)
+          TEXT=":white_check_mark: *장애 분석 완료* — <${ISSUE_URL}|#${ISSUE_NUMBER}>"
+          if [ -n "$SUMMARY" ]; then
+            TEXT="${TEXT}"$'\n'"${SUMMARY}"
+          fi
+          bash "$RUNNER_TEMP/incident-slack-notify.sh" "$TEXT" "$THREAD_TS" true
+
+      - name: Slack 실패 알림 (스레드 우선, 채널에도 노출)
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          THREAD_TS: ${{ steps.slack_thread.outputs.thread_ts }}
+          FINGERPRINT: ${{ github.event.client_payload.fingerprint }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TEXT=":rotating_light: *장애 분석 실패* — \`${FINGERPRINT}\` <${RUN_URL}|Actions 로그>"
+          NOTIFY="$RUNNER_TEMP/incident-slack-notify.sh"
+          [ -f "$NOTIFY" ] || NOTIFY=".github/scripts/incident-slack-notify.sh"
+          bash "$NOTIFY" "$TEXT" "$THREAD_TS" true

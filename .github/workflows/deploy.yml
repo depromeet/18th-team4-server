@@ -1,0 +1,90 @@
+# 개발 서버 배포 파이프라인.
+# 빌드(테스트 포함)는 GitHub Actions 가 하고, 서버는 jar 실행만 한다 — 서버(t3 급)에서
+# Gradle 을 돌리면 메모리가 부족해 blue/green 의 "두 프로세스 동시 상주"가 성립하지 않는다.
+# 서버 쪽 동작(deploy.sh 의 전환 사이클)과 필요한 Secrets 목록은 docs/ops/infrastructure.md 참조.
+
+name: deploy
+
+on:
+  # 수동 실행(workflow_dispatch) + dev 브랜치 머지 시 자동 배포. 최초 전환(cutover) 검증 완료로 활성화.
+  workflow_dispatch:
+  push:
+    branches: [dev]
+
+# 배포는 한 번에 하나만. 겹치면 뒤 실행이 대기한다 (진행 중인 배포를 끊지 않는다).
+concurrency:
+  group: deploy-dev-server
+  cancel-in-progress: false
+
+env:
+  # 서버 주소는 비밀이 아니라(DNS 에 공개) 워크플로우에 직접 둔다. 탄력적 IP 기준.
+  # DNS(api.readum.kr) A 레코드가 이 IP 로 정리된 뒤에는 도메인으로 바꿔도 된다.
+  DEPLOY_HOST: 54.116.108.68
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 빌드 (전체 테스트 포함 — 테스트 통과가 배포 자격)
+        run: ./gradlew build
+
+      - name: jar 에 커밋 식별자 부여
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
+          cp build/libs/readum-*-SNAPSHOT.jar "readum-${SHORT_SHA}.jar"
+
+      - name: SSH 접속 준비
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: 서버 .env 재작성 (원본 = ENV_FILE secret)
+        run: |
+          printf '%s\n' "${{ secrets.ENV_FILE }}" > env.deploy
+          scp -i ~/.ssh/deploy_key env.deploy "ubuntu@${DEPLOY_HOST}:/opt/readum/.env.tmp"
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
+            'chmod 600 /opt/readum/.env.tmp && mv /opt/readum/.env.tmp /opt/readum/.env'
+
+      - name: jar·배포 스크립트·nginx·compose 설정 업로드
+        run: |
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" 'mkdir -p /opt/readum/nginx /opt/readum/mysql'
+          scp -i ~/.ssh/deploy_key "readum-${SHORT_SHA}.jar" \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/releases/"
+          scp -i ~/.ssh/deploy_key infra/scripts/deploy.sh \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/bin/deploy.sh"
+          # nginx 설정은 스테이징 디렉토리에만 올린다. /etc/nginx 반영(변경분만)과 검증·reload 는
+          # deploy.sh 의 sync_nginx_conf 가 수행한다.
+          scp -i ~/.ssh/deploy_key infra/nginx/app.conf infra/nginx/websocket-upgrade.conf \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/nginx/"
+          # 컨테이너 정의·MySQL 설정도 최신본을 서버에 둔다(파일만 최신화). MySQL·Redis 기동·재시작은
+          # 수동이다 — 상태 서비스라 코드 배포 사이드이펙트로 재시작하지 않는다.
+          scp -i ~/.ssh/deploy_key infra/docker/docker-compose.dev.yml \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/docker-compose.dev.yml"
+          scp -i ~/.ssh/deploy_key infra/mysql/my.cnf \
+            "ubuntu@${DEPLOY_HOST}:/opt/readum/mysql/my.cnf"
+
+      - name: infra 부트스트랩 파일 업로드 (setup.sh 용 — 서버 git 체크아웃 대체)
+        run: |
+          # setup.sh(디렉토리·systemd 유닛·sudoers 설치)가 서버에서 git 없이 돌 수 있도록 infra 전체를 배달한다.
+          # 실제 실행은 root 권한이라 수동: sudo /opt/readum/infra/scripts/setup.sh /opt/readum/infra
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" 'rm -rf /opt/readum/infra'
+          scp -r -i ~/.ssh/deploy_key infra "ubuntu@${DEPLOY_HOST}:/opt/readum/"
+
+      - name: blue/green 배포 실행
+        run: |
+          ssh -i ~/.ssh/deploy_key "ubuntu@${DEPLOY_HOST}" \
+            "/opt/readum/bin/deploy.sh dev deploy /opt/readum/releases/readum-${SHORT_SHA}.jar"

@@ -1,0 +1,31 @@
+# readum 운영 backend green 인스턴스 (포트 8084). 원본은 repo 의 infra/systemd/.
+# 설치: sudo cp → /etc/systemd/system/ 후 daemon-reload (setup.sh 가 수행, 절차는 docs/ops/infrastructure.md)
+#
+# 개발 유닛(readum-blue :8081 / readum-green :8082)과 포트·경로·env 파일만 다르다.
+# 평상시에는 한쪽만 떠 있고, 배포 순간에만 잠깐 둘 다 상주한다.
+
+[Unit]
+Description=readum backend (prod, green, :8084)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/readum/prod/green
+# 힙을 명시해 배포 전환 구간(JVM 2개 동시 상주)의 메모리 사용을 예측 가능하게 고정한다.
+# t3.small 공존 기준의 Phase-1 값(개발과 동일 256m). 인스턴스 증설(t3.medium+) 시 운영을 크게 상향한다.
+ExecStart=/usr/bin/java -Xmx256m -jar /opt/readum/prod/green/app.jar
+EnvironmentFile=/opt/readum/prod.env
+Environment=SERVER_PORT=8084
+
+# 크래시(OOM 등)로 죽으면 자동 재기동. systemctl stop 에 의한 의도적 종료는 재기동하지 않는다.
+Restart=on-failure
+RestartSec=5
+
+# stop 시 SIGTERM → 앱의 graceful shutdown(진행 중 요청 60초 대기)이 끝나기를 기다린 뒤,
+# 그래도 살아 있으면 SIGKILL. 앱의 60초보다 여유 있게 잡아 SIGKILL 이 graceful 을 앞지르지 않게 한다.
+TimeoutStopSec=75
+# SIGTERM 종료 시 JVM 의 관례적 종료 코드(143)를 정상 종료로 취급한다.
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
