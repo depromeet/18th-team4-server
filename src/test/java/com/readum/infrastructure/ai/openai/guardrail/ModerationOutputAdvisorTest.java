@@ -50,6 +50,41 @@ class ModerationOutputAdvisorTest {
     }
 
     @Test
+    void 검토_호출이_실패하면_검사를_건너뛰지_않고_실패를_그대로_올려보낸다() {
+        // 예전에는 실패를 "통과" 로 흘려보냈다 — 검토 모델이 죽어 있는 동안 생성된 글이 아무 검사도 받지 않고 저장된다.
+        // 검사를 두는 이유가 바로 그 상황이므로, 실패는 감추지 않고 호출자가 정하게 한다(작업 큐가 보존·재시도한다).
+        ModerationModel moderationModel = mock(ModerationModel.class);
+        given(moderationModel.call(any()))
+                .willThrow(new com.readum.domain.aiChat.exception.AiDependencyUnavailableException(
+                        com.readum.domain.aiChat.exception.AiChatErrorCode.AI_PROVIDER_UNAVAILABLE));
+        ModerationOutputAdvisor advisor = new ModerationOutputAdvisor(moderationModel, FAILURE_MSG, 1000);
+
+        ChatClientRequest request = newRequest("질문");
+        CallAdvisorChain chain = mock(CallAdvisorChain.class);
+        given(chain.nextCall(any())).willReturn(responseFromAssistant("검사받지 않은 본문"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> advisor.adviseCall(request, chain))
+                .isInstanceOf(com.readum.domain.aiChat.exception.AiDependencyUnavailableException.class);
+    }
+
+    @Test
+    void 판정이_실리지_않은_검토_응답도_통과시키지_않는다() {
+        // results 가 비어 오면 "걸린 것이 없다" 와 구분되지 않는다 — 그대로 두면 검사받지 않은 본문이 저장된다.
+        ModerationModel moderationModel = mock(ModerationModel.class);
+        given(moderationModel.call(any())).willReturn(new ModerationResponse(
+                new org.springframework.ai.moderation.Generation(
+                        Moderation.builder().id("modr-test").model("omni-moderation-latest").results(List.of()).build())));
+        ModerationOutputAdvisor advisor = new ModerationOutputAdvisor(moderationModel, FAILURE_MSG, 1000);
+
+        ChatClientRequest request = newRequest("질문");
+        CallAdvisorChain chain = mock(CallAdvisorChain.class);
+        given(chain.nextCall(any())).willReturn(responseFromAssistant("검사받지 않은 본문"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> advisor.adviseCall(request, chain))
+                .isInstanceOf(com.readum.domain.exception.ExternalApiException.class);
+    }
+
+    @Test
     void 비스트리밍_응답이_clean_이면_원본_응답_그대로_반환된다() {
         ModerationModel moderationModel = mock(ModerationModel.class);
         given(moderationModel.call(any())).willReturn(cleanResponse());

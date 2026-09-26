@@ -37,8 +37,8 @@ class AiChatShutdownLifecycleTest {
                 null,
                 null,
                 new AiChatProperties.Streaming(120, 30, 150, shutdownWaitSeconds, 60, 60, 256, 300));
-        AiChatShutdownLifecycle lifecycle =
-                new AiChatShutdownLifecycle(registry, deliveryExecutor, postProcessingExecutor, properties);
+        AiChatShutdownLifecycle lifecycle = new AiChatShutdownLifecycle(
+                registry, deliveryExecutor, postProcessingExecutor, properties);
         lifecycle.start();
         return lifecycle;
     }

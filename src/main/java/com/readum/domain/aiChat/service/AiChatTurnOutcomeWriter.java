@@ -32,8 +32,8 @@ import java.time.LocalDateTime;
  * 예약 전이({@link AiChatTurnRequestWriter#reserveWithRecord})도 같은 순서로 잠그므로 예약과 종료가
  * 서로 교착하지 않는다.
  *
- * <p><b>트랜잭션 밖에 두는 것:</b> 외부 API 호출, SSE 쓰기, Redis 전역 게이트 보상. 이 빈은 셋 중 무엇도
- * 하지 않는다 — 커밋 시간을 외부 응답에 매달지 않기 위해서다. 게이트 보상 정책은 이 작업에서 바꾸지 않았다.
+ * <p><b>트랜잭션 밖에 두는 것:</b> 외부 API 호출과 SSE 쓰기. 이 빈은 둘 중 무엇도
+ * 하지 않는다 — 커밋 시간을 외부 응답에 매달지 않기 위해서다.
  *
  * <p><b>실패 시 부분 본문을 저장하지 않는다</b>(설계 정본 §6.3). 받은 데까지의 조각은 정상 답변이 아니라
  * 사용자에게 완결된 답변으로 보일 위험이 있고, 청구하지 않는 실패에 저장·집계만 남길 이유가 없다.
@@ -124,12 +124,20 @@ class AiChatTurnOutcomeWriter {
      * 실측 출력이 없으면 추정치로 대신하지 않고 프로그램 오류로 본다 — 성공 판정
      * ({@link AiChatGenerationOutcome#isSuccess()})이 유효 사용량을 이미 요구하기 때문이다.
      *
+     * <p><b>정상 경로와 되살리기가 이 메서드를 함께 쓴다.</b> 되살리기는 기록장에서 읽은 값으로 같은 인자를
+     * 만들어 부른다 — 두 경로가 다른 트랜잭션을 쓰면 청구 산식이나 잠금 규칙이 갈라진다.
+     *
      * @param generation                  {@link AiChatGenerationOutcome#isSuccess()} 인 결과만 받는다
      * @param estimatedMessageInputTokens 예약 때 센 이번 사용자 메시지의 입력 추정 토큰 (청구량 A 의 입력 몫)
+     * @param generatedAt                 답변이 생성된 시각. 저장 시각이 아니라 이 값을 작성 시각으로 남긴다
      */
     @Transactional
     TurnOutcomeResult finishSuccessfully(
-            Long turnRequestId, AiChatGenerationOutcome generation, int estimatedMessageInputTokens) {
+            Long turnRequestId,
+            AiChatGenerationOutcome generation,
+            int estimatedMessageInputTokens,
+            LocalDateTime generatedAt
+    ) {
         if (generation == null || !generation.isSuccess()) {
             // 실패한 생성이 성공 경로로 들어오면 부분 본문이 정상 답변으로 저장된다 — 도달하면 안 되는 분기다.
             throw new IllegalStateException(
@@ -151,7 +159,7 @@ class AiChatTurnOutcomeWriter {
         }
 
         AiChatMessage saved = aiChatMessagePersistService.saveAssistantSuccess(
-                turnRequest.getSessionId(), generation.content(), toCompletion(generation));
+                turnRequest.getSessionId(), generation.content(), toCompletion(generation), generatedAt);
         SavedAssistantMessage assistantMessage = new SavedAssistantMessage(
                 saved.getId(), saved.getInputTokens(), saved.getOutputTokens(),
                 saved.getTotalTokens(), saved.getCreatedAt());

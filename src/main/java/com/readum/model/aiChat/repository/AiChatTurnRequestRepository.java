@@ -73,4 +73,28 @@ public interface AiChatTurnRequestRepository extends JpaRepository<AiChatTurnReq
             """)
     List<Long> findOverdueUnfinishedIds(
             @Param("overdueBefore") LocalDateTime overdueBefore, Pageable pageable);
+
+    /**
+     * 같은 조건을 <b>id 로 이어 읽는다</b> — 앞 묶음의 마지막 id 다음부터 가져온다.
+     *
+     * <p>첫 페이지만 되풀이해 읽으면, 이번 회차가 끝내지 못하고 남겨 둔 행(기록장을 읽지 못해 미룬 행 등)이
+     * 그 자리를 계속 차지해 <b>뒤에 있는 행들이 영영 차례를 못 받는다</b>. 정렬 기준을 id 하나로 두고
+     * 이어 읽으면 그런 굶주림이 생기지 않는다 — 만료 시각 순서 대신 id 순서로 보게 되지만,
+     * 한 회차가 대상을 모두 훑는다는 점은 같다.
+     */
+    @Query("""
+            SELECT aiChatTurnRequest.id
+            FROM AiChatTurnRequest aiChatTurnRequest
+            WHERE aiChatTurnRequest.status IN (
+                      com.readum.model.aiChat.entity.AiChatTurnRequest.Status.ACCEPTED
+                    , com.readum.model.aiChat.entity.AiChatTurnRequest.Status.RESERVED
+                  )
+              AND aiChatTurnRequest.expiresAt < :overdueBefore
+              AND aiChatTurnRequest.id > :afterId
+            ORDER BY aiChatTurnRequest.id ASC
+            """)
+    List<Long> findOverdueUnfinishedIdsAfter(
+            @Param("overdueBefore") LocalDateTime overdueBefore,
+            @Param("afterId") Long afterId,
+            Pageable pageable);
 }

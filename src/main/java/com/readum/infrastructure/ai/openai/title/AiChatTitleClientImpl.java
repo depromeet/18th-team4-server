@@ -4,8 +4,6 @@ import com.readum.domain.aiChat.out.AiChatTitleClient;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
-import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -30,17 +28,9 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
     private static final String PROMPT_TEMPLATE_ID = "title-generator-system";
     private static final String PROMPT_TEMPLATE_VERSION = "v1";
 
-    /** 제목은 한 줄 출력 — 게이트 계상용 출력 추정값. */
-    private static final int ESTIMATED_OUTPUT_TOKENS = 64;
-
     // 제목 생성 전용 ChatClient(10초 responseTimeout, advisor 미적용). 빈 이름으로 주입해 채팅용 chatClient 와 구분한다.
     private final ChatClient titleGenerationChatClient;
     private final AiPromptAuditLogger auditLogger;
-    private final OpenAiRateLimitGuard rateLimitGuard;
-    private final TokenCounter tokenCounter;
-
-    @Value("${spring.ai.openai.chat.options.model}")
-    private String chatModel;
 
     @Value("classpath:prompts/title-generator-system.st")
     private Resource systemPromptResource;
@@ -58,12 +48,9 @@ public class AiChatTitleClientImpl implements AiChatTitleClient {
     public String generate(List<AiChatMessage> messages) {
         String chatHistory = formatChatHistory(messages);
 
-        // 전역 게이트: 포화면 이번 회차 생략. 던진 예외는 AiChatTitleGenerationListener 의
-        // error consumer 가 삼킨다 — 기존 제목 생성 실패 처리와 동일한 경로다 (저빈도·실패 허용).
-        int estimatedTokens = tokenCounter.count(systemPrompt) + tokenCounter.count(chatHistory)
-                + ESTIMATED_OUTPUT_TOKENS;
-        rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens);
-
+        // 제목 프로젝트가 차단 중이면 모델을 감싼 보호 계층이 이 호출을 거절한다. 던진 예외는
+        // AiChatTitleGenerationListener 의 error consumer 가 삼킨다 — 기존 제목 생성 실패 처리와 같은
+        // 경로다 (저빈도·실패 허용).
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(messages),
                 PROMPT_TEMPLATE_ID,

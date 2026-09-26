@@ -1,6 +1,7 @@
 package com.readum.domain.summary.service;
 
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
+import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.model.aiChat.entity.AiChatMessage;
@@ -111,6 +112,28 @@ public class SummaryJobLifecycleService {
                 now, PageRequest.of(0, batchSize));
         orphans.forEach(job -> job.releaseAfterOrphan(now));
         return orphans.size();
+    }
+
+    /**
+     * 접수한 지 전체 대기 한도를 넘긴 미완료 작업을 실패로 끝낸다. 소유자 확인 없이 끝낸다 —
+     * 한도를 넘겼다는 사실 자체가 종료 사유이고, 늦게 돌아온 옛 실행은 같은 행 잠금에 걸려 뒤집지 못한다.
+     *
+     * <p>공급자가 막혀 있는 동안에도 돌아야 한다. 그래야 활성 작업이 남아 세션이 영구히 잠기는 일이 없다.
+     * @return 끝낸 작업 수
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public int expireLongWaiting(int batchSize) {
+        LocalDateTime expiredBefore = LocalDateTime.now().minus(properties.maxTotalWait());
+        List<SummaryJob> expired = summaryJobRepository.findExpired(expiredBefore, PageRequest.of(0, batchSize));
+        expired.forEach(job -> job.markFailed(
+                AiChatErrorCode.SUMMARY_WAIT_EXPIRED.name(),
+                "접수 후 " + properties.maxTotalWaitHours() + "시간 안에 생성하지 못했습니다."));
+        return expired.size();
+    }
+
+    /** 처리할 작업이 하나도 남지 않았는가 — 적체를 다 비웠는지 판정한다(시도 시각이 미래인 것·처리 중인 것 포함). */
+    public boolean hasUnfinishedJob() {
+        return summaryJobRepository.existsUnfinishedJob();
     }
 
     /** 실패 기록 — 재시도 가능하고 상한 미만이면 백오프 재시도, 아니면 FAILED. 세션은 건드리지 않는다. */

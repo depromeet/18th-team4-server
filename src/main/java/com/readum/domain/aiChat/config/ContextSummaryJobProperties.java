@@ -20,11 +20,20 @@ public record ContextSummaryJobProperties(
         @Positive long leaseSeconds,
         @Positive int maxAttempts,
         @Positive long baseBackoffSeconds,
-        @Positive int maxRequestTokens
+        @Positive int maxRequestTokens,
+        @Positive long maxTotalWaitHours
 ) {
 
     public Duration lease() {
         return Duration.ofSeconds(leaseSeconds);
+    }
+
+    /**
+     * 한 작업이 접수부터 끝나기까지 기다려 줄 전체 한도. 감상문 큐와 같은 이유 —
+     * 공급자가 오래 막히면 시도 횟수를 쓰지 않고 계속 되돌아오므로, 끝을 보장하는 기한이 따로 있어야 한다.
+     */
+    public Duration maxTotalWait() {
+        return Duration.ofHours(maxTotalWaitHours);
     }
 
     /** 지수 백오프: base * 2^attemptCount (attemptCount = 지금까지의 시도 횟수). */

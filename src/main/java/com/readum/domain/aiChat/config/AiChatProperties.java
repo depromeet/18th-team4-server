@@ -91,9 +91,10 @@ public record AiChatProperties(
      * <ul>
      *   <li>prepareAllowanceSeconds — <b>선행 처리 여유</b>. 요청 행을 넣은 뒤(= 접수) 생성 호출을 시작하기까지
      *       걸릴 수 있는 시간이다. 가장 긴 몫은 입력 moderation 의 HTTP 상한 6초
-     *       (연결 2초 + 읽기 4초, {@code OpenAiHttpClientConfig})이고, 그 뒤로 폭주 가드·전역 게이트의
-     *       Redis 몫 2초(각 1회 × 명령 기한 1초, {@code spring.data.redis.timeout})와 이력 조회·예약·
-     *       USER 저장의 DB 몫 2초가 더 붙는다. 후보값 10초는 이 셋(6 + 2 + 2)을 더한 것이다.</li>
+     *       (연결 2초 + 읽기 4초, {@code OpenAiHttpClientConfig})이고, 그 뒤로 선행 처리가 부르는
+     *       Redis 몫 3초(폭주 가드·공급자 가용 확인·입력 검토 허가 각 1회 × 명령 기한 1초,
+     *       {@code spring.data.redis.timeout})와 이력 조회·예약·USER 저장의 DB 몫 1초가 더 붙는다.
+     *       계산값은 그 합 10초이고, 설정값은 여유를 더해 잡는다.</li>
      *   <li>postProcessingAllowanceSeconds — <b>후처리 여유</b>. 생성이 끝난 뒤 저장·정산·요청 종료 트랜잭션이
      *       끝나기까지 걸릴 수 있는 시간이다. DB 연결을 얻는 데 Hikari {@code connection-timeout} 3초가 들 수 있고,
      *       그 뒤 트랜잭션 안에서 같은 요청 행을 잠그는 대기가 {@code innodb_lock_wait_timeout} 5초까지 갈 수 있다.
@@ -119,11 +120,11 @@ public record AiChatProperties(
      * 마지막 후처리까지를 말한다({@code AiChatInFlightTurnRegistry} 의 추적 구간과 같다). 상한에 닿으면 새 요청을
      * 503({@code AI_CHAT_CAPACITY_EXCEEDED})으로 거절한다.
      *
-     * <p>이것은 처리량 목표가 아니라 <b>마지막 안전장치</b>다. 평소 유입을 조절하는 것은 사용자별 폭주 가드와
-     * 전역 게이트인데, 둘 다 Redis 에 기대고 Redis 가 죽으면 검사 없이 통과시킨다(fail-open, docs/record/0006).
+     * <p>이것은 처리량 목표가 아니라 <b>마지막 안전장치</b>다. 평소 유입을 조절하는 것은 사용자별 폭주 가드인데,
+     * 그것은 Redis 에 기대고 Redis 가 죽으면 검사 없이 통과시킨다(fail-open, docs/record/0006).
      * 그 순간 앱이 받는 만큼 다 받아 자기 자원(힙·연결)을 먼저 소진하는 것을 막는 자리다.
      *
-     * <p><b>계산값이며 임시값이다.</b> 힙(배포 {@code -Xmx256m})·스트리밍 연결 풀·전역 게이트 세 자원의 상한을 각각
+     * <p><b>계산값이며 임시값이다.</b> 힙(배포 {@code -Xmx256m})과 스트리밍 연결 풀의 상한을 각각
      * 계산해 그 최솟값에 여유를 뺀 값이며, 실측으로 정한 값이 아니다. 산출 과정과 입력값의 출처는
      * {@code docs/architecture/capacity-baseline.md} 의 "채팅 진행 중 턴 상한" 절에 있다.
      * 지표 {@code ai_chat_in_flight_turns} 의 최고치와 {@code ai_chat_in_flight_rejections_total} 을 보고 조정한다.

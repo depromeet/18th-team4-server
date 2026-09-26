@@ -1,6 +1,7 @@
 package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
+import com.readum.domain.aiChat.out.AiAvailability;
 import com.readum.model.aiChat.entity.AiChatContextSummary;
 import com.readum.model.aiChat.repository.AiChatContextSummaryJobRepository;
 import com.readum.model.aiChat.repository.AiChatContextSummaryRepository;
@@ -30,6 +31,7 @@ public class EnqueueContextSummaryJobService {
     private final AiChatMessageRepository messageRepository;
     private final ContextSummaryJobInserter inserter;
     private final AiChatProperties aiChatProperties;
+    private final AiAvailability aiAvailability;
 
     /**
      * 요약 반영 지점 이후 최근 원문 대화 토큰 합이 트리거 임계값을 넘으면 요약 작업을 적재한다.
@@ -48,6 +50,14 @@ public class EnqueueContextSummaryJobService {
         if (jobRepository.existsByActiveSessionId(sessionId)) {
             return;
         }
+        // 공급자가 막혀 있거나 차단 뒤 쌓인 작업을 비우는 중이면 이번 트리거는 건너뛴다.
+        // 여기서 던지지 않는 이유: 이 적재는 사용자 채팅의 곁가지라 실패가 채팅을 망가뜨리면 안 되고,
+        // 건너뛰어도 대화 내용은 그대로 남아 다음 턴 트리거가 같은 판정을 다시 한다(보존된다).
+        // 임계값·중복 확인보다 뒤에 두는 이유: 저 둘은 값싼 DB 조회이고 대부분의 턴은 거기서 끝난다 —
+        // 적재할 일이 없는 턴마다 Redis 를 두드릴 이유가 없다.
+        if (!isProviderAvailable(sessionId)) {
+            return;
+        }
         try {
             inserter.insertPending(sessionId);
         } catch (DataIntegrityViolationException e) {
@@ -57,6 +67,20 @@ public class EnqueueContextSummaryJobService {
                 return;
             }
             throw e;
+        }
+    }
+
+    /**
+     * 신규 접수를 받아도 되는지 확인한다. 막혀 있으면 예외로 알려 오므로 여기서 거짓으로 바꾼다 —
+     * 이 경로는 어떤 이유로도 위로 던지지 않는다(채팅의 곁가지).
+     */
+    private boolean isProviderAvailable(Long sessionId) {
+        try {
+            aiAvailability.requireAvailable(AiAvailability.Capability.CONTEXT_SUMMARY);
+            return true;
+        } catch (RuntimeException blocked) {
+            log.debug("컨텍스트 요약 작업 적재 건너뜀 — 공급자를 지금 쓸 수 없다 sessionId={}", sessionId);
+            return false;
         }
     }
 }

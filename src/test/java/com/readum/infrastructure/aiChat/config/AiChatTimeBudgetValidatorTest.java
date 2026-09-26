@@ -63,22 +63,37 @@ class AiChatTimeBudgetValidatorTest {
     }
 
     @Test
-    void Redis_명령_기한_두_번과_moderation_상한이_선행_처리_여유_안에_들지_않으면_기동을_막는다() {
-        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
+    void Redis_명령_기한과_moderation_상한이_선행_처리_여유_안에_들지_않으면_기동을_막는다() {
+        AiChatProperties.Streaming streaming = streaming(13, 20, 10, 30, 10);
 
         // 매달린 Redis 앞에서 fail-open 은 명령 기한만큼 기다린 뒤에야 발동한다 — 그 몫이 선행 여유에 들어야 한다.
-        // 명령 기한 2초면 호출 둘이 4초, moderation 6초와 합쳐 10초라 선행 여유 10초를 그대로 다 쓴다.
+        // 명령 기한 8초면 호출 하나가 8초, moderation 6초와 합쳐 14초라 선행 여유 13초를 넘는다.
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
-                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, Duration.ofSeconds(2)))
+                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, Duration.ofSeconds(8)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("spring.data.redis.timeout(2000ms)")
-                .hasMessageContaining("Redis 호출 2회")
-                .hasMessageContaining("prepare-allowance-seconds(10)");
+                .hasMessageContaining("spring.data.redis.timeout(8000ms)")
+                .hasMessageContaining("Redis 호출 1회")
+                .hasMessageContaining("prepare-allowance-seconds(13)");
+    }
+
+    @Test
+    void Redis_명령_기한과_moderation_상한의_합이_선행_처리_여유와_같아도_기동을_막는다() {
+        AiChatProperties.Streaming streaming = streaming(13, 20, 10, 30, 10);
+
+        // 딱 맞아떨어지면 선행 처리가 만료 시각에 끝난다 — 남는 시간이 0 이라 DB 몫이 없다. 같을 때도 막는다.
+        // 명령 기한 7초면 Redis 호출 하나가 7초, moderation 6초와 합쳐 정확히 선행 여유 13초다.
+        assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
+                streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT,
+                Duration.ofMillis(7000)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("spring.data.redis.timeout(7000ms)")
+                .hasMessageContaining("= 13000ms")
+                .hasMessageContaining("prepare-allowance-seconds(13)");
     }
 
     @Test
     void Redis_명령_기한을_읽지_못하면_그_조건만_건너뛰고_통과한다() {
-        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
+        AiChatProperties.Streaming streaming = streaming(13, 20, 10, 30, 10);
 
         assertThatCode(() -> AiChatTimeBudgetValidator.verify(
                 streaming, MODERATION_HTTP_CEILING, CONNECTION_ACQUIRE_TIMEOUT, null))
@@ -87,7 +102,7 @@ class AiChatTimeBudgetValidatorTest {
 
     @Test
     void DB_연결_획득_상한이_후처리_여유_안에_들지_않으면_기동을_막는다() {
-        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
+        AiChatProperties.Streaming streaming = streaming(13, 20, 10, 30, 10);
 
         assertThatThrownBy(() -> AiChatTimeBudgetValidator.verify(
                 streaming, MODERATION_HTTP_CEILING, Duration.ofSeconds(30), REDIS_COMMAND_TIMEOUT))
@@ -98,7 +113,7 @@ class AiChatTimeBudgetValidatorTest {
 
     @Test
     void 연결_획득_상한을_읽지_못하면_그_조건만_건너뛰고_통과한다() {
-        AiChatProperties.Streaming streaming = streaming(10, 20, 10, 30, 10);
+        AiChatProperties.Streaming streaming = streaming(13, 20, 10, 30, 10);
 
         assertThatCode(() -> AiChatTimeBudgetValidator.verify(
                 streaming, MODERATION_HTTP_CEILING, null, REDIS_COMMAND_TIMEOUT))
@@ -122,8 +137,8 @@ class AiChatTimeBudgetValidatorTest {
                 productionRedisCommandTimeout()))
                 .doesNotThrowAnyException();
 
-        // 한 턴의 시간 예산은 40초다 — 값이 바뀌면 문서(docs/domain/ai-chat.md · docs/ops/…)도 함께 고친다.
-        assertThat(streaming.turnRequestExpiryTimeout()).isEqualTo(Duration.ofSeconds(40));
+        // 한 턴의 시간 예산은 43초다 — 값이 바뀌면 문서(docs/domain/ai-chat.md · docs/ops/…)도 함께 고친다.
+        assertThat(streaming.turnRequestExpiryTimeout()).isEqualTo(Duration.ofSeconds(43));
     }
 
     private static AiChatProperties.Streaming streaming(
@@ -146,35 +161,49 @@ class AiChatTimeBudgetValidatorTest {
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> productionStreamingProperties() throws Exception {
-        try (InputStream applicationYaml = Files.newInputStream(Path.of("src/main/resources/application.yml"))) {
-            Map<String, Object> root = new Yaml().load(applicationYaml);
-            Map<String, Object> aiChat = (Map<String, Object>) root.get("ai-chat");
-            return (Map<String, Object>) aiChat.get("streaming");
-        }
+        Map<String, Object> aiChat = (Map<String, Object>) productionYamlRoot().get("ai-chat");
+        return (Map<String, Object>) aiChat.get("streaming");
     }
 
     /** 세 MySQL 프로파일이 같은 값을 쓰므로 local 하나만 읽는다 — 갈라지면 아래 단언이 먼저 깨진다. */
     @SuppressWarnings("unchecked")
     private static Duration productionConnectionAcquireTimeout() throws Exception {
-        try (InputStream localYaml = Files.newInputStream(Path.of("src/main/resources/application-local.yml"))) {
-            Map<String, Object> root = new Yaml().load(localYaml);
-            Map<String, Object> datasource =
-                    (Map<String, Object>) ((Map<String, Object>) root.get("spring")).get("datasource");
-            Map<String, Object> hikari = (Map<String, Object>) datasource.get("hikari");
-            return Duration.ofMillis(((Number) hikari.get("connection-timeout")).longValue());
-        }
+        Map<String, Object> root = yamlRoot("src/main/resources/application-local.yml");
+        Map<String, Object> datasource =
+                (Map<String, Object>) ((Map<String, Object>) root.get("spring")).get("datasource");
+        Map<String, Object> hikari = (Map<String, Object>) datasource.get("hikari");
+        return Duration.ofMillis(((Number) hikari.get("connection-timeout")).longValue());
     }
 
     /** Redis 명령 기한은 환경 무관 상수라 세 프로파일이 아니라 {@code application.yml} 한 곳에 있다. */
     @SuppressWarnings("unchecked")
     private static Duration productionRedisCommandTimeout() throws Exception {
-        try (InputStream applicationYaml = Files.newInputStream(Path.of("src/main/resources/application.yml"))) {
-            Map<String, Object> root = new Yaml().load(applicationYaml);
-            Map<String, Object> data = (Map<String, Object>) ((Map<String, Object>) root.get("spring")).get("data");
-            Map<String, Object> redis = (Map<String, Object>) data.get("redis");
-            Object timeout = redis.get("timeout");
-            assertThat(timeout).as("application.yml 의 spring.data.redis.timeout").isNotNull();
-            return DurationStyle.detectAndParse(timeout.toString());
+        Map<String, Object> data = (Map<String, Object>) ((Map<String, Object>) productionYamlRoot().get("spring"))
+                .get("data");
+        Map<String, Object> redis = (Map<String, Object>) data.get("redis");
+        Object timeout = redis.get("timeout");
+        assertThat(timeout).as("application.yml 의 spring.data.redis.timeout").isNotNull();
+        return DurationStyle.detectAndParse(timeout.toString());
+    }
+
+    /** 채팅 게이트 대기 상한도 환경 무관 상수라 {@code application.yml} 한 곳에 있다. */
+    @SuppressWarnings("unchecked")
+    private static Duration productionChatGateMaxWait() throws Exception {
+        Map<String, Object> gate =
+                (Map<String, Object>) ((Map<String, Object>) productionYamlRoot().get("openai")).get("gate");
+        Object chatMaxWaitMillis = gate.get("chat-max-wait-millis");
+        assertThat(chatMaxWaitMillis).as("application.yml 의 openai.gate.chat-max-wait-millis").isNotNull();
+        return Duration.ofMillis(((Number) chatMaxWaitMillis).longValue());
+    }
+
+    /** 대조할 값 셋(streaming · Redis 명령 기한 · 채팅 게이트 대기 상한)이 같은 파일에 있어 읽기는 한 곳에 둔다. */
+    private static Map<String, Object> productionYamlRoot() throws Exception {
+        return yamlRoot("src/main/resources/application.yml");
+    }
+
+    private static Map<String, Object> yamlRoot(String path) throws Exception {
+        try (InputStream yaml = Files.newInputStream(Path.of(path))) {
+            return new Yaml().load(yaml);
         }
     }
 

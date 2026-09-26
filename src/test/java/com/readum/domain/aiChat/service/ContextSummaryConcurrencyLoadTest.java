@@ -2,6 +2,7 @@ package com.readum.domain.aiChat.service;
 
 import com.readum.domain.aiChat.dto.AssembledContext;
 import com.readum.domain.aiChat.dto.ContextSummaryResult;
+import com.readum.domain.aiChat.out.AiAvailability;
 import com.readum.domain.aiChat.out.AiContextSummaryClient;
 import com.readum.model.aiChat.entity.AiChatContextSummary;
 import com.readum.model.aiChat.entity.AiChatContextSummaryJob;
@@ -50,6 +51,15 @@ class ContextSummaryConcurrencyLoadTest {
     @MockitoBean
     private AiContextSummaryClient aiContextSummaryClient;
 
+    /**
+     * 이 테스트의 관심사는 큐의 동시성·정합성이지 공급자 가용 판정이 아니다. 실제 어댑터를 쓰면 Redis 가 없는
+     * 환경에서 fail-closed 로 막혀 적재 자체가 일어나지 않아, 검증하려던 불변식에 닿지도 못한다.
+     * 가용 상태는 "항상 정상" 으로 고정하고, Redis 장애 시의 fail-closed 는 실제 Redis 하네스를 쓰는
+     * {@code AiProviderCircuitBreakerRedisTest} 가 따로 검증한다.
+     */
+    @MockitoBean
+    private AiAvailability aiAvailability;
+
     @Autowired
     private AiChatMessageRepository messageRepository;
     @Autowired
@@ -64,6 +74,12 @@ class ContextSummaryConcurrencyLoadTest {
     private AiChatHistorySearchService historySearchService;
 
     private final AtomicInteger summaryCallCount = new AtomicInteger(0);
+
+    @BeforeEach
+    void stubAvailabilityAsHealthy() {
+        given(aiAvailability.canProcess(any())).willReturn(true);
+
+    }
 
     @BeforeEach
     void stubLlm() {

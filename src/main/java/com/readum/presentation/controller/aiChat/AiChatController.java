@@ -177,18 +177,19 @@ public class AiChatController {
                     서버는 끊긴 연결을 다시 잇거나 이미 보낸 조각을 재생해 주지 않는다.
 
                     error 이벤트의 code:
-                    - `AI_RATE_LIMIT_BURST`: OpenAI 의 일시적 한도 초과 (RPM/TPM). rateLimit payload 포함, 클라이언트 자동 재시도 가능.
+                    - `AI_PROVIDER_RATE_LIMITED`: OpenAI 가 호출 한도 초과로 거절 (RPM/TPM). rateLimit payload 포함, 클라이언트 자동 재시도 가능.
                     - `AI_QUOTA_EXHAUSTED`: OpenAI quota 소진 (insufficient_quota). 사람 개입 전까지 회복 불가, rateLimit payload 없음.
+                    - `AI_PROVIDER_UNAVAILABLE`: 이 기능이 공급자 장애로 차단된 상태. 차단이 풀리면 자동으로 다시 받는다.
                     - `AI_PROVIDER_ERROR` / `AI_PROVIDER_TRANSIENT` / `AI_STREAM_INTERRUPTED`: 그 외 OpenAI 호출 실패.
 
                     rate-limit 처리 경로 (둘이 다름에 유의):
                     - **자체 rate limiter (USER_RATE_LIMIT_EXCEEDED)**: SSE 시작 전에 동기 검사. 한도 초과 시 SSE 가 시작되지 않고
                       HTTP 429 + Retry-After / X-RateLimit-* 헤더 + 에러 JSON 으로 응답된다 (아래 429 spec 참고).
-                    - **OpenAI 의 429** (AI_RATE_LIMIT_BURST / AI_QUOTA_EXHAUSTED): mid-stream 발생이라
+                    - **OpenAI 의 429** (AI_PROVIDER_RATE_LIMITED / AI_QUOTA_EXHAUSTED): mid-stream 발생이라
                       status 200 SSE 안에서 error 이벤트로 노출. HTTP 응답이 이미 commit 되어 X-RateLimit-* 헤더는 사용 불가하고,
                       동일 정보는 error.rateLimit payload 로 운반된다.
 
-                    rateLimit payload (BURST 일 때만):
+                    rateLimit payload (공급자가 한도 초과로 거절했을 때만):
                     ```
                     {
                       "retryAfterSeconds": 13,
@@ -231,7 +232,7 @@ public class AiChatController {
                             SSE 시작 전에 동기적으로 검사하므로, 한도를 넘으면 SSE 가 시작되지 않고
                             HTTP 429 + Retry-After / X-RateLimit-* 헤더 + 에러 JSON 이 응답된다.
 
-                            대조적으로 OpenAI 의 429 (AI_RATE_LIMIT_BURST / AI_QUOTA_EXHAUSTED) 는 mid-stream 으로
+                            대조적으로 OpenAI 의 429 (AI_PROVIDER_RATE_LIMITED / AI_QUOTA_EXHAUSTED) 는 mid-stream 으로
                             발생하므로, 이미 commit 된 status 200 SSE 안에서 error 이벤트로 노출된다 (description 본문 참고).
                             """,
                     headers = {

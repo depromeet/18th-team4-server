@@ -24,15 +24,21 @@ import java.time.Duration;
  * 미정산 예약 반환이 가로채 환불한다. 그 어긋남을 첫 기동에서 드러내는 것이 이 빈의 일이다.
  *
  * <p>이 빈이 <b>infrastructure</b> 에 있는 이유: 대조할 값 넷 중 셋(moderation HTTP 상한 · Hikari 연결 획득
- * 상한 · Redis 명령 기한)이 인프라 쪽 설정이라, 도메인이 인프라를 거꾸로 참조하지 않게 하려면
- * 대조가 이쪽에 있어야 한다.
+ * 상한 · Redis 명령 기한)이 인프라 쪽 설정이라, 도메인이 인프라를 거꾸로 참조하지
+ * 않게 하려면 대조가 이쪽에 있어야 한다.
  */
 @Slf4j
 @Component
 public class AiChatTimeBudgetValidator {
 
-    /** 선행 처리가 Redis 를 부르는 횟수 — 폭주 가드 1회 + 전역 게이트 1회. 매달린 Redis 앞에서 각각 명령 기한만큼 쓴다. */
-    static final int PREPARE_REDIS_CALL_COUNT = 2;
+    /**
+     * 선행 처리가 Redis 를 부르는 횟수. 매달린 Redis 앞에서 각각 명령 기한만큼 쓴다.
+     *
+     * <p>한 턴의 선행 처리에서 실제로 오가는 왕복을 하나씩 센 값이다. 지금은 <b>사용자 폭주 가드 1회</b>뿐이다 —
+     * 공급자 가용 확인과 입력 검토 허가는 서버 안 차단기(Resilience4j)가 메모리에서 답하므로 Redis 를 부르지 않는다.
+     * 생성 기록(저널)은 선행 처리가 아니라 생성 단계에서 오가고, 그 쓰기도 전달 스레드가 맡아 이 여유와 무관하다.
+     */
+    static final int PREPARE_REDIS_CALL_COUNT = 1;
 
     private final AiChatProperties.Streaming streaming;
     private final Duration moderationHttpCeiling;
@@ -100,8 +106,9 @@ public class AiChatTimeBudgetValidator {
                             .formatted(moderationCeilingSeconds, streaming.prepareAllowanceSeconds()));
         }
 
-        // 4) 매달린 Redis 앞에서 선행 처리가 쓰는 최악 시간 — moderation 상한에 Redis 호출 둘의 명령 기한이 더 붙는다.
-        //    fail-open 은 예외를 받은 뒤에야 발동하므로, 명령 기한이 곧 통과까지 걸리는 시간이다.
+        // 4) 선행 처리가 쓰는 최악 시간 — moderation 상한에 Redis 호출의 명령 기한이 더 붙는다.
+        //    매달린 Redis 앞에서 검사 없이 통과(fail-open)하는 것은 예외를 받은 뒤에야 일어나므로,
+        //    명령 기한이 곧 통과까지 걸리는 시간이다.
         //    이 합이 선행 처리 여유를 다 쓰면 정상 처리 중인 요청을 미정산 예약 반환이 가로챈다.
         if (redisCommandTimeout == null) {
             log.warn("[AI 채팅] Redis 명령 기한을 읽지 못해 선행 처리 여유와 대조하지 못했습니다 — "
@@ -110,14 +117,15 @@ public class AiChatTimeBudgetValidator {
         } else {
             long prepareRedisMillis = redisCommandTimeout.toMillis() * PREPARE_REDIS_CALL_COUNT;
             long prepareAllowanceMillis = streaming.prepareAllowanceSeconds() * 1_000L;
-            if (prepareRedisMillis + moderationHttpCeiling.toMillis() >= prepareAllowanceMillis) {
+            long prepareWorstCaseMillis = prepareRedisMillis + moderationHttpCeiling.toMillis();
+            if (prepareWorstCaseMillis >= prepareAllowanceMillis) {
                 throw new IllegalStateException(
                         ("선행 처리의 Redis 몫과 moderation 상한이 선행 처리 여유 안에 들지 않습니다: "
-                                + "spring.data.redis.timeout(%dms) × Redis 호출 %d회 + moderation 연결+읽기(%dms) = %dms "
-                                + "< prepare-allowance-seconds(%d) × 1000 = %dms 여야 합니다.")
+                                + "spring.data.redis.timeout(%dms) × Redis 호출 %d회 + moderation 연결+읽기(%dms) "
+                                + "= %dms < prepare-allowance-seconds(%d) × 1000 = %dms 여야 합니다.")
                                 .formatted(redisCommandTimeout.toMillis(), PREPARE_REDIS_CALL_COUNT,
                                         moderationHttpCeiling.toMillis(),
-                                        prepareRedisMillis + moderationHttpCeiling.toMillis(),
+                                        prepareWorstCaseMillis,
                                         streaming.prepareAllowanceSeconds(), prepareAllowanceMillis));
             }
         }

@@ -1,6 +1,5 @@
 package com.readum.infrastructure.ai.openai.chat;
 
-import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
@@ -12,9 +11,6 @@ import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
 import com.readum.infrastructure.ai.openai.guardrail.ChatInputGuardrail;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
-import com.readum.domain.aiChat.out.TokenCounter;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -60,12 +56,6 @@ public class AiChatClientImpl implements AiChatClient {
     // 판정만 하고, 거절은 선행 단계(AiChatMessageSendService)가 400 으로 낸다.
     private final ChatInputGuardrail chatInputGuardrail;
     private final AiPromptAuditLogger auditLogger;
-    private final OpenAiRateLimitGuard rateLimitGuard;
-    private final AiChatProperties aiChatProperties;
-    private final TokenCounter tokenCounter;
-
-    @Value("${spring.ai.openai.chat.options.model}")
-    private String chatModel;
 
     @Value("classpath:prompts/reading-assistant-system.st")
     private Resource systemPromptResource;
@@ -76,33 +66,6 @@ public class AiChatClientImpl implements AiChatClient {
     void init() throws IOException {
         // 책 정보·이전 대화 요약을 매 호출마다 덧붙여야 하므로 시스템 프롬프트 파일을 직접 읽어 조립한다.
         this.baseSystemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
-    }
-
-    @Override
-    public RateLimitPermit acquireRateLimitPermit(AiChatStreamCommand command) {
-        String systemPrompt = buildSystemPrompt(command.bookContext(), command.contextSummary());
-        // 분당 예산에서 "요청 1 + 추정 토큰" 확보. 사전 단계(요청 스레드)에서 호출되어
-        // 거절은 GlobalExceptionHandler 가 429 JSON 으로 변환한다.
-        // 계상은 실제 전송량 전체(시스템 프롬프트 + 이력 + 예약 출력) — 사용자 예산과 달리 오버헤드 포함.
-        int payloadTokens = tokenCounter.count(systemPrompt);
-        for (HistoryMessage historyMessage : command.history()) {
-            payloadTokens += tokenCounter.count(historyMessage.content());
-        }
-        int estimatedTokens = payloadTokens + aiChatProperties.tokenBudget().estimatedOutputTokens();
-        // 게이트 계상 내역을 도메인이 들고 다닐 permit 으로 변환한다 — 도메인이 인프라 타입을
-        // 모르게 하는 경계 번역. fail-open 통과(계상 없음)는 release 가 no-op 인 Uncounted.
-        return rateLimitGuard.acquireOrThrow(chatModel, estimatedTokens)
-                .<RateLimitPermit>map(reservation -> new RateLimitPermit.Counted(
-                        reservation.model(), reservation.epochMinute(), reservation.estimatedTokens()))
-                .orElseGet(RateLimitPermit.Uncounted::new);
-    }
-
-    @Override
-    public void releaseRateLimitPermit(RateLimitPermit permit) {
-        if (permit instanceof RateLimitPermit.Counted counted) {
-            rateLimitGuard.compensate(new OpenAiRequestGate.GateReservation(
-                    counted.model(), counted.epochMinute(), counted.estimatedTokens()));
-        }
     }
 
     /**
@@ -116,7 +79,7 @@ public class AiChatClientImpl implements AiChatClient {
     }
 
     /**
-     * 토큰 스트리밍. 호출 전 acquireRateLimitPermit() 이 선행되어야 한다.
+     * 토큰 스트리밍.
      *
      * <p>ChatClient 가 아니라 {@code OpenAiChatModel} 을 직접 호출한다(이유는 그 빈의 주석 참조).
      * 그래서 ChatClient 가 해 주던 프롬프트 조립을 여기서 직접 한다: 시스템 메시지가 맨 앞,

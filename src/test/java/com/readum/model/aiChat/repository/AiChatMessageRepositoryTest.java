@@ -145,4 +145,37 @@ class AiChatMessageRepositoryTest {
         assertThat(valid).extracting(AiChatMessage::getStatus)
                 .containsOnly(AiChatMessage.Status.COMPLETED);
     }
+    @Test
+    @DisplayName("되살려 늦게 저장한 답변은 생성 시각으로 정렬되고, id 기준 요약 대상에서도 빠지지 않는다")
+    void 되살린_답변의_순서와_요약_대상_포함() {
+        // 되살리기는 답변을 <b>생성된 시각</b>으로 저장한다. 그래서 id 는 가장 큰데 createdAt 은 앞선다 —
+        // 그 두 성질이 각각 어디에 쓰이는지를 한 번에 못박는다.
+        Long sessionId = nextSessionId();
+        AiChatMessage firstUser = aiChatMessageRepository.save(
+                AiChatMessage.createUserMessage(sessionId, "첫 질문"));
+        AiChatMessage laterUser = aiChatMessageRepository.save(
+                AiChatMessage.createUserMessage(sessionId, "그 다음 질문"));
+        AiChatMessage recovered = aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(
+                sessionId, "되살린 답변", 10, 5, 15, 5,
+                laterUser.getCreatedAt().minusMinutes(1)));
+        aiChatMessageRepository.flush();
+
+        // 1) 화면 순서는 저장 순서가 아니라 생성 시각이 정한다 — id 가 가장 큰 되살린 답변이 맨 뒤로 간다.
+        List<AiChatMessage> visible = aiChatMessageRepository
+                .findVisibleHistory(sessionId, PageRequest.of(0, 10)).getContent();
+        assertThat(visible).extracting(AiChatMessage::getId).contains(recovered.getId());
+        assertThat(visible.get(visible.size() - 1).getId())
+                .as("저장 시각으로 적었다면 맨 앞에 왔을 것이다")
+                .isEqualTo(recovered.getId());
+        assertThat(recovered.getId())
+                .isGreaterThan(firstUser.getId())
+                .isGreaterThan(laterUser.getId());
+
+        // 2) 요약 반영 지점은 id 기준이라, 늦게 저장된 답변은 더 큰 id 를 받아 다음 요약에서 잡힌다.
+        List<AiChatMessage> afterWatermark =
+                aiChatMessageRepository.findCompletedMessagesAfter(sessionId, laterUser.getId());
+        assertThat(afterWatermark).extracting(AiChatMessage::getId)
+                .as("되살린 답변이 요약에서 빠지면 그 턴이 컨텍스트에서 사라진다")
+                .containsExactly(recovered.getId());
+    }
 }

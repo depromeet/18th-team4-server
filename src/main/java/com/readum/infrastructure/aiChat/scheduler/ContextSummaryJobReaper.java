@@ -8,7 +8,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * 멈춘(고아) 컨텍스트 요약 작업 회수기. lease 만료된 PROCESSING 작업을 PENDING 으로 되돌려 다시 처리되게 한다.
- * 서버 재시작/워커 장애 시 작업이 영영 점유 상태에 갇히는 것을 막는다. 감상문 SummaryJobReaper 와 같은 골격.
+ * 서버 재시작/워커 장애 시 작업이 영영 점유 상태에 갇히는 것을 막는다. 감상문 SummaryJobReaper 와 같은 골격 —
+ * 접수한 지 전체 대기 한도를 넘긴 작업을 실패로 끝내는 일도 함께 한다(공급자 차단과 무관하게 돈다).
  */
 @Slf4j
 @Component
@@ -24,6 +25,10 @@ public class ContextSummaryJobReaper {
         int reclaimed = lifecycleService.reclaimOrphans(BATCH_SIZE);
         if (reclaimed > 0) {
             log.warn("멈춘 컨텍스트 요약 작업 회수 {}건", reclaimed);
+        }
+        int expired = lifecycleService.expireLongWaiting(BATCH_SIZE);
+        if (expired > 0) {
+            log.warn("전체 대기 한도를 넘긴 컨텍스트 요약 작업 종료 {}건", expired);
         }
     }
 }

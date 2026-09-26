@@ -1,18 +1,13 @@
 package com.readum.infrastructure.ai.openai.chat;
 
-import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.HistoryMessage;
-import com.readum.domain.aiChat.out.AiChatClient;
-import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.exception.BusinessException;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.guardrail.ChatInputGuardrail;
 import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,7 +33,6 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class AiChatClientImplTest {
@@ -50,53 +44,18 @@ class AiChatClientImplTest {
     @Mock
     private AiPromptAuditLogger auditLogger;
 
-    @Mock
-    private OpenAiRateLimitGuard rateLimitGuard;
-
-    private final TokenCounter tokenCounter = text -> 0;
-
     // 실제 기본 패턴을 그대로 쓰는 검사기 — 운영과 같은 판정을 보려면 같은 설정이어야 한다.
     private final ChatInputGuardrail chatInputGuardrail =
             new ChatInputGuardrail(GuardrailProperties.Input.defaults());
-
-    private final AiChatProperties aiChatProperties = new AiChatProperties(
-            new AiChatProperties.Context(8000, 2000, 4000, 800),
-            new AiChatProperties.MessageRule(1000),
-            new AiChatProperties.RateLimit(10, 5),
-            new AiChatProperties.TokenBudget(120000, 512),
-            new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 256, 300)
-    );
 
     private AiChatClientImpl aiChatClient;
 
     @BeforeEach
     void setUp() {
-        aiChatClient = new AiChatClientImpl(
-                streamingChatModel, chatInputGuardrail,
-                auditLogger, rateLimitGuard, aiChatProperties, tokenCounter);
+        aiChatClient = new AiChatClientImpl(streamingChatModel, chatInputGuardrail, auditLogger);
         // @Value 로 주입되던 시스템 프롬프트는 파일 로딩(@PostConstruct) 없이 직접 채운다 —
         // 이 테스트가 보는 것은 프롬프트 조립 순서와 입력 검사이지 프롬프트 원문이 아니다.
         ReflectionTestUtils.setField(aiChatClient, "baseSystemPrompt", "너는 독서 도우미다.");
-    }
-
-    // 확보 쪽 번역(가드의 Optional → Counted/Uncounted)은 여기서 직접 단언하지 않는다 — 의도된 공백이다.
-    // acquireRateLimitPermit 은 @Value 로 주입되는 모델 이름에 기대므로 그 필드를 채우지 않고는
-    // 단위 수준으로 구성할 수 없다. 확보 쪽은 OpenAiRateLimitGuardTest(Optional 반환)가 받친다.
-
-    @Test
-    void 계상된_permit_의_release_는_확보_시점의_분_키_내역으로_게이트_보상_차감을_호출한다() {
-        aiChatClient.releaseRateLimitPermit(
-                new AiChatClient.RateLimitPermit.Counted("gpt-4o-mini", 29_000_000L, 4500));
-
-        verify(rateLimitGuard).compensate(
-                new OpenAiRequestGate.GateReservation("gpt-4o-mini", 29_000_000L, 4500));
-    }
-
-    @Test
-    void 계상_없는_permit_의_release_는_게이트에_접근하지_않는다() {
-        aiChatClient.releaseRateLimitPermit(new AiChatClient.RateLimitPermit.Uncounted());
-
-        verifyNoInteractions(rateLimitGuard);
     }
 
     @Test

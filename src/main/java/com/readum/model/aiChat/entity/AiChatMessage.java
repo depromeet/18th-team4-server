@@ -137,6 +137,24 @@ public class AiChatMessage {
             Integer totalTokens,
             Integer tokenCount
     ) {
+        return createAssistantSuccess(
+                sessionId, content, inputTokens, outputTokens, totalTokens, tokenCount, LocalDateTime.now());
+    }
+
+    /**
+     * 작성 시각을 직접 정해 저장한다 — <b>답변이 생성된 시각</b>을 쓰는 자리다.
+     * 되살린 답변을 저장 시각으로 적으면 그 사이 오간 대화보다 뒤로 밀려 대화 순서가 뒤바뀐다.
+     * 이력·컨텍스트 조회가 {@code createdAt} 우선, 같으면 {@code id} 순으로 정렬하므로 순서는 결정적이다.
+     */
+    public static AiChatMessage createAssistantSuccess(
+            Long sessionId,
+            String content,
+            Integer inputTokens,
+            Integer outputTokens,
+            Integer totalTokens,
+            Integer tokenCount,
+            LocalDateTime createdAt
+    ) {
         return new AiChatMessage(
                 null,
                 sessionId,
@@ -148,7 +166,7 @@ public class AiChatMessage {
                 totalTokens,
                 tokenCount,
                 Status.COMPLETED,
-                LocalDateTime.now()
+                createdAt
         );
     }
 

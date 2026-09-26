@@ -229,8 +229,7 @@ class OpenAiChatModelStreamContractTest {
         AiChatClientImpl client = new AiChatClientImpl(
                 model,
                 new ChatInputGuardrail(GuardrailProperties.Input.defaults()),
-                new AiPromptAuditLogger(JsonMapper.builder().build()),
-                null, null, null);
+                new AiPromptAuditLogger(JsonMapper.builder().build()));
         ReflectionTestUtils.setField(client, "baseSystemPrompt", "너는 독서 도우미다.");
         return client;
     }

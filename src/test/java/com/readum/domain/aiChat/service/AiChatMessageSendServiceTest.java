@@ -10,6 +10,7 @@ import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.domain.aiChat.out.CompletedTurnStore;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.aiChat.out.UserMessageRateLimiter;
@@ -36,6 +37,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.concurrent.TimeoutException;
 import java.time.InstantSource;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -69,8 +71,6 @@ class AiChatMessageSendServiceTest {
     private static final Long TURN_REQUEST_ID = 4242L;
     private static final UserTokenBudgetWriter.ReserveResult.Granted GRANTED =
             new UserTokenBudgetWriter.ReserveResult.Granted(20260904, 100);
-    private static final AiChatClient.RateLimitPermit GATE_PERMIT =
-            new AiChatClient.RateLimitPermit.Counted("gpt-4o-mini", 29_000_000L, 1000);
     private static final LocalDateTime SAVED_AT = LocalDateTime.of(2026, 9, 6, 12, 0, 0);
     /** 기한 넷과 큐 상한 — 운영 후보값 그대로. 기한을 짧게 둬야 하는 테스트는 따로 서비스를 만든다. */
     /** 진행 중 턴 상한 — 운영 값. 상한 거절을 보는 테스트는 상한 1짜리 진행 목록을 따로 만든다. */
@@ -97,6 +97,9 @@ class AiChatMessageSendServiceTest {
     private InputModerationClient inputModerationClient;
 
     @Mock
+    private com.readum.domain.aiChat.out.AiAvailability aiAvailability;
+
+    @Mock
     private UserTokenBudgetWriter userTokenBudgetWriter;
 
     @Mock
@@ -109,6 +112,9 @@ class AiChatMessageSendServiceTest {
     // 제출 거절(종료 절차) 경로만 테스트별로 던지게 바꾼다.
     @Mock
     private ExecutorService aiChatPostProcessingExecutor;
+
+    /** 완성 답변 보관소 대역 — 무엇이 몇 번 적혔는지 그대로 들여다볼 수 있게 메모리에 담는다. */
+    private final RecordingCompletedTurnStore completedTurnStore = new RecordingCompletedTurnStore();
 
     // 진행 목록은 순수 메모리 상태라 진짜를 쓴다 — 등록·정리가 실제로 맞물리는지 보려면 대역이 도움이 되지 않는다.
     private final AiChatInFlightTurnRegistry aiChatInFlightTurnRegistry = new AiChatInFlightTurnRegistry(MAX_IN_FLIGHT_TURNS);
@@ -152,9 +158,6 @@ class AiChatMessageSendServiceTest {
         // rate limit 기본값: 통과(Allowed). 거절/우회 케이스는 각 테스트에서 override.
         lenient().when(userMessageRateLimiter.tryConsume(anyLong()))
                 .thenReturn(new UserMessageRateLimiter.Result.Allowed());
-        // 전역 게이트 기본값: 계상된 permit 확보. 거절 케이스는 각 테스트에서 override.
-        lenient().when(aiChatClient.acquireRateLimitPermit(any(AiChatStreamCommand.class)))
-                .thenReturn(GATE_PERMIT);
         // 후처리 실행기 기본값: 제출받은 작업을 그 자리에서 실행. 거절 케이스는 각 테스트에서 override.
         lenient().doAnswer(invocation -> {
             invocation.getArgument(0, Runnable.class).run();
@@ -163,6 +166,10 @@ class AiChatMessageSendServiceTest {
         service = serviceWith(aiChatProperties);
     }
 
+    /**
+     * 완성 답변 보관소는 여기서 <b>실제 동작하는 대역</b>을 쓴다 — "언제 한 번 적히고 언제 지워지는가" 가
+     * 이 서비스의 계약이라, 통째로 꺼 버리면 그 시점을 보지 못한다.
+     */
     private AiChatMessageSendService serviceWith(AiChatProperties properties) {
         return serviceWith(properties, aiChatInFlightTurnRegistry);
     }
@@ -172,8 +179,9 @@ class AiChatMessageSendServiceTest {
         return new AiChatMessageSendService(
                 persistService, aiChatClient, properties,
                 userMessageRateLimiter, userBookRepository, bookRepository, inputModerationClient,
-                aiChatTurnRequestWriter, aiChatTurnOutcomeWriter,
-                inFlightTurnRegistry, aiChatPostProcessingRetry, aiChatPostProcessingExecutor, tokenCounter
+                aiAvailability, aiChatTurnRequestWriter, aiChatTurnOutcomeWriter,
+                inFlightTurnRegistry, aiChatPostProcessingRetry, aiChatPostProcessingExecutor,
+                tokenCounter, completedTurnStore
         );
     }
 
@@ -196,7 +204,7 @@ class AiChatMessageSendServiceTest {
 
     /** 이번 턴이 저장·정산까지 확정됐다고 응답하는 요청 종료 트랜잭션. */
     private void givenCommittedSuccess(Long messageId, Integer input, Integer output, Integer total) {
-        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
                 .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.Succeeded(
                         new AiChatTurnOutcomeWriter.SavedAssistantMessage(
                                 messageId, input, output, total, SAVED_AT)));
@@ -317,6 +325,46 @@ class AiChatMessageSendServiceTest {
         // 재전송이 그 요청의 상태를 건드리면 안 된다.
         verify(aiChatTurnOutcomeWriter, never())
                 .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
+    }
+
+    @Test
+    void 공급자가_막혀_있으면_예약도_외부_호출도_시작하지_않고_503_으로_거절한다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        org.mockito.BDDMockito.willThrow(
+                        new com.readum.domain.aiChat.exception.AiDependencyUnavailableException(
+                                AiChatErrorCode.AI_PROVIDER_UNAVAILABLE))
+                .given(aiAvailability).requireAvailable(
+                        com.readum.domain.aiChat.out.AiAvailability.Capability.CHAT);
+
+        assertThatThrownBy(() -> executeTurn(command))
+                .asInstanceOf(InstanceOfAssertFactories.type(ServiceUnavailableException.class))
+                .extracting(ex -> ((com.readum.domain.exception.BusinessException) ex).getErrorCode())
+                .isEqualTo(AiChatErrorCode.AI_PROVIDER_UNAVAILABLE);
+
+        // 확인이 예약보다 앞서야 하는 이유: 쓰지도 못할 예약을 잡았다가 되돌리기 전에 프로세스가 죽으면
+        // 사용자의 하루 예산만 깎인다. 외부 검토 호출도 시작하지 않는다(응답 모델이 막혔으면 그 판정은 쓸 데가 없다).
+        verify(aiChatTurnRequestWriter, never()).reserveWithRecord(anyLong(), anyLong(), anyInt());
+        verifyNoInteractions(inputModerationClient, aiChatClient, persistService);
+        // 잡아 둔 요청 자리는 청구 없이 닫는다 — 미종료로 남겨 두면 예약 반환 대상이 되어 떠돈다.
+        verify(aiChatTurnOutcomeWriter)
+                .finishWithoutCharge(anyLong(), eq(AiChatTurnRequest.Status.FAILED), anyString());
+    }
+
+    @Test
+    void 공급자_가용_확인은_사용자_폭주_가드_뒤_예산_예약_앞에서_일어난다() {
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 1, 1, 2));
+        givenCommittedSuccess(1L, 1, 1, 2);
+
+        executeTurn(command);
+
+        InOrder admissionOrder = inOrder(userMessageRateLimiter, aiAvailability, aiChatTurnRequestWriter);
+        admissionOrder.verify(userMessageRateLimiter).tryConsume(USER_ID);
+        admissionOrder.verify(aiAvailability)
+                .requireAvailable(com.readum.domain.aiChat.out.AiAvailability.Capability.CHAT);
+        admissionOrder.verify(aiChatTurnRequestWriter).reserveWithRecord(anyLong(), anyLong(), anyInt());
     }
 
     @Test
@@ -553,7 +601,7 @@ class AiChatMessageSendServiceTest {
         // 저장·정산·예산 보정·요청 성공 확정은 한 트랜잭션(AiChatTurnOutcomeWriter)이 맡는다.
         // 서비스는 판정 결과와 청구량 A 의 입력 몫(메시지 입력 추정 1)만 넘긴다.
         ArgumentCaptor<AiChatGenerationOutcome> captor = ArgumentCaptor.forClass(AiChatGenerationOutcome.class);
-        verify(aiChatTurnOutcomeWriter).finishSuccessfully(eq(TURN_REQUEST_ID), captor.capture(), eq(1));
+        verify(aiChatTurnOutcomeWriter).finishSuccessfully(eq(TURN_REQUEST_ID), captor.capture(), eq(1), any(LocalDateTime.class));
         assertThat(captor.getValue().isSuccess()).isTrue();
         assertThat(captor.getValue().content()).isEqualTo("응답");
         assertThat(captor.getValue().outputTokens()).isEqualTo(5);
@@ -577,7 +625,7 @@ class AiChatMessageSendServiceTest {
         executeTurn(command);
 
         ArgumentCaptor<AiChatGenerationOutcome> captor = ArgumentCaptor.forClass(AiChatGenerationOutcome.class);
-        verify(aiChatTurnOutcomeWriter).finishSuccessfully(eq(TURN_REQUEST_ID), captor.capture(), anyInt());
+        verify(aiChatTurnOutcomeWriter).finishSuccessfully(eq(TURN_REQUEST_ID), captor.capture(), anyInt(), any(LocalDateTime.class));
         assertThat(captor.getValue().outputTokens()).isEqualTo(5);
         assertThat(captor.getValue().totalTokens()).isEqualTo(15);
     }
@@ -615,42 +663,14 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 생성_에러면_게이트_계상을_보상_차감한다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
-        givenLoadHistory(7L, List.of(), 100L);
-        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
-                .willReturn(Flux.error(new RuntimeException("boom")));
-        givenFinishedWithoutCharge();
-
-        executeTurn(command);
-
-        // OpenAI 가 토큰을 소모하지 않았으므로 확보했던 분당 계상을 되돌린다.
-        verify(aiChatClient).releaseRateLimitPermit(GATE_PERMIT);
-    }
-
-    @Test
-    void 게이트_보상_차감이_실패해도_error_이벤트는_그대로_반환된다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
-        givenLoadHistory(7L, List.of(), 100L);
-        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
-                .willReturn(Flux.error(new RuntimeException("boom")));
-        givenFinishedWithoutCharge();
-        willThrow(new RuntimeException("redis down"))
-                .given(aiChatClient).releaseRateLimitPermit(GATE_PERMIT);
-
-        List<MessageStreamEvent> events = executeTurn(command);
-
-        assertThat(events).hasSize(1);
-        assertThat(events.get(0)).isInstanceOf(MessageStreamEvent.Error.class);
-    }
-
-    @Test
-    void 성공_확정_커밋이_실패하면_현재_상태를_다시_확인하고_미종료일_때만_청구_없이_끝낸다() {
+    void 성공_확정_커밋이_실패하고_되살릴_기록도_없으면_현재_상태를_다시_확인하고_청구_없이_끝낸다() {
+        // 되살릴 근거가 있을 때의 처리는 따로 본다 — 그때는 환불하지 않고 되살리기에 맡긴다.
+        completedTurnStore.saveFails = true;
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
-        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
                 .willThrow(new RuntimeException("db down"));
         given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
                 .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
@@ -662,8 +682,6 @@ class AiChatMessageSendServiceTest {
         verify(aiChatTurnOutcomeWriter).currentOutcome(TURN_REQUEST_ID);
         verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
                 eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED), anyString());
-        // 생성이 성공해 OpenAI 가 실제로 토큰을 소모했으므로 분당 계상은 그대로가 맞다.
-        verify(aiChatClient, never()).releaseRateLimitPermit(any());
         assertThat(events.getLast()).isInstanceOf(MessageStreamEvent.Error.class);
     }
 
@@ -673,7 +691,7 @@ class AiChatMessageSendServiceTest {
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
-        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
                 .willThrow(new RuntimeException("커밋 응답이 끊겼다"));
         given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
                 .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.AlreadyFinished(
@@ -683,7 +701,6 @@ class AiChatMessageSendServiceTest {
 
         verify(aiChatTurnOutcomeWriter, never())
                 .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
-        verify(aiChatClient, never()).releaseRateLimitPermit(any());
     }
 
     @Test
@@ -693,7 +710,7 @@ class AiChatMessageSendServiceTest {
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
         // 풀 순간 고갈·잠금 경합처럼 몇 초 안에 지나가는 실패 — 두 번째 시도에서 확정된다.
-        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
                 .willThrow(new CannotAcquireLockException("Lock wait timeout exceeded"))
                 .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.Succeeded(
                         new AiChatTurnOutcomeWriter.SavedAssistantMessage(42L, 10, 5, 15, SAVED_AT)));
@@ -702,7 +719,7 @@ class AiChatMessageSendServiceTest {
 
         assertThat(events.getLast()).isInstanceOf(MessageStreamEvent.Done.class);
         verify(aiChatTurnOutcomeWriter, times(2))
-                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt());
+                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class));
         verify(aiChatTurnOutcomeWriter, never())
                 .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
         assertThat(aiChatPostProcessingRetry.retryCount()).isEqualTo(1);
@@ -712,11 +729,12 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 저장이_데이터_오류로_실패하면_다시_시도하지_않고_기존_실패_경로로_간다() {
+        completedTurnStore.saveFails = true;
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
-        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
                 .willThrow(new DataIntegrityViolationException("제약 위반"));
         given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
                 .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
@@ -727,7 +745,7 @@ class AiChatMessageSendServiceTest {
 
         // 다시 시도해도 같은 결과라 한 번만 부르고 곧바로 기존 재확인 경로로 간다.
         verify(aiChatTurnOutcomeWriter)
-                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt());
+                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class));
         verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
                 eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED), anyString());
         assertThat(aiChatPostProcessingRetry.retryCount()).isZero();
@@ -736,11 +754,12 @@ class AiChatMessageSendServiceTest {
 
     @Test
     void 저장이_세_번_다_실패하면_기존_재확인_경로로_가고_끝내_실패로_센다() {
+        completedTurnStore.saveFails = true;
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
-        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
                 .willThrow(new CannotAcquireLockException("Lock wait timeout exceeded"));
         given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
                 .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
@@ -750,7 +769,7 @@ class AiChatMessageSendServiceTest {
         List<MessageStreamEvent> events = executeTurn(command);
 
         verify(aiChatTurnOutcomeWriter, times(3))
-                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt());
+                .finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class));
         verify(aiChatTurnOutcomeWriter).currentOutcome(TURN_REQUEST_ID);
         verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
                 eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED), anyString());
@@ -771,7 +790,8 @@ class AiChatMessageSendServiceTest {
 
         executeTurn(command);
 
-        verify(aiChatClient, never()).releaseRateLimitPermit(any());
+        verify(aiChatTurnOutcomeWriter, never())
+                .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
     }
 
     @Test
@@ -805,29 +825,7 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 게이트_거절_시_예약을_전액_환불하고_예외를_그대로_던진다() {
-        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
-        givenLoadHistory(7L, List.of(), 100L);
-        willThrow(new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST))
-                .given(aiChatClient).acquireRateLimitPermit(any(AiChatStreamCommand.class));
-
-        assertThatThrownBy(() -> executeTurn(command))
-                .asInstanceOf(InstanceOfAssertFactories.type(TooManyRequestsException.class))
-                .extracting(TooManyRequestsException::getErrorCode)
-                .isEqualTo(AiChatErrorCode.AI_RATE_LIMIT_BURST);
-
-        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
-                TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
-                AiChatErrorCode.AI_RATE_LIMIT_BURST.name());
-        verify(aiChatClient, never()).generateStream(any(AiChatStreamCommand.class));
-        // 게이트 거절은 USER 저장 전이어야 한다 — 응답 없는 USER 메시지가 이력에 남지 않는다.
-        verify(persistService, never()).recordUserMessage(anyLong(), anyLong(), anyString());
-        // 거절은 tryAcquire 가 스스로 계상을 되돌렸으므로 여기서 또 보상하면 이중 차감이다.
-        verify(aiChatClient, never()).releaseRateLimitPermit(any());
-    }
-
-    @Test
-    void USER_저장이_실패하면_게이트_계상을_보상_차감하고_예외를_그대로_전파한다() {
+    void USER_저장이_실패하면_청구_없이_요청을_끝내고_예외를_그대로_전파한다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
         willThrow(new RuntimeException("db down"))
@@ -837,8 +835,7 @@ class AiChatMessageSendServiceTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("db down");
 
-        // 생성이 일어나지 않았으므로 게이트 계상 보상 + 청구 없는 요청 종료(예약 반환) 둘 다 수행된다.
-        verify(aiChatClient).releaseRateLimitPermit(GATE_PERMIT);
+        // 생성이 일어나지 않았으므로 청구 없는 요청 종료(예약 반환)를 수행한다.
         verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
                 eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED), anyString());
         verify(aiChatClient, never()).generateStream(any(AiChatStreamCommand.class));
@@ -919,9 +916,6 @@ class AiChatMessageSendServiceTest {
         verify(aiChatClient, never()).generateStream(any(AiChatStreamCommand.class));
         // 로컬 검사는 공짜지만 moderation 은 공급자 RPM 자원을 쓴다 — 거절될 요청이 그것을 소모하지 않는다.
         verifyNoInteractions(inputModerationClient);
-        // 게이트는 아직 확보 전이라 보상할 것이 없다.
-        verify(aiChatClient, never()).acquireRateLimitPermit(any(AiChatStreamCommand.class));
-        verify(aiChatClient, never()).releaseRateLimitPermit(any());
         // 예약 반환은 공통 종료 경로가 한 트랜잭션으로 한다.
         verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
                 TURN_REQUEST_ID, AiChatTurnRequest.Status.FAILED,
@@ -989,7 +983,7 @@ class AiChatMessageSendServiceTest {
         verify(persistService, times(1)).recordUserMessage(sessionId, 1L, "주제 요약");
         verify(persistService, never()).recordRejectedUserMessage(anyLong(), anyString());
         // ASSISTANT 저장은 요청 종료 트랜잭션 안에서 일어난다 — 서비스가 따로 저장하지 않는다.
-        verify(persistService, never()).saveAssistantSuccess(anyLong(), anyString(), any());
+        verify(persistService, never()).saveAssistantSuccess(anyLong(), anyString(), any(), any(LocalDateTime.class));
     }
 
     @Test
@@ -1015,11 +1009,11 @@ class AiChatMessageSendServiceTest {
 
         // 받은 데까지의 조각은 정상 답변이 아니므로 어떤 형태로도 저장하지 않는다
         // (본문 없이 끝내는 경로 자체의 단언은 AiChatTurnOutcomeWriterTest 가 맡는다).
-        verify(persistService, never()).saveAssistantSuccess(anyLong(), anyString(), any());
+        verify(persistService, never()).saveAssistantSuccess(anyLong(), anyString(), any(), any(LocalDateTime.class));
     }
 
     @Test
-    void TooManyRequestsException_BURST_이면_AI_RATE_LIMIT_BURST_코드와_RateLimitInfo_가_Error_이벤트로_운반된다() {
+    void 공급자가_한도_초과로_거절하면_그_코드와_RateLimitInfo_가_Error_이벤트로_운반된다() {
         Long sessionId = 7L;
         SendMessageCommand command = new SendMessageCommand(USER_ID, sessionId, REQUEST_ID, "질문");
 
@@ -1029,7 +1023,8 @@ class AiChatMessageSendServiceTest {
                 Duration.ofSeconds(12), null
         );
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
-                .willReturn(Flux.error(new TooManyRequestsException(AiChatErrorCode.AI_RATE_LIMIT_BURST, info)));
+                .willReturn(Flux.error(
+                        new TooManyRequestsException(AiChatErrorCode.AI_PROVIDER_RATE_LIMITED, info)));
         givenFinishedWithoutCharge();
 
         List<MessageStreamEvent> events = executeTurn(command);
@@ -1038,7 +1033,7 @@ class AiChatMessageSendServiceTest {
         assertThat(events.get(0))
                 .asInstanceOf(InstanceOfAssertFactories.type(MessageStreamEvent.Error.class))
                 .satisfies(error -> {
-                    assertThat(error.code()).isEqualTo(AiChatErrorCode.AI_RATE_LIMIT_BURST.name());
+                    assertThat(error.code()).isEqualTo(AiChatErrorCode.AI_PROVIDER_RATE_LIMITED.name());
                     assertThat(error.rateLimitInfo()).isSameAs(info);
                 });
     }
@@ -1133,7 +1128,7 @@ class AiChatMessageSendServiceTest {
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
         // 만료 복구 등 다른 실행이 먼저 이 요청을 끝낸 경우.
-        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
                 .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.AlreadyFinished(
                         AiChatTurnRequest.Status.EXPIRED, null));
 
@@ -1204,7 +1199,7 @@ class AiChatMessageSendServiceTest {
         deliveryChannel.close(); // 전달 VT 가 클라이언트 이탈로 이미 끝낸 상태
         executeTurn(command, service, deliveryChannel);
 
-        verify(aiChatTurnOutcomeWriter).finishSuccessfully(eq(TURN_REQUEST_ID), any(), anyInt());
+        verify(aiChatTurnOutcomeWriter).finishSuccessfully(eq(TURN_REQUEST_ID), any(), anyInt(), any(LocalDateTime.class));
         assertThat(aiChatInFlightTurnRegistry.inFlightCount()).isZero();
     }
 
@@ -1234,18 +1229,24 @@ class AiChatMessageSendServiceTest {
                 .isEqualTo("앞뒤");
     }
 
+    /**
+     * 기한 초과 판정은 이 계층의 책임으로 남아 있다. 다만 <b>기한을 재는 일</b>은 어댑터가 공급자 상태 보호 구간
+     * 안쪽에서 한다({@code ProtectedChatModel}) — 바깥에 걸면 기한 초과가 그 구간에는 취소로만 보여
+     * "공급자가 응답을 끊었다" 와 "우리가 구독을 놓았다" 가 구분되지 않기 때문이다.
+     * 그래서 여기서는 기한이 실제로 흐르기를 기다리는 대신, <b>포트가 기한 초과를 오류 신호로 올려보낸 상황</b>을
+     * 그대로 만들어 판정과 정산을 확인한다. 타이머가 제때 발동하는지는 어댑터 쪽 테스트가 맡는다.
+     */
     @Test
-    void 무응답_기한을_넘기면_기한_초과로_판정해_청구_없이_끝낸다() {
+    void 포트가_기한_초과를_알리면_기한_초과로_판정해_청구_없이_끝낸다() {
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
-        // 첫 청크 뒤로 아무것도 오지 않는 스트림 — 무응답 기한 1초에 걸린다(전체 기한은 넉넉히 120초).
+        // 조각이 좀 오다가 기한 초과로 끊긴 스트림 — 어댑터가 건 무응답/전체 기한이 이 모양으로 도착한다.
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
-                .willReturn(Flux.concat(Flux.just(AiChatStreamChunk.ofDelta("첫 조각")), Flux.never()));
+                .willReturn(Flux.just(AiChatStreamChunk.ofDelta("첫 조각"))
+                        .concatWith(Flux.error(new TimeoutException("무응답 기한 초과"))));
         givenFinishedWithoutCharge();
 
-        AiChatMessageSendService shortIdleService =
-                serviceWith(propertiesWith(new AiChatProperties.Streaming(120, 1, 150, 60, 60, 60, 256, 300)));
-        executeTurn(command, shortIdleService);
+        executeTurn(command);
 
         verify(aiChatTurnOutcomeWriter, timeout(3_000)).finishWithoutCharge(
                 eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED),
@@ -1253,22 +1254,19 @@ class AiChatMessageSendServiceTest {
     }
 
     @Test
-    void 청크가_계속_와도_전체_기한을_넘기면_기한_초과로_판정한다() {
+    void 기한_초과와_그_밖의_스트림_오류를_다르게_판정한다() {
+        // 사후 확인에서 "왜 끊겼는가" 가 남아야 하므로 둘을 같은 실패로 뭉뚱그리지 않는다.
         SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
         givenLoadHistory(7L, List.of(), 100L);
-        // 100ms 마다 조각이 오므로 무응답 기한(30초)에는 걸리지 않는다 — 전체 기한 1초만이 이 스트림을 끊는다.
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
-                .willReturn(Flux.interval(Duration.ofMillis(100))
-                        .map(tick -> AiChatStreamChunk.ofDelta("조각")));
+                .willReturn(Flux.error(new java.io.IOException("연결이 끊겼다")));
         givenFinishedWithoutCharge();
 
-        AiChatMessageSendService shortTotalService =
-                serviceWith(propertiesWith(new AiChatProperties.Streaming(1, 30, 150, 60, 60, 60, 256, 300)));
-        executeTurn(command, shortTotalService);
+        executeTurn(command);
 
         verify(aiChatTurnOutcomeWriter, timeout(3_000)).finishWithoutCharge(
                 eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED),
-                eq(AiChatGenerationOutcome.Status.TIMED_OUT.name()));
+                eq(AiChatGenerationOutcome.Status.STREAM_ERROR.name()));
     }
 
     @Test
@@ -1278,7 +1276,7 @@ class AiChatMessageSendServiceTest {
         given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
                 .willReturn(streamOf("응답", 10, 5, 15));
         // 저장·정산이 전체 기한(1초)보다 오래 걸리는 상황.
-        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt()))
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
                 .willAnswer(invocation -> {
                     Thread.sleep(1_500);
                     return new AiChatTurnOutcomeWriter.TurnOutcomeResult.Succeeded(
@@ -1336,6 +1334,254 @@ class AiChatMessageSendServiceTest {
         verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
                 eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED),
                 eq(AiChatGenerationOutcome.Status.NO_FINISH_REASON.name()));
-        verify(persistService, never()).saveAssistantSuccess(anyLong(), anyString(), any());
+        verify(persistService, never()).saveAssistantSuccess(anyLong(), anyString(), any(), any(LocalDateTime.class));
+    }
+
+    // --- 완성 답변 보관과 되살리기 --------------------------------------------------------------------
+
+    @Test
+    void 생성_중에는_아무것도_적지_않고_끝난_뒤_한_번만_적는다() {
+        // 조각은 기록을 거치지 않고 곧바로 전달된다. 되살리기의 근거는 완성본 하나뿐이다.
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(Flux.just(
+                        AiChatStreamChunk.ofDelta("안녕"),
+                        AiChatStreamChunk.ofDelta("하세요"),
+                        AiChatStreamChunk.ofFinishReason("STOP"),
+                        AiChatStreamChunk.ofUsage(10, 5, 15)));
+        givenCommittedSuccess(1L, 10, 5, 15);
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        assertThat(events).first().isEqualTo(new MessageStreamEvent.Token("안녕"));
+        assertThat(events).element(1).isEqualTo(new MessageStreamEvent.Token("하세요"));
+        assertThat(completedTurnStore.saveCount.get())
+                .as("조각마다 적지 않는다 — 완성본 한 번뿐이다")
+                .isEqualTo(1);
+        assertThat(completedTurnStore.saved.get().content()).isEqualTo("안녕하세요");
+    }
+
+    @Test
+    void 완성본은_DB_확정보다_먼저_보관소에_적힌다() {
+        // 이 순서가 "여기서 프로세스가 죽어도 되살릴 수 있다" 를 만든다.
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
+                .willAnswer(invocation -> {
+                    assertThat(completedTurnStore.saved.get())
+                            .as("DB 확정 트랜잭션이 열릴 때 이미 완성본이 적혀 있어야 한다")
+                            .isNotNull();
+                    return new AiChatTurnOutcomeWriter.TurnOutcomeResult.Succeeded(
+                            new AiChatTurnOutcomeWriter.SavedAssistantMessage(
+                                    1L, 10, 5, 15, LocalDateTime.now()));
+                });
+
+        executeTurn(command);
+
+        assertThat(completedTurnStore.saved.get().content()).isEqualTo("응답");
+        assertThat(completedTurnStore.saved.get().outputTokens()).isEqualTo(5);
+        assertThat(completedTurnStore.deleted.get())
+                .as("DB 종료가 확실해진 뒤에 지운다").isTrue();
+    }
+
+    @Test
+    void 적는_값은_되살리는_쪽이_정상_경로와_같게_확정할_수_있는_전부다() {
+        // 본문·실측 사용량만으로는 부족하다 — 청구의 입력 몫(예약 때 센 값), 작성 시각, 요청 신원이 함께 있어야
+        // 되살려 확정한 결과가 제때 확정한 결과와 같아진다.
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        givenCommittedSuccess(1L, 10, 5, 15);
+
+        executeTurn(command);
+
+        ArgumentCaptor<LocalDateTime> generatedAt = ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<Integer> estimatedInputTokens = ArgumentCaptor.forClass(Integer.class);
+        verify(aiChatTurnOutcomeWriter).finishSuccessfully(
+                eq(TURN_REQUEST_ID), any(AiChatGenerationOutcome.class),
+                estimatedInputTokens.capture(), generatedAt.capture());
+
+        CompletedTurnStore.CompletedTurn saved = completedTurnStore.saved.get();
+        assertThat(completedTurnStore.savedKey.get())
+                .as("열쇠는 요청 기록의 id 다").isEqualTo(TURN_REQUEST_ID);
+        assertThat(saved.turnRequestId())
+                .as("기록 안에도 요청 신원이 있어야 남의 기록을 되살리지 않는다").isEqualTo(TURN_REQUEST_ID);
+        assertThat(saved.sessionId()).isEqualTo(7L);
+        assertThat(saved.userId()).isEqualTo(USER_ID);
+        assertThat(saved.estimatedInputTokens()).isEqualTo(estimatedInputTokens.getValue());
+        assertThat(saved.generatedAt()).isEqualTo(generatedAt.getValue());
+        assertThat(saved.finishReason()).isEqualTo("STOP");
+        assertThat(saved.inputTokens()).isEqualTo(10);
+        assertThat(saved.totalTokens()).isEqualTo(15);
+    }
+
+    @Test
+    void 보관소가_대답하지_않아도_대화는_그대로_끝난다() {
+        // 보관소는 대화를 돕는 장치이지 대화의 조건이 아니다 — 되살리기 보장만 없어진다.
+        completedTurnStore.goDown();
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        givenCommittedSuccess(1L, 10, 5, 15);
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        assertThat(events.getLast()).isInstanceOf(MessageStreamEvent.Done.class);
+        verify(aiChatTurnOutcomeWriter).finishSuccessfully(
+                anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class));
+    }
+
+    @Test
+    void 실패한_턴은_보관소에_아무것도_적지_않는다() {
+        // 부분 답변은 적히지 않는다 — 되살릴 것이 없으니 지울 것도 없다.
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(Flux.error(new RuntimeException("boom")));
+        givenFinishedWithoutCharge();
+
+        executeTurn(command);
+
+        assertThat(completedTurnStore.saveCount.get()).isZero();
+        assertThat(completedTurnStore.saved.get()).isNull();
+    }
+
+    @Test
+    void 확정_커밋이_끊겼는데_기록이_남아_있으면_환불하지_않고_되살리기에_맡긴다() {
+        // 여기서 청구 없이 끝내면, 끝까지 만들어져 보관소에 남아 있는 답변을 우리 손으로 버리는 셈이다.
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
+                .willThrow(new RuntimeException("db down"));
+        given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
+                .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
+                        AiChatTurnRequest.Status.RESERVED));
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        verify(aiChatTurnOutcomeWriter, never())
+                .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
+        assertThat(completedTurnStore.deleted.get())
+                .as("되살릴 근거를 지우면 안 된다").isFalse();
+        assertThat(events.getLast()).isInstanceOf(MessageStreamEvent.Error.class);
+    }
+
+    @Test
+    void 확정_커밋이_끊겼고_기록도_없으면_기존대로_청구_없이_끝낸다() {
+        completedTurnStore.saveFails = true;
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
+                .willThrow(new RuntimeException("db down"));
+        given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
+                .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
+                        AiChatTurnRequest.Status.RESERVED));
+        givenFinishedWithoutCharge();
+
+        executeTurn(command);
+
+        verify(aiChatTurnOutcomeWriter).finishWithoutCharge(
+                eq(TURN_REQUEST_ID), eq(AiChatTurnRequest.Status.FAILED), anyString());
+    }
+
+    @Test
+    void 적기에_실패했어도_기록이_남아_있을_수_있으면_환불하지_않고_미룬다() {
+        // 적기의 실패는 "적히지 않았다" 가 아니다 — 명령은 닿았는데 응답만 끊겼을 수 있다.
+        // 확실히 없다고 읽히기 전에는 예약을 되돌리지 않는다.
+        completedTurnStore.goDown();
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        given(aiChatTurnOutcomeWriter.finishSuccessfully(anyLong(), any(AiChatGenerationOutcome.class), anyInt(), any(LocalDateTime.class)))
+                .willThrow(new RuntimeException("db down"));
+        given(aiChatTurnOutcomeWriter.currentOutcome(TURN_REQUEST_ID))
+                .willReturn(new AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning(
+                        AiChatTurnRequest.Status.RESERVED));
+
+        List<MessageStreamEvent> events = executeTurn(command);
+
+        verify(aiChatTurnOutcomeWriter, never())
+                .finishWithoutCharge(anyLong(), any(AiChatTurnRequest.Status.class), anyString());
+        assertThat(completedTurnStore.deleted.get())
+                .as("판단을 미룬 요청의 근거를 지우면 안 된다").isFalse();
+        assertThat(events.getLast()).isInstanceOf(MessageStreamEvent.Error.class);
+    }
+
+    @Test
+    void 연결이_끊겨도_완성본은_그대로_적힌다() {
+        // 기록 대상은 서버가 만든 결과이지 전달된 것이 아니다 — 끊긴 연결이 기록을 멈출 이유가 없다.
+        SendMessageCommand command = new SendMessageCommand(USER_ID, 7L, REQUEST_ID, "질문");
+        givenLoadHistory(7L, List.of(), 100L);
+        given(aiChatClient.generateStream(any(AiChatStreamCommand.class)))
+                .willReturn(streamOf("응답", 10, 5, 15));
+        givenCommittedSuccess(1L, 10, 5, 15);
+        ChatDeliveryChannel deliveryChannel = ChatDeliveryChannel.open(STREAMING);
+        deliveryChannel.close();
+
+        executeTurn(command, service, deliveryChannel);
+
+        assertThat(completedTurnStore.saved.get()).isNotNull();
+        assertThat(completedTurnStore.saved.get().content()).isEqualTo("응답");
+    }
+
+    /**
+     * 완성 답변 보관소 대역 — 실제 Redis 없이 <b>무엇이 몇 번 적혔고 지워졌는지</b>를 그대로 보관한다.
+     * 먼저 적힌 기록을 덮지 않는 성질까지 흉내 내, 이 서비스가 기록을 한 번만 남기는지 단언할 수 있게 한다.
+     */
+    private static final class RecordingCompletedTurnStore implements CompletedTurnStore {
+
+        private final java.util.concurrent.atomic.AtomicReference<CompletedTurn> saved =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        private final java.util.concurrent.atomic.AtomicLong savedKey =
+                new java.util.concurrent.atomic.AtomicLong();
+        private final java.util.concurrent.atomic.AtomicInteger saveCount =
+                new java.util.concurrent.atomic.AtomicInteger();
+        private final java.util.concurrent.atomic.AtomicBoolean deleted =
+                new java.util.concurrent.atomic.AtomicBoolean();
+
+        /** 참이면 적기가 실패한다 — 적히지 않았을 수도, 응답만 끊겼을 수도 있는 상황. */
+        private volatile boolean saveFails;
+
+        /** 참이면 읽기가 알 수 없음으로 답한다 — 보관소가 대답하지 않는 상황. */
+        private volatile boolean findFails;
+
+        /** 쓰기도 읽기도 안 되는 상황 — 보관소가 통째로 죽었다. */
+        private void goDown() {
+            saveFails = true;
+            findFails = true;
+        }
+
+        @Override public boolean save(long turnRequestId, CompletedTurn completedTurn) {
+            if (saveFails) {
+                return false;
+            }
+            saveCount.incrementAndGet();
+            savedKey.set(turnRequestId);
+            // 먼저 적힌 기록은 덮지 않는다(어댑터의 NX 와 같은 성질).
+            saved.compareAndSet(null, completedTurn);
+            return true;
+        }
+
+        @Override public Lookup find(long turnRequestId) {
+            if (findFails) {
+                return new Lookup.Unknown();
+            }
+            CompletedTurn recorded = saved.get();
+            return (recorded == null) ? new Lookup.Absent() : new Lookup.Found(recorded);
+        }
+
+        @Override public void delete(long turnRequestId) {
+            deleted.set(true);
+        }
     }
 }

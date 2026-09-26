@@ -21,6 +21,11 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
      * 처리 가능한 PENDING 작업을 선점 후보로 조회한다.
      * PESSIMISTIC_WRITE + lock timeout -2(Hibernate SKIP LOCKED): 다른 워커가 이미 잠근 행은 건너뛴다.
      * 주의: SKIP LOCKED 동시-skip 동작은 MySQL 에서 성립하며 H2 에서는 무시될 수 있다.
+     *
+     * <p><b>정렬은 접수 순서(createdAt, id)다.</b> 다음 시도 시각으로 정렬하면, 공급자가 막혀 시도 횟수 없이
+     * 되돌린 작업이 되돌린 시각을 새 시도 시각으로 갖게 되어 그 뒤에 접수된 작업보다 뒤로 밀린다 —
+     * 오래 기다린 사람이 더 오래 기다리게 된다. 시도 시각은 "지금 처리해도 되는가" 를 거르는 조건으로만 쓰고,
+     * 순서는 접수 순서로 정한다. 완료 순서까지 접수 순으로 보장한다는 뜻은 아니다(작업마다 걸리는 시간이 다르다).
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
@@ -29,7 +34,7 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
               from SummaryJob summaryJob
              where summaryJob.status = :status
                and summaryJob.nextAttemptAt <= :now
-             order by summaryJob.nextAttemptAt asc
+             order by summaryJob.createdAt asc
                     , summaryJob.id asc
             """)
     List<SummaryJob> findClaimable(
@@ -82,6 +87,42 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
     boolean existsByActiveSessionId(Long activeSessionId);
 
     /**
+     * 아직 끝나지 않은 작업이 하나라도 있는가 — 적체를 다 비웠는지 판정한다.
+     *
+     * <p>선점이 비었다는 것만으로는 다 비웠다고 할 수 없다. 백오프 때문에 시도 시각이 미래인 PENDING 이나
+     * 다른 서버가 들고 처리 중인 PROCESSING 이 남아 있으면, 선점은 빈손으로 돌아오지만 적체는 남아 있다.
+     * 그 상태에서 신규 접수를 다시 열면 복구가 끝나기 전에 새 작업이 섞인다.
+     */
+    @Query("""
+            select case when count(summaryJob) > 0 then true else false end
+              from SummaryJob summaryJob
+             where summaryJob.status in (
+                       com.readum.model.summary.entity.SummaryJob.Status.PENDING
+                     , com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
+                   )
+            """)
+    boolean existsUnfinishedJob();
+
+    /**
+     * 접수한 지 너무 오래된 미완료 작업을 조회한다 — 기한 만료로 끝낼 대상.
+     * 공급자가 오래 막혀 있어도 작업이 영원히 남아 세션이 영구히 잠기지 않게 하는 마지막 장치라,
+     * 공급자 상태와 무관하게 도는 회수기가 이 조회를 쓴다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
+    @Query("""
+            select summaryJob
+              from SummaryJob summaryJob
+             where summaryJob.status in (
+                       com.readum.model.summary.entity.SummaryJob.Status.PENDING
+                     , com.readum.model.summary.entity.SummaryJob.Status.PROCESSING
+                   )
+               and summaryJob.createdAt < :expiredBefore
+             order by summaryJob.createdAt asc
+            """)
+    List<SummaryJob> findExpired(@Param("expiredBefore") LocalDateTime expiredBefore, Pageable pageable);
+
+    /**
      * 자동 요약 대상 세션들의 작업을 집합 단위 단일 INSERT 로 한 번에 적재한다.
      * 새벽 6시 적재를 세션마다 도는 per-row 루프(≈2N 쿼리/N 트랜잭션) 대신 1 쿼리/1 트랜잭션으로 줄인다.
      *
@@ -92,6 +133,10 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
      *
      * <p>id 가 IDENTITY 라 JPQL/HQL bulk-insert 가 안 되므로 네이티브 SQL. 컬럼 값은 {@code createPending}
      * 의 기본값(status='PENDING', attempt_count=0, 시각=:now)과 일치한다.
+     *
+     * <p>건수 상한을 두지 않는다 — 부르는 쪽이 공급자 가용을 먼저 확인하므로, 차단 중에 "조금만 넣어 보며
+     * 살아났는지 떠본다" 는 회차가 없다(복구 확인은 전용 스케줄러가 자기 호출로 한다).
+     * 세션 id 순 정렬은 남긴다 — 실행마다 적재 순서가 달라지지 않게 해 두면 로그를 되짚기 쉽다.
      *
      * @return 실제 적재된(insert 된) 행 수
      */
@@ -127,6 +172,7 @@ public interface SummaryJobRepository extends JpaRepository<SummaryJob, Long> {
                           from summary_job summaryJob
                          where summaryJob.active_session_id = aiChatSession.id
                     )
+             order by aiChatSession.id asc
             """, nativeQuery = true)
     int enqueuePendingForEligibleSessions(
             @Param("minTokens") int minTokens,

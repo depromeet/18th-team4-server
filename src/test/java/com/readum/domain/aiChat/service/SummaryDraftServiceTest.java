@@ -41,6 +41,7 @@ class SummaryDraftServiceTest {
     @Mock private AiChatSessionRepository aiChatSessionRepository;
     @Mock private UserBookRepository userBookRepository;
     @Mock private SummaryDraftPolicy summaryDraftPolicy;
+    @Mock private com.readum.domain.aiChat.out.AiAvailability aiAvailability;
     @Mock private SummaryJobRepository summaryJobRepository;
     @Mock private EnqueueSummaryJobService enqueueSummaryJobService;
 
@@ -60,6 +61,25 @@ class SummaryDraftServiceTest {
     }
 
     @Test
+    void 가용_확인은_자격_검증을_통과한_뒤_적재_직전에_한다() {
+        // 자격에서 떨어질 요청으로 Redis 를 두드리지 않고, 적재 뒤에 확인해 이미 쌓은 작업을 되돌리는 일도 없게 한다.
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(SESSION_ID, USER_BOOK_ID, 2, 600, "제목");
+        UserBook userBook = UserBookFixture.persistedUserBook(USER_BOOK_ID, USER_ID, BOOK_ID);
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
+        given(enqueueSummaryJobService.execute(SESSION_ID)).willReturn(new EnqueueSummaryJobResult(true));
+
+        summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID));
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(
+                summaryDraftPolicy, aiAvailability, enqueueSummaryJobService);
+        order.verify(summaryDraftPolicy).assertEligible(session);
+        order.verify(aiAvailability).requireAvailable(
+                com.readum.domain.aiChat.out.AiAvailability.Capability.SUMMARY);
+        order.verify(enqueueSummaryJobService).execute(SESSION_ID);
+    }
+
+    @Test
     void 적재_경합으로_적재되지_않으면_409_SUMMARY_IN_PROGRESS() {
         AiChatSession session = AiChatSessionFixture.persistedActiveSession(SESSION_ID, USER_BOOK_ID, 2, 600, "제목");
         UserBook userBook = UserBookFixture.persistedUserBook(USER_BOOK_ID, USER_ID, BOOK_ID);
@@ -71,6 +91,41 @@ class SummaryDraftServiceTest {
                 .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
                 .extracting(ConflictException::getErrorCode)
                 .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
+    }
+
+    @Test
+    void 공급자를_쓸_수_없으면_새_접수를_받지_않고_적재하지_않는다() {
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(SESSION_ID, USER_BOOK_ID, 2, 600, "제목");
+        UserBook userBook = UserBookFixture.persistedUserBook(USER_BOOK_ID, USER_ID, BOOK_ID);
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
+        willThrow(new com.readum.domain.aiChat.exception.AiDependencyUnavailableException(
+                AiChatErrorCode.AI_PROVIDER_UNAVAILABLE))
+                .given(aiAvailability)
+                .requireAvailable(com.readum.domain.aiChat.out.AiAvailability.Capability.SUMMARY);
+
+        assertThatThrownBy(() -> summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID)))
+                .isInstanceOf(com.readum.domain.aiChat.exception.AiDependencyUnavailableException.class);
+
+        verify(enqueueSummaryJobService, never()).execute(anyLong());
+    }
+
+    @Test
+    void 이미_활성_작업이_있으면_공급자_상태를_보기_전에_이미_접수됨으로_답한다() {
+        // 재요청은 사용자가 보기에 예전에 이미 받아들여진 요청이다 — 공급자가 막혔다고 그 사실이 달라지지 않는다.
+        AiChatSession session = AiChatSessionFixture.persistedActiveSession(SESSION_ID, USER_BOOK_ID, 2, 600, "제목");
+        UserBook userBook = UserBookFixture.persistedUserBook(USER_BOOK_ID, USER_ID, BOOK_ID);
+        given(aiChatSessionRepository.findById(SESSION_ID)).willReturn(Optional.of(session));
+        given(userBookRepository.findByIdAndUserId(USER_BOOK_ID, USER_ID)).willReturn(Optional.of(userBook));
+        given(summaryJobRepository.existsByActiveSessionId(SESSION_ID)).willReturn(true);
+
+        assertThatThrownBy(() -> summaryDraftService.execute(new SummaryDraftCommand(USER_ID, SESSION_ID)))
+                .asInstanceOf(InstanceOfAssertFactories.type(ConflictException.class))
+                .extracting(ConflictException::getErrorCode)
+                .isEqualTo(AiChatErrorCode.SUMMARY_IN_PROGRESS);
+
+        verify(aiAvailability, never()).requireAvailable(org.mockito.ArgumentMatchers.any());
+        verify(enqueueSummaryJobService, never()).execute(anyLong());
     }
 
     @Test

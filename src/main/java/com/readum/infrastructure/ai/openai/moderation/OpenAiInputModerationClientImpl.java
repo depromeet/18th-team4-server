@@ -3,6 +3,8 @@ package com.readum.infrastructure.ai.openai.moderation;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.InputModerationClient;
+import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.exception.ExternalApiException;
 import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -136,12 +138,20 @@ public class OpenAiInputModerationClientImpl implements InputModerationClient {
                 .map(list -> list.get(0))
                 .orElse(null);
 
-        if (result == null || !result.isFlagged()) {
+        if (result == null) {
+            // 판정이 실려 있지 않다 — "걸린 것이 없다" 와 구분되지 않으므로 통과로 읽으면 안 된다.
+            // 모델 경계(ProtectedModerationModel)가 먼저 걸러 주지만, 다른 구현을 끼웠을 때 조용히 통과하지 않게 여기서도 막는다.
+            throw new ExternalApiException(AiChatErrorCode.GUARDRAIL_MODERATION_UNAVAILABLE);
+        }
+        if (!result.isFlagged()) {
             return List.of();
         }
         Categories categories = result.getCategories();
         if (categories == null) {
-            return List.of();
+            // 걸렸다고는 하는데 어느 항목인지가 없다. 통과시키면 "걸린 입력" 이 그대로 지나가므로,
+            // 아래 매핑 실패와 같은 취지로 차단 쪽으로 보낸다.
+            log.warn("[Guardrail] moderation flagged=true 이나 카테고리 정보가 없습니다. 차단 처리.");
+            return List.of("unmapped");
         }
 
         List<String> flagged = new ArrayList<>();

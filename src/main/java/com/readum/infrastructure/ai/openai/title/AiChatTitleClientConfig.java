@@ -4,12 +4,19 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import com.readum.domain.aiChat.out.AiAvailability;
+import com.readum.infrastructure.ai.openai.OpenAiResponseErrorHandlerFactory;
+import com.readum.infrastructure.ai.openai.availability.AiProviderCallGuard;
+import com.readum.infrastructure.ai.openai.availability.ProtectedChatModel;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.retry.RetryPolicy;
+import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.client.ReactorClientHttpRequestFactory;
-import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
@@ -35,8 +42,9 @@ public class AiChatTitleClientConfig {
 
     @Bean
     public ChatClient titleGenerationChatClient(
-            ResponseErrorHandler openAiResponseErrorHandler,
-            @Value("${spring.ai.openai.api-key}") String apiKey,
+            OpenAiResponseErrorHandlerFactory errorHandlerFactory,
+            AiProviderCallGuard callGuard,
+            OpenAiProjectProperties projectProperties,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
             @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}") String chatModelName
     ) {
@@ -45,20 +53,26 @@ public class AiChatTitleClientConfig {
                 .requestFactory(new ReactorClientHttpRequestFactory(httpClient));
 
         OpenAiApi openAiApi = OpenAiApi.builder()
-                .apiKey(apiKey)
+                .apiKey(projectProperties.apiKeyOf(OpenAiProject.TITLE))
                 .baseUrl(baseUrl)
                 .restClientBuilder(restClientBuilder)
                 .webClientBuilder(WebClient.builder())
-                .responseErrorHandler(openAiResponseErrorHandler)
+                .responseErrorHandler(errorHandlerFactory.create(OpenAiProject.TITLE))
                 .build();
 
+        // 자체 재시도를 두지 않는다. 이 경로의 재시도 정책은 바깥(큐·리스너)이 이미 정하고 있어서,
+        // 모델이 안에서 한 번 더 되풀이하면 실패 한 번이 보이지 않는 과금 호출 여러 번으로 불어난다
+        // (#103 교훈: 재시도는 증폭기). 기본값(10회·지수 백오프)은 응답 기한 초과까지 되풀이 대상에 넣는다.
+        RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
         OpenAiChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(openAiApi)
                 .defaultOptions(OpenAiChatOptions.builder().model(chatModelName).build())
+                .retryTemplate(new RetryTemplate(noRetry))
                 .build();
 
         log.info("[AiChat] 제목 생성 전용 ChatClient 구성 - model={}, responseTimeout={}",
                 chatModelName, TITLE_RESPONSE_TIMEOUT);
-        return ChatClient.builder(chatModel).build();
+        return ChatClient.builder(
+                new ProtectedChatModel(chatModel, AiAvailability.Capability.TITLE, callGuard)).build();
     }
 }

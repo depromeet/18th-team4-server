@@ -22,6 +22,19 @@ public final class SummaryJobFixture {
         );
     }
 
+    /**
+     * 접수 시각(createdAt)까지 지정한 PENDING 작업 — 선점 순서가 접수 순서인지 검증할 때 쓴다.
+     * 저장 시각을 따로 조작할 수 없어(모든 픽스처가 "지금") 순서 검증이 불가능하던 문제를 푼다.
+     */
+    public static SummaryJob persistedPendingCreatedAt(
+            Long id, Long sessionId, LocalDateTime nextAttemptAt, LocalDateTime createdAt
+    ) {
+        return new SummaryJob(
+                id, sessionId, sessionId, SummaryJob.Status.PENDING,
+                null, null, 0, nextAttemptAt, null, null, createdAt, createdAt
+        );
+    }
+
     /** 저장되어 점유(PROCESSING)된 작업. lockedUntil 로 lease 만료 여부를 제어한다(회수기 테스트용). */
     public static SummaryJob persistedProcessing(
             Long id, Long sessionId, String owner, LocalDateTime lockedUntil

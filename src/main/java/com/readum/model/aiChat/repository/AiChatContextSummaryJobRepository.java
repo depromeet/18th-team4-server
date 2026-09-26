@@ -21,6 +21,9 @@ public interface AiChatContextSummaryJobRepository extends JpaRepository<AiChatC
      * 처리 가능한 PENDING 작업을 선점 후보로 조회한다.
      * PESSIMISTIC_WRITE + lock timeout -2(Hibernate SKIP LOCKED): 다른 워커가 이미 잠근 행은 건너뛴다.
      * 주의: SKIP LOCKED 동시-skip 동작은 MySQL 에서 성립하며 H2 에서는 무시될 수 있다.
+     *
+     * <p>정렬은 접수 순서(createdAt, id)다. 이유는 감상문 큐와 같다 — 공급자가 막혀 시도 횟수 없이 되돌린 작업이
+     * 되돌린 시각 때문에 뒤로 밀리지 않게 한다.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
@@ -29,7 +32,7 @@ public interface AiChatContextSummaryJobRepository extends JpaRepository<AiChatC
               from AiChatContextSummaryJob contextSummaryJob
              where contextSummaryJob.status = :status
                and contextSummaryJob.nextAttemptAt <= :now
-             order by contextSummaryJob.nextAttemptAt asc
+             order by contextSummaryJob.createdAt asc
                     , contextSummaryJob.id asc
             """)
     List<AiChatContextSummaryJob> findClaimable(
@@ -60,6 +63,33 @@ public interface AiChatContextSummaryJobRepository extends JpaRepository<AiChatC
 
     /** 세션에 미완료(활성) 작업이 이미 있는지 — 적재 멱등성 사전 확인용. */
     boolean existsByActiveSessionId(Long activeSessionId);
+
+    /** 아직 끝나지 않은 작업이 하나라도 있는가 — 적체를 다 비웠는지 판정한다(감상문 큐와 같은 이유). */
+    @Query("""
+            select case when count(contextSummaryJob) > 0 then true else false end
+              from AiChatContextSummaryJob contextSummaryJob
+             where contextSummaryJob.status in (
+                       com.readum.model.aiChat.entity.AiChatContextSummaryJob.Status.PENDING
+                     , com.readum.model.aiChat.entity.AiChatContextSummaryJob.Status.PROCESSING
+                   )
+            """)
+    boolean existsUnfinishedJob();
+
+    /** 접수한 지 너무 오래된 미완료 작업 — 기한 만료로 끝낼 대상(감상문 큐와 같은 이유). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
+    @Query("""
+            select contextSummaryJob
+              from AiChatContextSummaryJob contextSummaryJob
+             where contextSummaryJob.status in (
+                       com.readum.model.aiChat.entity.AiChatContextSummaryJob.Status.PENDING
+                     , com.readum.model.aiChat.entity.AiChatContextSummaryJob.Status.PROCESSING
+                   )
+               and contextSummaryJob.createdAt < :expiredBefore
+             order by contextSummaryJob.createdAt asc
+            """)
+    List<AiChatContextSummaryJob> findExpired(
+            @Param("expiredBefore") LocalDateTime expiredBefore, Pageable pageable);
 
     /**
      * 등록 도서(UserBook) 삭제 cascade 용 — 그 도서의 세션들에 속한 작업을 일괄 삭제한다.

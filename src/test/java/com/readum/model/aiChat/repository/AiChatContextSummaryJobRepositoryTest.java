@@ -29,13 +29,15 @@ class AiChatContextSummaryJobRepositoryTest {
     }
 
     @Test
-    void findClaimable_은_처리시점이_지난_PENDING만_nextAttemptAt_오름차순으로_가져온다() {
+    void findClaimable_은_처리시점이_지난_PENDING만_접수_순서로_가져온다() {
         LocalDateTime now = LocalDateTime.now();
-        // 처리시점이 지난 claimable 을 둘 시딩해 오름차순 정렬을 실제로 검증한다(하나만 두면 정렬 여부를 알 수 없다).
+        // 처리시점이 지난 claimable 을 둘 시딩해 정렬을 실제로 검증한다(하나만 두면 정렬 여부를 알 수 없다).
         AiChatContextSummaryJob earlier = jobRepository.save(
-                AiChatContextSummaryJobFixture.persistedPendingDueAt(null, nextSessionId(), now.minusSeconds(30)));
+                AiChatContextSummaryJobFixture.persistedPendingCreatedAt(
+                        null, nextSessionId(), now.minusSeconds(10), now.minusMinutes(30)));
         AiChatContextSummaryJob later = jobRepository.save(
-                AiChatContextSummaryJobFixture.persistedPendingDueAt(null, nextSessionId(), now.minusSeconds(10)));
+                AiChatContextSummaryJobFixture.persistedPendingCreatedAt(
+                        null, nextSessionId(), now.minusSeconds(30), now.minusMinutes(1)));
         jobRepository.save(
                 AiChatContextSummaryJobFixture.persistedPendingDueAt(null, nextSessionId(), now.plusMinutes(10)));
 
@@ -45,6 +47,24 @@ class AiChatContextSummaryJobRepositoryTest {
         assertThat(claimable).extracting(AiChatContextSummaryJob::getId)
                 .containsSubsequence(earlier.getId(), later.getId());
         assertThat(claimable).allMatch(job -> !job.getNextAttemptAt().isAfter(now));
+    }
+
+    @Test
+    void findExpired_는_접수_기한을_넘긴_미완료_작업만_가져오고_existsUnfinishedJob_은_미래_시도도_센다() {
+        LocalDateTime now = LocalDateTime.now();
+        AiChatContextSummaryJob tooOld = jobRepository.save(
+                AiChatContextSummaryJobFixture.persistedPendingCreatedAt(
+                        null, nextSessionId(), now, now.minusHours(30)));
+        AiChatContextSummaryJob recent = jobRepository.save(
+                AiChatContextSummaryJobFixture.persistedPendingCreatedAt(
+                        null, nextSessionId(), now.plusMinutes(10), now.minusMinutes(5)));
+
+        List<AiChatContextSummaryJob> expired =
+                jobRepository.findExpired(now.minusHours(24), PageRequest.of(0, 10));
+
+        assertThat(expired).extracting(AiChatContextSummaryJob::getId).contains(tooOld.getId());
+        assertThat(expired).extracting(AiChatContextSummaryJob::getId).doesNotContain(recent.getId());
+        assertThat(jobRepository.existsUnfinishedJob()).isTrue();
     }
 
     @Test

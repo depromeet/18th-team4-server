@@ -6,13 +6,17 @@ import com.readum.infrastructure.ai.openai.guardrail.ChatInputGuardrail;
 import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
 import com.readum.infrastructure.ai.openai.guardrail.ModerationOutputAdvisor;
 import com.readum.infrastructure.ai.openai.guardrail.PromptInjectionPatternAdvisor;
+import com.readum.domain.aiChat.out.AiAvailability;
+import com.readum.infrastructure.ai.openai.availability.AiProviderCallGuard;
+import com.readum.infrastructure.ai.openai.availability.ProtectedChatModel;
 import com.readum.infrastructure.ai.openai.moderation.OpenAiInputModerationClientImpl;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiGateProperties;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SafeGuardAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.moderation.ModerationModel;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
@@ -26,12 +30,10 @@ import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.resources.ConnectionProvider;
-import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -70,8 +72,9 @@ public class OpenAiConfig {
     public ChatClient chatClient(
             GuardrailProperties guardrailProperties,
             ObjectProvider<ModerationModel> moderationModelProvider,
-            ResponseErrorHandler openAiResponseErrorHandler,
-            @Value("${spring.ai.openai.api-key}") String apiKey,
+            OpenAiResponseErrorHandlerFactory errorHandlerFactory,
+            AiProviderCallGuard callGuard,
+            OpenAiProjectProperties projectProperties,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
             @Value("${spring.ai.openai.chat.options.model}") String chatModelName,
             @Value("classpath:prompts/reading-assistant-system.st") Resource systemPromptResource
@@ -88,11 +91,11 @@ public class OpenAiConfig {
         RestClient.Builder restClientBuilder = RestClient.builder().requestFactory(requestFactory);
 
         OpenAiApi openAiApi = OpenAiApi.builder()
-                .apiKey(apiKey)
+                .apiKey(projectProperties.apiKeyOf(OpenAiProject.SUMMARY))
                 .baseUrl(baseUrl)
                 .restClientBuilder(restClientBuilder)
                 .webClientBuilder(WebClient.builder()) // OpenAiApi 빌더 필수 인자 — call 경로에서는 사용되지 않음
-                .responseErrorHandler(openAiResponseErrorHandler)
+                .responseErrorHandler(errorHandlerFactory.create(OpenAiProject.SUMMARY))
                 .build();
         // 자체 재시도를 두지 않는다(모더레이션 빈과 동일 정책). 빌더 기본 재시도(10회·지수 백오프)는
         // read 타임아웃(ResourceAccessException)까지 재시도 대상에 포함해, 최악의 경우 SseEmitter 상한(120초)을
@@ -104,6 +107,9 @@ public class OpenAiConfig {
                 .defaultOptions(OpenAiChatOptions.builder().model(chatModelName).build())
                 .retryTemplate(new RetryTemplate(noRetry))
                 .build();
+        // 공급자 상태 보호는 모델 경계에 붙인다 — 이 ChatClient 를 거치는 모든 호출이 같은 보호를 받는다.
+        ChatModel protectedChatModel =
+                new ProtectedChatModel(chatModel, AiAvailability.Capability.SUMMARY, callGuard);
 
         List<Advisor> advisors = inputAdvisors(guardrailProperties);
 
@@ -114,7 +120,8 @@ public class OpenAiConfig {
                 ORDER_MODERATION_OUTPUT
         ));
 
-        ChatClient.Builder chatClientBuilder = ChatClient.builder(chatModel).defaultSystem(systemPrompt);
+        ChatClient.Builder chatClientBuilder =
+                ChatClient.builder(protectedChatModel).defaultSystem(systemPrompt);
         if (!advisors.isEmpty()) {
             chatClientBuilder = chatClientBuilder.defaultAdvisors(advisors);
         }
@@ -169,10 +176,12 @@ public class OpenAiConfig {
      * {@link #openAiStreamingConnectionProvider} 가 준 전용 풀을 쓴다.
      */
     @Bean
-    public OpenAiChatModel streamingChatModel(
+    public ChatModel streamingChatModel(
             ConnectionProvider openAiStreamingConnectionProvider,
-            ResponseErrorHandler openAiResponseErrorHandler,
-            @Value("${spring.ai.openai.api-key}") String apiKey,
+            OpenAiResponseErrorHandlerFactory errorHandlerFactory,
+            AiProviderCallGuard callGuard,
+            AiChatProperties aiChatProperties,
+            OpenAiProjectProperties projectProperties,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
             @Value("${spring.ai.openai.chat.options.model}") String chatModelName
     ) {
@@ -186,17 +195,23 @@ public class OpenAiConfig {
         requestFactory.setReadTimeout(CHAT_READ_TIMEOUT);
 
         OpenAiApi openAiApi = OpenAiApi.builder()
-                .apiKey(apiKey)
+                .apiKey(projectProperties.apiKeyOf(OpenAiProject.CHAT))
                 .baseUrl(baseUrl)
                 .restClientBuilder(RestClient.builder().requestFactory(requestFactory))
-                .webClientBuilder(WebClient.builder().clientConnector(new ReactorClientHttpConnector(
-                        HttpClient.create(openAiStreamingConnectionProvider))))
-                .responseErrorHandler(openAiResponseErrorHandler)
+                .webClientBuilder(WebClient.builder()
+                        .clientConnector(new ReactorClientHttpConnector(
+                                HttpClient.create(openAiStreamingConnectionProvider)))
+                        // 오류 분류를 여기서 따로 얹는다 — OpenAiApi 는 responseErrorHandler 를 RestClient 에만
+                        // 연결하므로, 이것이 없으면 스트림의 429·401·503 이 우리 분류를 거치지 않고
+                        // WebClientResponseException 으로 올라가 "세지 않는 실패" 로 묻힌다.
+                        .filter(errorHandlerFactory.createStreamingErrorFilter(OpenAiProject.CHAT)))
+                // 스트림 경로에서는 쓰이지 않지만 빌더의 필수 인자다(RestClient 쪽에만 연결된다).
+                .responseErrorHandler(errorHandlerFactory.create(OpenAiProject.CHAT))
                 .build();
         // 자체 재시도를 두지 않는다 — 사용자가 기다리기를 그만둔 뒤에도 보이지 않는 과금 호출이 반복되는 것을
         // 막는다(#103 교훈: 재시도는 증폭기). 실패는 즉시 표면화하고 재전송 여부는 사용자가 정한다.
         RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
-        return OpenAiChatModel.builder()
+        OpenAiChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(openAiApi)
                 .defaultOptions(OpenAiChatOptions.builder()
                         .model(chatModelName)
@@ -204,6 +219,15 @@ public class OpenAiConfig {
                         .build())
                 .retryTemplate(new RetryTemplate(noRetry))
                 .build();
+        // 공급자 상태 보호를 모델 경계에 둔다 — 스트림이 실제로 구독됐을 때 허가를 받고, 끝나는 모양을 보고 결과를 남긴다.
+        // 응답 기한 둘도 여기서 건다: 보호 구간 바깥에 두면 기한 초과가 취소로만 보여 공급자 상태에 반영되지 않는다.
+        AiChatProperties.Streaming streaming = aiChatProperties.streaming();
+        return new ProtectedChatModel(
+                chatModel,
+                AiAvailability.Capability.CHAT,
+                callGuard,
+                Duration.ofSeconds(streaming.generationIdleTimeoutSeconds()),
+                Duration.ofSeconds(streaming.generationTotalTimeoutSeconds()));
     }
 
     /** 스트리밍 경로가 ChatClient 없이 수행할 로컬 입력 검사 — 판정 기준은 입력 advisor 두 개와 같다. */
@@ -250,25 +274,14 @@ public class OpenAiConfig {
         if (moderationModel == null) {
             throw new IllegalStateException(
                     "ModerationModel 빈이 등록되어 있지 않습니다. "
-                            + "spring.ai.openai.api-key 와 spring.ai.openai.moderation 설정을 확인하세요."
+                            + "openai.projects.moderation.api-key 와 spring.ai.openai.moderation 설정을 확인하세요."
             );
         }
         return moderationModel;
     }
 
-    // Spring AI auto-config(OpenAiChatAutoConfiguration#openAiApi) 는 ResponseErrorHandler bean 을
-    // ObjectProvider#getIfAvailable 로 픽업한다. 컨텍스트에 단 하나만 있으면 OpenAiApi.Builder 로
-    // 자동 주입되어 RestClient/WebClient 양쪽에 적용된다.
-    //
-    // 이 핸들러를 통해 OpenAI 응답의 status / 헤더 / body 를 typed 하게 보고 도메인 예외로 분류한다.
-    @Bean
-    public ResponseErrorHandler openAiResponseErrorHandler(
-            ObjectMapper objectMapper,
-            OpenAiRequestGate requestGate,
-            OpenAiGateProperties gateProperties,
-            @Value("${spring.ai.openai.chat.options.model}") String chatModel
-    ) {
-        return new OpenAiResponseErrorHandler(objectMapper, requestGate, chatModel,
-                gateProperties.quotaCooldownSeconds());
-    }
+    // 오류 핸들러는 더 이상 컨텍스트에 하나만 두지 않는다. 핸들러가 남기는 상태(결제·잔액 쿨다운)가
+    // "프로젝트 × 모델" 키에 쌓이므로, 공용 하나를 다섯 경로가 나눠 쓰면 그 키가 한 프로젝트로 고정되어
+    // 제목 생성에서 본 오류가 채팅의 상태를 바꾼다. 각 경로를 조립하는 자리에서
+    // OpenAiResponseErrorHandlerFactory 로 그 경로의 프로젝트에 맞는 핸들러를 만들어 붙인다.
 }

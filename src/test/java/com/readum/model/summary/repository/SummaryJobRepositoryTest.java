@@ -86,13 +86,15 @@ class SummaryJobRepositoryTest {
     }
 
     @Test
-    void findClaimable_은_nextAttemptAt_빠른순으로_정렬한다() {
+    void findClaimable_은_접수가_이른_순서로_정렬한다() {
         LocalDateTime now = LocalDateTime.now();
         long earlierSession = nextSessionId();
         long laterSession = nextSessionId();
-        // 일부러 늦은 것을 먼저 저장해 정렬이 삽입순이 아님을 확인
-        summaryJobRepository.save(SummaryJobFixture.persistedPending(null, laterSession, now.minusSeconds(10)));
-        summaryJobRepository.save(SummaryJobFixture.persistedPending(null, earlierSession, now.minusSeconds(60)));
+        // 일부러 나중에 접수된 것을 먼저 저장해 정렬이 삽입순이 아님을 확인한다.
+        summaryJobRepository.save(SummaryJobFixture.persistedPendingCreatedAt(
+                null, laterSession, now.minusSeconds(10), now.minusMinutes(1)));
+        summaryJobRepository.save(SummaryJobFixture.persistedPendingCreatedAt(
+                null, earlierSession, now.minusSeconds(10), now.minusMinutes(30)));
 
         List<SummaryJob> claimable =
                 summaryJobRepository.findClaimable(
@@ -100,6 +102,52 @@ class SummaryJobRepositoryTest {
 
         List<Long> sessionOrder = claimable.stream().map(SummaryJob::getAiChatSessionId).toList();
         assertThat(sessionOrder.indexOf(earlierSession)).isLessThan(sessionOrder.indexOf(laterSession));
+    }
+
+    @Test
+    void 공급자_차단으로_되돌아온_오래된_작업이_새로_접수된_작업보다_먼저_나온다() {
+        // 무벌점 반납은 다음 시도 시각을 "지금" 으로 다시 찍는다. 시도 시각으로 정렬하면 그 작업이
+        // 그 사이 접수된 새 작업보다 뒤로 밀려, 오래 기다린 사람이 더 오래 기다리게 된다.
+        LocalDateTime now = LocalDateTime.now();
+        long longWaiting = nextSessionId();
+        long justArrived = nextSessionId();
+        summaryJobRepository.save(SummaryJobFixture.persistedPendingCreatedAt(
+                null, longWaiting, now, now.minusHours(3)));
+        summaryJobRepository.save(SummaryJobFixture.persistedPendingCreatedAt(
+                null, justArrived, now.minusSeconds(30), now.minusSeconds(30)));
+
+        List<SummaryJob> claimable = summaryJobRepository.findClaimable(
+                SummaryJob.Status.PENDING, now, PageRequest.of(0, 10));
+
+        List<Long> sessionOrder = claimable.stream().map(SummaryJob::getAiChatSessionId).toList();
+        assertThat(sessionOrder.indexOf(longWaiting)).isLessThan(sessionOrder.indexOf(justArrived));
+    }
+
+    @Test
+    void findExpired_는_접수_기한을_넘긴_미완료_작업만_가져온다() {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime expiredBefore = now.minusHours(24);
+        SummaryJob tooOld = summaryJobRepository.save(SummaryJobFixture.persistedPendingCreatedAt(
+                null, nextSessionId(), now, now.minusHours(30)));
+        SummaryJob recent = summaryJobRepository.save(SummaryJobFixture.persistedPendingCreatedAt(
+                null, nextSessionId(), now, now.minusHours(1)));
+
+        List<SummaryJob> expired = summaryJobRepository.findExpired(expiredBefore, PageRequest.of(0, 10));
+
+        assertThat(expired).extracting(SummaryJob::getId).contains(tooOld.getId());
+        assertThat(expired).extracting(SummaryJob::getId).doesNotContain(recent.getId());
+    }
+
+    @Test
+    void existsUnfinishedJob_은_시도_시각이_미래인_작업도_남은_것으로_센다() {
+        // 선점이 빈손으로 돌아왔다고 해서 적체가 비었다는 뜻은 아니다 — 백오프로 시도 시각이 미래인 작업이 남아 있다.
+        LocalDateTime now = LocalDateTime.now();
+        summaryJobRepository.save(SummaryJobFixture.persistedPendingCreatedAt(
+                null, nextSessionId(), now.plusMinutes(10), now));
+
+        assertThat(summaryJobRepository.existsUnfinishedJob()).isTrue();
+        assertThat(summaryJobRepository.findClaimable(
+                SummaryJob.Status.PENDING, now, PageRequest.of(0, 10))).isEmpty();
     }
 
     @Test
