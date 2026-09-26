@@ -195,7 +195,7 @@ class AiChatMessagePersistServiceTest {
 
         AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150);
 
-        persistService.saveAssistantSuccess(sessionId, "첫 응답", meta);
+        persistService.saveAssistantSuccess(sessionId, "첫 응답", meta, LocalDateTime.now());
 
         // saveAssistantSuccess 는 제목 생성 이벤트 외에 컨텍스트 요약 트리거 이벤트도 발행하므로, 모든 발행을 캡처해 걸러낸다.
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
@@ -222,7 +222,7 @@ class AiChatMessagePersistServiceTest {
 
         AiChatCompletion meta = new AiChatCompletion(null, 100, 50, 150);
 
-        persistService.saveAssistantSuccess(sessionId, "후속 응답", meta);
+        persistService.saveAssistantSuccess(sessionId, "후속 응답", meta, LocalDateTime.now());
 
         verify(eventPublisher, never()).publishEvent(any(FirstAssistantResponseCompletedEvent.class));
     }
@@ -240,7 +240,7 @@ class AiChatMessagePersistServiceTest {
         });
 
         AiChatCompletion meta = new AiChatCompletion(null, 312, 58, 370);
-        AiChatMessage saved = persistService.saveAssistantSuccess(sessionId, "응답 본문", meta);
+        AiChatMessage saved = persistService.saveAssistantSuccess(sessionId, "응답 본문", meta, LocalDateTime.now());
 
         ArgumentCaptor<AiChatMessage> captor = ArgumentCaptor.forClass(AiChatMessage.class);
         verify(aiChatMessageRepository).save(captor.capture());
@@ -267,7 +267,7 @@ class AiChatMessagePersistServiceTest {
             return AiChatMessageFixture.persistedCopyOf(1L, incoming);
         });
 
-        persistService.saveAssistantSuccess(sessionId, "본문", null);
+        persistService.saveAssistantSuccess(sessionId, "본문", null, LocalDateTime.now());
 
         assertThat(session.getAccumulatedTokens()).isEqualTo(100);
     }

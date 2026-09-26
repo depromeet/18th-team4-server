@@ -9,7 +9,9 @@ import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.dto.MessageStreamEvent;
 import com.readum.domain.aiChat.dto.SendMessageCommand;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.aiChat.out.AiAvailability;
 import com.readum.domain.aiChat.out.AiChatClient;
+import com.readum.domain.aiChat.out.CompletedTurnStore;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.aiChat.out.UserMessageRateLimiter;
@@ -30,9 +32,10 @@ import org.springframework.ai.retry.TransientAiException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
+
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -55,16 +58,17 @@ public class AiChatMessageSendService {
     private final UserBookRepository userBookRepository;
     private final BookRepository bookRepository;
     private final InputModerationClient inputModerationClient;
+    private final AiAvailability aiAvailability;
     private final AiChatTurnRequestWriter aiChatTurnRequestWriter;
     private final AiChatTurnOutcomeWriter aiChatTurnOutcomeWriter;
     private final AiChatInFlightTurnRegistry aiChatInFlightTurnRegistry;
     private final AiChatPostProcessingRetry aiChatPostProcessingRetry;
     private final ExecutorService aiChatPostProcessingExecutor;
     private final TokenCounter tokenCounter;
+    private final CompletedTurnStore completedTurnStore;
 
     /**
      * 선행 처리 결과 — 생성 단계(generateAndDeliver)에 필요한 모든 문맥. 예약(reservation)은 항상 존재한다.
-     * rateLimitPermit 은 전역 게이트 확보 결과로 항상 존재한다 (게이트가 검사 없이 통과시켰다면 계상 없는 permit).
      * turnRequestId 는 이 턴의 요청 기록(ai_chat_turn_request) id — 생성 이후의 요청 종료(성공 확정·실패
      * 기록·예약 반환)가 잠글 행을 가리킨다.
      * inFlightTurn 은 진행 목록에 올린 이 실행의 자리 — 후처리가 끝나면 이 자리를 정리한다.
@@ -75,8 +79,7 @@ public class AiChatMessageSendService {
             AiChatInFlightTurnRegistry.InFlightTurn inFlightTurn,
             AiChatStreamCommand streamCommand,
             UserTokenBudgetWriter.ReserveResult.Granted reservation,
-            int estimatedMessageInputTokens,
-            AiChatClient.RateLimitPermit rateLimitPermit
+            int estimatedMessageInputTokens
     ) {
         public Long sessionId() {
             return streamCommand.conversationId();
@@ -85,7 +88,8 @@ public class AiChatMessageSendService {
 
     /**
      * 선행 처리(요청의 가상 스레드에서 동기 순차): <b>진행 목록 등록</b> → 본문 검증 → <b>요청 중복 판정</b> →
-     * 사용자 폭주 가드 → 예산 예약 → 이력 조회 → 로컬 입력 검사 → 입력 모더레이션 → 전역 게이트 → USER 저장.
+     * 사용자 폭주 가드 → <b>공급자 가용 확인</b> → 예산 예약 → 이력 조회 → 로컬 입력 검사 → 입력 모더레이션 →
+     * USER 저장.
      * 각 단계는 앞 단계의 결과를 보고 다음을 정하는 순차 업무이고, 요청 스레드가 가상 스레드라
      * 여기서 기다려도 다른 요청의 처리를 막지 않는다 — 그래서 리액티브 체인 밖에 둔다.
      * 여기서 던진 예외는 SSE 시작 전이라 GlobalExceptionHandler 가 4xx/5xx JSON 으로 변환한다.
@@ -94,6 +98,10 @@ public class AiChatMessageSendService {
      * 다시 도착한 것이다. 가드를 먼저 통과시키면 재전송이 폭주 슬롯을 갉아먹고(슬롯은 반환하지 않는다),
      * 예약·moderation 같은 부수 효과도 중복으로 시작된다. 중복 판정 자체도 DB 삽입이라 부수 효과지만,
      * 그 삽입이 곧 멱등 판정이라 어떤 것보다 앞서야 한다.
+     *
+     * <p>공급자 가용 확인을 예산 예약 앞에 두는 이유: 공급자가 막혀 있으면 이 턴은 어차피 성립하지 않는다.
+     * 예약을 먼저 하면 쓰지도 못한 예약을 다시 되돌려야 하고, 되돌리기 전에 프로세스가 죽으면 사용자의
+     * 하루 예산만 깎인다. 확인은 Redis 조회 한 번이라 앞으로 당겨도 비용이 없다.
      *
      * <p>예산 예약을 moderation 앞에 두는 이유: 예산이 소진된 사용자가 공짜 moderation 호출
      * (제공자 RPM 자원)을 소모하지 못하게 한다 — 토큰 추정(tokenCounter)은 로컬 계산이라
@@ -136,10 +144,16 @@ public class AiChatMessageSendService {
 
         Long turnRequestId = claimTurnRequest(userId, sessionId, command.requestId());
 
-        // 자리를 잡은 뒤의 거절은 예약 전(폭주 가드·예산 거절)이든 예약 후(이력 조회·입력 검사·게이트·
+        // 자리를 잡은 뒤의 거절은 예약 전(폭주 가드·예산 거절)이든 예약 후(이력 조회·입력 검사·
         // USER 저장)든 종료 트랜잭션 한 번으로 끝낸다 — 되돌릴 양은 그 트랜잭션이 잠근 행에서 읽는다.
         try {
             verifyUserMessageRateLimit(userId);
+
+            // 공급자가 막혀 있으면 여기서 끝낸다 — 예약도, 외부 호출도 시작하지 않는다.
+            // 채팅은 응답 모델과 입력 검토 모델 둘 다 있어야 한 턴이 되므로 둘을 함께 본다
+            // (Capability.CHAT 의 의존 기능). 응답 모델이 막혔는데 입력 검토부터 부르면
+            // 어차피 못 쓸 판정에 공급자 한도와 비용을 쓴다.
+            aiAvailability.requireAvailable(AiAvailability.Capability.CHAT);
 
             BudgetReservation reservation = reserveTokenBudget(turnRequestId, userId, normalizedContent);
 
@@ -227,13 +241,7 @@ public class AiChatMessageSendService {
                 inputModerationClient.check(normalizedContent, turnContext.bookContext());
         applyModerationDecision(moderation, sessionId, userId, normalizedContent);
 
-        // 전역 게이트: SSE 시작 전에 확보한다. USER 저장보다 먼저 확인해
-        // 거절(429) 시 응답 없는 USER 메시지가 대화 이력에 남지 않게 한다.
-        // 거절 시 예약 반환은 prepare() 의 공통 종료 경로가 담당하고, 게이트 분당 계상은
-        // tryAcquire 가 거절하면서 스스로 되돌렸으므로 여기서 또 보상하면 이중 차감이다.
-        AiChatClient.RateLimitPermit rateLimitPermit = aiChatClient.acquireRateLimitPermit(streamCommand);
-
-        recordUserMessageOrCompensate(sessionId, userId, normalizedContent, rateLimitPermit);
+        aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
 
         return new PreparedChatTurn(
                 userId,
@@ -241,18 +249,22 @@ public class AiChatMessageSendService {
                 inFlightTurn,
                 streamCommand,
                 reservation.granted(),
-                reservation.estimatedMessageInputTokens(),
-                rateLimitPermit);
+                reservation.estimatedMessageInputTokens());
     }
 
     /**
      * 생성 단계: <b>서버가 구독을 소유한다</b>. 이 메서드는 구독만 걸고 곧바로 돌아온다 —
      * 요청 스레드는 여기서 생성이 끝나기를 기다리지 않고 {@code SseEmitter} 를 돌려주러 간다.
      *
-     * <p>청크 콜백이 하는 일은 셋뿐이다: 누적, 메타데이터·사용량 수집({@link AiChatGenerationAccumulator}),
+     * <p>청크 콜백이 하는 일은 둘뿐이다: 누적·메타데이터·사용량 수집({@link AiChatGenerationAccumulator}) 과
      * 전달 큐 입력 시도({@link ChatDeliveryChannel#offerDelta}). <b>큐 빈자리도 SSE 쓰기도 기다리지 않는다.</b>
      * 그래서 이 경로에는 블로킹 작업이 없고, 예전처럼 청크마다 공유 풀로 넘기는 실행 경계
      * ({@code publishOn(boundedElastic)})도 두지 않는다.
+     *
+     * <p><b>조각은 Redis 로 가지 않는다.</b> 되살리기의 근거는 완성된 답변 하나뿐이고, 그것은 생성이 정상으로
+     * 끝난 뒤 한 번만 적힌다({@link CompletedTurnStore}). 그래서 이 경로에는 조각마다 끼어드는 기록 호출도,
+     * 그 호출을 대신 맡는 중계 스레드도 없다. 본문을 온전히 들고 있는 것은 이 메서드의 누적기이고,
+     * 그 누적은 메모리에서 일어난다.
      *
      * <p><b>연결 종료·큐 포화·전달 실패를 상류 취소로 연결하지 않는다.</b> 전달이 끝나도 채널은
      * 예외 없이 무시할 뿐이고 구독은 그대로 남아 생성을 끝까지 소비한다. 취소로 이으면 저장·정산이
@@ -270,6 +282,10 @@ public class AiChatMessageSendService {
      */
     public void generateAndDeliver(PreparedChatTurn turn, ChatDeliveryChannel deliveryChannel) {
         AiChatGenerationAccumulator accumulator = new AiChatGenerationAccumulator();
+        // 답변의 작성 시각은 <b>생성을 시작한 이 시점</b>으로 못박는다. 되살려 저장하는 경우에도 같은 값을 쓰므로,
+        // 늦게 저장됐다는 이유로 대화 순서가 뒤바뀌지 않는다. 조각이 하나도 오지 않아도 정해지는 값이라
+        // "첫 조각 시각" 보다 다루기 쉽고, 바로 앞에서 저장한 USER 메시지보다 언제나 뒤다.
+        LocalDateTime generatedAt = LocalDateTime.now();
         // 종료 훅은 서로 배타적이지만(onComplete/onError 중 하나), 구독 실패까지 겹칠 수 있어
         // 후처리 제출은 한 번만 일어나도록 잠근다 — 두 번 제출하면 저장·정산 트랜잭션이 두 번 돈다.
         AtomicBoolean postProcessingSubmitted = new AtomicBoolean(false);
@@ -277,44 +293,38 @@ public class AiChatMessageSendService {
             generationStream(turn).subscribe(
                     chunk -> receiveChunk(chunk, accumulator, deliveryChannel),
                     generationError -> submitPostProcessing(
-                            turn, deliveryChannel, postProcessingSubmitted,
+                            turn, deliveryChannel, generatedAt, postProcessingSubmitted,
                             judgeFailedStream(accumulator, generationError), generationError),
                     () -> submitPostProcessing(
-                            turn, deliveryChannel, postProcessingSubmitted,
+                            turn, deliveryChannel, generatedAt, postProcessingSubmitted,
                             accumulator.completeNormally(), null));
         } catch (RuntimeException subscribeError) {
             // 구독을 걸기도 전에 실패한 경우(예: 클라이언트가 스트림을 만들다 즉시 던짐).
             // 이미 예약·USER 저장이 끝난 뒤이므로 실패 경로를 그대로 태워 예약을 되돌린다.
             log.error("AI 응답 생성 구독 시작 실패 sessionId={}", turn.sessionId(), subscribeError);
-            submitPostProcessing(turn, deliveryChannel, postProcessingSubmitted,
+            submitPostProcessing(turn, deliveryChannel, generatedAt, postProcessingSubmitted,
                     accumulator.failWithStreamError(), subscribeError);
         }
     }
 
     /**
-     * 기한 둘을 건 생성 스트림.
+     * 생성 스트림. <b>기한 둘(무응답 · 생성 전체)은 이 계층에서 걸지 않는다</b> — 어댑터가 공급자 상태 보호 구간
+     * 안쪽에서 건다({@code ProtectedChatModel}). 바깥에 걸면 기한 초과가 그 구간에는 <b>취소</b> 로만 보이고,
+     * 취소는 다른 이유로도 오므로 공급자가 응답을 끊은 것과 구분되지 않는다. 타이머 수는 그대로 둘이다.
      *
-     * <p>무응답 기한({@code timeout})의 시작점은 구독 시점이고, 그 뒤로는 <b>청크 1건을 받을 때마다</b>
-     * 다시 시작된다. 무엇을 수신으로 인정하는지: <b>본문 델타뿐 아니라 종료 사유·사용량만 실린 청크도 인정한다.</b>
-     * 이 기한이 재는 것은 "답변이 늘고 있는가" 가 아니라 "공급자가 아직 응답을 보내고 있는가" 이고,
-     * 메타데이터·사용량 전용 청크도 정상 응답 모양({@link AiChatStreamChunk#isMetadataOnly()})이라
-     * 그것을 무응답으로 세면 정상 스트림의 마지막 구간을 끊게 된다.
-     *
-     * <p>전체 기한은 첫 신호와 무관하게 구독 시점부터 한 번만 잰다 — 청크가 계속 도착해도 적용하는 절대 상한이다.
-     * 기한이 되면 오류 신호를 흘려 넣어 상류 구독을 취소시킨다(정상 완료로 끝내면 판정이 성공 쪽 규칙을 타게 된다).
+     * <p>이 계층의 책임은 바뀌지 않았다 — 기한 초과는 여전히 {@link TimeoutException} 오류 신호로 도착하고,
+     * {@link #judgeFailedStream} 이 그것을 기한 초과로 판정한다. 무엇을 수신으로 인정하는지(본문 델타뿐 아니라
+     * 종료 사유·사용량만 실린 청크도 인정)와 두 기한의 시작점도 어댑터 쪽 주석에 그대로 남아 있다.
      */
     private Flux<AiChatStreamChunk> generationStream(PreparedChatTurn turn) {
-        AiChatProperties.Streaming streaming = aiChatProperties.streaming();
-        Duration idleTimeout = Duration.ofSeconds(streaming.generationIdleTimeoutSeconds());
-        Duration totalTimeout = Duration.ofSeconds(streaming.generationTotalTimeoutSeconds());
-        return aiChatClient.generateStream(turn.streamCommand())
-                .timeout(idleTimeout)
-                .takeUntilOther(Mono.delay(totalTimeout)
-                        .then(Mono.error(() -> new TimeoutException(
-                                "AI 응답 생성이 전체 기한(" + totalTimeout.toSeconds() + "초)을 넘겼습니다."))));
+        return aiChatClient.generateStream(turn.streamCommand());
     }
 
-    /** 청크 1건 — 누적하고, 본문 조각이면 전달 큐에 넣어 본다. 큐가 받지 못해도(포화·종료) 생성은 그대로 이어진다. */
+    /**
+     * 청크 1건 — 누적하고, 본문 조각이면 전달 큐에 넣어 본다.
+     * 전달 채널이 받지 못해도(큐 포화·이미 종료됨) 생성은 그대로 이어진다 —
+     * 이 자리에서는 아무것도 기다리지 않고, 본문의 정본은 누적기가 계속 들고 있다.
+     */
     private void receiveChunk(
             AiChatStreamChunk chunk, AiChatGenerationAccumulator accumulator, ChatDeliveryChannel deliveryChannel) {
         accumulator.accept(chunk);
@@ -346,6 +356,7 @@ public class AiChatMessageSendService {
     private void submitPostProcessing(
             PreparedChatTurn turn,
             ChatDeliveryChannel deliveryChannel,
+            LocalDateTime generatedAt,
             AtomicBoolean postProcessingSubmitted,
             AiChatGenerationOutcome generation,
             Throwable generationError
@@ -355,7 +366,7 @@ public class AiChatMessageSendService {
         }
         try {
             aiChatPostProcessingExecutor.execute(
-                    () -> finishTurn(turn, deliveryChannel, generation, generationError));
+                    () -> finishTurn(turn, deliveryChannel, generatedAt, generation, generationError));
         } catch (RejectedExecutionException postProcessingRejected) {
             log.error("채팅 턴 후처리 제출 거절 — 저장·정산을 시작하지 못했다."
                             + " 요청 기록은 미종료로 남아 미정산 예약 반환 대상이다 turnRequestId={} sessionId={}",
@@ -372,17 +383,23 @@ public class AiChatMessageSendService {
      * <p>어떤 이유로 끝나든 <b>마지막에 진행 목록의 자리를 정리한다</b>. 다만 자리를 지우는 것은
      * "이번 실행이 끝났다" 는 뜻이지 "업무가 성공했다" 는 뜻이 아니다 — 확정하지 못한 요청 기록은
      * 미종료로 남아 미정산 예약 반환의 대상이 된다.
+     *
+     * <p><b>여기서 전달을 기다리지 않는다.</b> 조각은 생성 콜백에서 전달 채널에 곧바로 들어갔고,
+     * 채널은 남은 조각을 모두 내보낸 뒤에야 종료 이벤트를 내보낸다({@link ChatDeliveryChannel#poll}).
+     * 종료 이벤트가 조각을 추월하지 않게 하는 것은 그 순서 규칙의 몫이지, 이 자리의 대기가 아니다.
      */
     private void finishTurn(
             PreparedChatTurn turn,
             ChatDeliveryChannel deliveryChannel,
+            LocalDateTime generatedAt,
             AiChatGenerationOutcome generation,
             Throwable generationError
     ) {
         try {
             if (generation.isSuccess()) {
-                finishSucceededTurn(turn, deliveryChannel, generation);
+                finishSucceededTurn(turn, deliveryChannel, generatedAt, generation);
             } else {
+                // 실패한 턴은 기록을 적은 적이 없다 — 지울 것도 없다.
                 finishFailedTurn(turn, deliveryChannel, generation, generationError);
             }
         } catch (RuntimeException postProcessingError) {
@@ -397,54 +414,125 @@ public class AiChatMessageSendService {
 
     /**
      * 정상 완료: 답변 저장·정산·예산 보정·요청 성공 확정을 한 트랜잭션으로 확정하고, 그 뒤에만 성공을 알린다.
-     * 게이트 계상은 되돌리지 않는다 — 생성이 실제로 일어나 토큰이 소모됐으므로 계상이 맞다.
      *
      * <p>확정 호출은 <b>유계로 다시 시도한다</b>({@link AiChatPostProcessingRetry}) — 사용자가 답변 전문을
      * 이미 본 뒤라, 몇 초 안에 지나가는 일시 실패로 저장을 잃지 않게 한다. 다시 시도한 뒤에도 실패하면
      * 아래 재확인 경로로 간다.
      */
     private void finishSucceededTurn(
-            PreparedChatTurn turn, ChatDeliveryChannel deliveryChannel, AiChatGenerationOutcome generation) {
+            PreparedChatTurn turn,
+            ChatDeliveryChannel deliveryChannel,
+            LocalDateTime generatedAt,
+            AiChatGenerationOutcome generation
+    ) {
+        // 완성본을 <b>DB 확정보다 먼저</b> 적는다. 이 한 줄이 "프로세스가 여기서 죽어도 되살릴 수 있다" 를 만든다.
+        boolean stored = storeCompletedTurn(turn, generatedAt, generation);
         AiChatTurnOutcomeWriter.TurnOutcomeResult outcomeResult;
         try {
             outcomeResult = aiChatPostProcessingRetry.run(
                     AiChatPostProcessingRetry.FinishKind.SUCCESS_COMMIT,
                     turn.turnRequestId(), turn.inFlightTurn().startedAt(),
                     () -> aiChatTurnOutcomeWriter.finishSuccessfully(
-                            turn.turnRequestId(), generation, turn.estimatedMessageInputTokens()),
+                            turn.turnRequestId(), generation, turn.estimatedMessageInputTokens(), generatedAt),
                     () -> aiChatTurnOutcomeWriter.currentOutcome(turn.turnRequestId()));
         } catch (RuntimeException commitError) {
             log.error("성공 확정 커밋 실패 — 현재 요청 상태를 다시 확인한다 turnRequestId={} sessionId={}",
                     turn.turnRequestId(), turn.sessionId(), commitError);
-            recheckUncertainSuccessCommit(turn, deliveryChannel, commitError);
+            recheckUncertainSuccessCommit(turn, deliveryChannel, commitError, stored);
             return;
         }
+        // 여기 도달했다는 것은 이 요청이 DB 에서 종료됐다는 뜻이다(이번 호출이 끝냈든, 이미 끝나 있었든).
+        // 그때에만 기록을 지운다 — 먼저 지우면 커밋이 실패했을 때 되살릴 근거가 사라진다.
+        completedTurnStore.delete(turn.turnRequestId());
         notifySuccessOutcome(turn, deliveryChannel, generation, outcomeResult);
+    }
+
+    /**
+     * 끝까지 만들어진 답변을 보관소에 적는다 — <b>생성이 정상으로 판정된 뒤 한 번</b>, 값 하나로.
+     * 여기 오기까지의 검증({@link AiChatGenerationAccumulator} 의 정상 완료 판정)을 이미 통과했으므로,
+     * 기록이 남았다는 것은 곧 되살려도 되는 결과가 남았다는 뜻이다.
+     *
+     * <p>본문·사용량과 함께 <b>예약 때 센 입력 추정 토큰과 생성 시작 시각, 요청 신원</b>을 같이 적는다.
+     * 되살리는 쪽이 정상 경로와 <b>똑같은 값</b>으로 확정해야 청구와 대화 순서가 어긋나지 않기 때문이다.
+     *
+     * @return 참이면 이 결과는 프로세스가 죽어도 되살릴 수 있다.
+     */
+    private boolean storeCompletedTurn(
+            PreparedChatTurn turn, LocalDateTime generatedAt, AiChatGenerationOutcome generation) {
+        return completedTurnStore.save(turn.turnRequestId(),
+                new CompletedTurnStore.CompletedTurn(
+                        turn.turnRequestId(),
+                        turn.sessionId(),
+                        turn.userId(),
+                        turn.estimatedMessageInputTokens(),
+                        generatedAt,
+                        generation.content(),
+                        generation.finishReason(),
+                        generation.inputTokens(),
+                        generation.outputTokens(),
+                        generation.totalTokens()));
     }
 
     /**
      * 커밋 응답이 불확실하게 끊긴 뒤의 재확인. 예외만 보고 환불로 직행하면 <b>이미 성공 커밋된 요청의 예약까지</b>
      * 되돌릴 수 있으므로, 잠그지 않고 현재 상태를 다시 읽어 판단한다.
      *
-     * <p>아직 미종료라면 커밋이 반영되지 않은 것이라 청구 없이 끝내고 예약을 되돌린다. 이미 종료돼 있다면
-     * 커밋이 실제로는 반영된 것이므로 <b>아무것도 되돌리지 않는다</b>. 다만 이 경로에는 저장된 답변의
-     * 토큰 수·저장 시각이 손에 없어 성공 이벤트를 만들 수 없으므로, 연결에는 오류로 끝을 알린다 —
-     * 답변의 정본은 DB 에 있고, 클라이언트는 이력 조회로 확인한다.
+     * <p>아직 미종료라면 커밋이 반영되지 않은 것이다. 다만 그 자리에서 바로 되돌리지는 않는다 —
+     * 보관소에 완성본이 있거나({@link CompletedTurnStore.Lookup.Found}) 있는지 알 수 없으면
+     * ({@link CompletedTurnStore.Lookup.Unknown}) 판단을 미루고 되살리기에 맡기며,
+     * <b>확실히 없다고 읽혔을 때만</b>({@link CompletedTurnStore.Lookup.Absent}) 청구 없이 끝내고 예약을 되돌린다.
+     * 이미 종료돼 있다면 커밋이 실제로는 반영된 것이므로 <b>아무것도 되돌리지 않는다</b>.
+     *
+     * <p>어느 길로 끝나든 이 경로에는 저장된 답변의 토큰 수·저장 시각이 손에 없어 성공 이벤트를 만들 수 없으므로,
+     * 연결에는 오류로 끝을 알린다 — 답변의 정본은 DB 에 있고, 클라이언트는 이력 조회로 확인한다.
      */
     private void recheckUncertainSuccessCommit(
-            PreparedChatTurn turn, ChatDeliveryChannel deliveryChannel, RuntimeException commitError) {
+            PreparedChatTurn turn,
+            ChatDeliveryChannel deliveryChannel,
+            RuntimeException commitError,
+            boolean stored
+    ) {
         AiChatTurnOutcomeWriter.TurnOutcomeResult currentOutcome =
                 aiChatTurnOutcomeWriter.currentOutcome(turn.turnRequestId());
         if (currentOutcome instanceof AiChatTurnOutcomeWriter.TurnOutcomeResult.StillRunning) {
-            // 생성은 성공했지만 답변이 저장되지 않았다 — 청구하지 않는다.
-            // 게이트 계상은 되돌리지 않는다(토큰은 실제로 소모됐다).
+            if (stored || shouldDeferRefund(turn)) {
+                // <b>환불하지 않고, 기록도 지우지 않는다.</b> 답변은 끝까지 만들어졌고 저장만 못 했는데,
+                // 그 완성본이 보관소에 남아 있거나 남아 있는지 알 수 없는 상태다. 여기서 청구 없이 끝내거나
+                // 기록을 지우면 되살릴 수 있었을 결과를 우리 손으로 버리는 셈이다.
+                // 요청을 미종료로 남겨 두면 기한이 지난 뒤 되살리기가 다시 보고 판단한다.
+                log.warn("성공 확정을 커밋하지 못했다 — 기록이 남아 있어 되살리기에 맡기고 예약을 되돌리지 않는다"
+                        + " turnRequestId={}", turn.turnRequestId());
+                deliveryChannel.completeWithFailure(errorEvent(AiChatErrorCode.AI_STREAM_INTERRUPTED, null));
+                return;
+            }
+            // 되살릴 근거가 확실히 없다 — 기존대로 청구 없이 끝내고 예약을 되돌린다.
+            // 지울 것도 없다: 바로 앞에서 기록이 없음을 확인했고, 이 요청에 기록을 적는 실행은 여기 하나뿐이다.
             finishWithoutChargeWithRetry(turn, failureCodeOf(commitError));
             deliveryChannel.completeWithFailure(errorEvent(AiChatErrorCode.AI_STREAM_INTERRUPTED, null));
             return;
         }
         log.warn("성공 확정 커밋이 실제로는 반영돼 있었다 — 예약을 되돌리지 않는다 turnRequestId={} 현재상태={}",
                 turn.turnRequestId(), currentOutcome);
+        completedTurnStore.delete(turn.turnRequestId());
         deliveryChannel.completeWithFailure(errorEvent(AiChatErrorCode.AI_STREAM_INTERRUPTED, null));
+    }
+
+    /**
+     * 지금 예약을 되돌리지 말고 미뤄야 하는가 — <b>환불하기 직전에만</b> 묻는다.
+     *
+     * <p>적기에 실패했다는 답({@link CompletedTurnStore#save} 의 거짓)은 "적히지 않았다" 를 뜻하지 않는다.
+     * 명령은 닿았는데 응답만 끊겼을 수 있고, 그 자리에는 <b>같은 요청의 같은 완성본</b>이 이미 있을 수도 있다.
+     * 그래서 한 번 더 확인하고, 있거나({@link CompletedTurnStore.Lookup.Found})
+     * 알 수 없으면({@link CompletedTurnStore.Lookup.Unknown}) 미룬다 —
+     * 확실히 없을 때만 예약을 되돌린다. <b>참이 "되살릴 결과가 있다" 를 뜻하지는 않는다</b>:
+     * 알 수 없음도 참이며, 그때는 있는지 없는지 모르니 판단을 다음 회차로 넘기는 것뿐이다.
+     *
+     * <p>미룬 요청은 미종료로 남아 미정산 예약 반환이 다시 집는다. 그때도 보관소가 대답하지 않으면
+     * 또 미루고, 끝내 기록이 없는 것으로 읽히면 그 회차가 예약을 돌려준다 — 환불이 사라지지는 않는다.
+     */
+    private boolean shouldDeferRefund(PreparedChatTurn turn) {
+        return !(completedTurnStore.find(turn.turnRequestId())
+                instanceof CompletedTurnStore.Lookup.Absent);
     }
 
     /**
@@ -472,14 +560,8 @@ public class AiChatMessageSendService {
     }
 
     /**
-     * 생성 실패: 청구 없이 요청을 끝내고(상태 전이 + 예약 반환) 게이트 계상을 보상 차감한다.
+     * 생성 실패: 청구 없이 요청을 끝낸다(상태 전이 + 예약 반환).
      * <b>받은 데까지의 부분 본문은 저장하지 않는다</b>(설계 정본 §6.3).
-     *
-     * <p>게이트 보상의 기준은 <b>생성 판정이 성공이 아닌 것</b> 하나다. 실패의 대부분(연결 실패·4xx·429·기한 초과)은
-     * OpenAI 가 토큰을 소모하지 않아 보상이 실제와 맞는다. 반대로 스트림은 끝났는데 판정에서 걸린 경우
-     * (종료 사유 누락·비정상 종료 사유·사용량 없음)는 이미 과금된 뒤일 수 있어 실제보다 많이 되돌리는 셈이 된다 —
-     * 기존 실패 보상에도 있던 성격의 어림이고, 보상은 확보 당시의 분 키를 되돌리므로 분을 넘겨 도착한 보상이
-     * 현재 분 예산을 부풀리지는 않는다.
      */
     private void finishFailedTurn(
             PreparedChatTurn turn,
@@ -492,8 +574,6 @@ public class AiChatMessageSendService {
                 generationError == null ? "없음" : generationError.toString());
 
         finishWithoutChargeWithRetry(turn, generation.status().name());
-        // 게이트 보상은 DB 트랜잭션 밖에서 — Redis 왕복을 커밋 시간에 매달지 않는다.
-        releaseRateLimitPermitQuietly(turn.rateLimitPermit(), turn.sessionId());
         deliveryChannel.completeWithFailure(buildErrorEvent(generationError));
     }
 
@@ -562,7 +642,7 @@ public class AiChatMessageSendService {
     /**
      * 입력이 차단됐을 때의 공통 처리 — 로컬 입력 검사와 외부 moderation 이 같은 모양으로 거절한다.
      * 사용자에게 나가는 것도, 남는 흔적도 같아야 어느 검사에 걸렸는지가 클라이언트 계약을 바꾸지 않는다.
-     * 예약 반환은 prepare() 의 공통 종료 경로가 하고, 게이트는 아직 확보 전이라 보상할 것이 없다.
+     * 예약 반환은 prepare() 의 공통 종료 경로가 한다.
      */
     private BadRequestException rejectBlockedInput(
             Long sessionId, Long userId, String normalizedContent, String detectedBy) {
@@ -579,31 +659,6 @@ public class AiChatMessageSendService {
         withCurrent.add(new HistoryMessage(HistoryMessage.Role.USER, normalizedContent));
         return new AiChatStreamCommand(
                 sessionId, withCurrent, turnContext.bookContext(), loaded.contextSummary());
-    }
-
-    private void recordUserMessageOrCompensate(
-            Long sessionId, Long userId, String normalizedContent, AiChatClient.RateLimitPermit rateLimitPermit) {
-        try {
-            aiChatMessagePersistService.recordUserMessage(sessionId, userId, normalizedContent);
-        } catch (RuntimeException userMessagePersistError) {
-            // 게이트 확보 이후·생성 이전의 실패 — 생성이 일어나지 않아 OpenAI 토큰 소모가 없으므로
-            // 버킷에 계상했던 몫을 보상 차감한다. 예약 반환은 prepare() 의 공통 종료 경로가 담당한다.
-            releaseRateLimitPermitQuietly(rateLimitPermit, sessionId);
-            throw userMessagePersistError;
-        }
-    }
-
-    /**
-     * 게이트 보상 차감 실패는 잡아 로그만 남기고 밖으로 던지지 않는다 — 버킷 보충과 키 TTL 이 안전망이라
-     * (되돌리지 못한 계상도 보충 속도만큼 곧 회복되고, 조용한 뒤에는 키가 만료돼 사라진다)
-     * 실패가 응답 경로(선행 처리의 원래 예외 전파·생성 단계의 error 이벤트 전달)를 막을 이유가 없다.
-     */
-    private void releaseRateLimitPermitQuietly(AiChatClient.RateLimitPermit rateLimitPermit, Long sessionId) {
-        try {
-            aiChatClient.releaseRateLimitPermit(rateLimitPermit);
-        } catch (RuntimeException releaseError) {
-            log.error("전역 게이트 보상 차감 실패 sessionId={}", sessionId, releaseError);
-        }
     }
 
     private TooManyRequestsException tokenBudgetExceeded(Duration retryAfter) {

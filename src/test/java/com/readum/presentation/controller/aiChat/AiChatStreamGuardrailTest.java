@@ -2,10 +2,9 @@ package com.readum.presentation.controller.aiChat;
 
 import com.readum.domain.aiChat.dto.AiChatStreamChunk;
 import com.readum.domain.aiChat.dto.AiChatStreamCommand;
+import com.readum.domain.aiChat.out.AiAvailability;
 import com.readum.domain.aiChat.dto.InputModerationResult;
 import com.readum.domain.aiChat.out.AiChatClient;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import com.readum.domain.aiChat.out.InputModerationClient;
 import com.readum.model.aiChat.entity.AiChatSession;
 import com.readum.model.aiChat.entity.AiChatSessionFixture;
@@ -112,9 +111,10 @@ class AiChatStreamGuardrailTest {
     private AiChatClient aiChatClient;
 
     // 토큰 예산은 실제 빈(UserTokenBudgetWriter) + H2 원장으로 동작한다 — 일일 예산이 커서 항상 허용된다.
-    // 전역 게이트는 실제 Redis 없이 항상 허용시킨다 (이 슬라이스는 moderation 검증용).
+    // 공급자 가용 상태는 고정한다 — 이 슬라이스가 보려는 것은 가드레일 판정뿐이라, 차단기의 판단이 끼어들면
+    // 검증 대상에 닿지도 못한다. 차단 판정 자체는 차단기 테스트가 따로 본다.
     @MockitoBean
-    private OpenAiRequestGate openAiRequestGate;
+    private AiAvailability aiAvailability;
 
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
@@ -123,13 +123,6 @@ class AiChatStreamGuardrailTest {
 
     @BeforeEach
     void setUp() {
-        given(openAiRequestGate.tryAcquire(any(), anyString(), anyInt()))
-                .willReturn(new OpenAiRequestGate.Decision.Permitted(
-                        new OpenAiRequestGate.GateReservation(OpenAiProject.CHAT, "gpt-4o-mini", 1000)));
-        // AiChatClient 자체가 mock 이므로 게이트 확보도 여기서 직접 통과시킨다 (계상 없는 permit).
-        given(aiChatClient.acquireRateLimitPermit(any(AiChatStreamCommand.class)))
-                .willReturn(new AiChatClient.RateLimitPermit.Uncounted());
-
         User user = userRepository.save(User.create(UUID.randomUUID(), "책읽는여우"));
         userId = user.getId();
 

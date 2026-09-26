@@ -2,13 +2,9 @@ package com.readum.infrastructure.ai.openai.summary;
 
 import com.readum.domain.aiChat.dto.SummaryDraftResult;
 import com.readum.domain.aiChat.out.AiSummaryClient;
-import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.infrastructure.ai.audit.AiPromptAuditEvent;
 import com.readum.infrastructure.ai.audit.AiPromptAuditLogger;
 import com.readum.infrastructure.ai.openai.ChatResponseAuditMapper;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard;
-import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -16,7 +12,6 @@ import org.springframework.ai.chat.client.ResponseEntity;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.ResponseFormat;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -39,28 +34,15 @@ public class AiSummaryClientImpl implements AiSummaryClient {
     // 응답 스키마 구조는 promptAssembler 에서 가져와 인스턴스 필드로 보관한다.
     // static 필드가 아닌 이유: ResponseFormat 조립에 promptAssembler 인스턴스가 필요하기 때문.
     private final ResponseFormat summaryResponseFormat;
-    private final OpenAiRateLimitGuard rateLimitGuard;
-    // domain 의 config record 를 infrastructure 가 읽는 것은 허용 방향(infrastructure → domain).
-    private final SummaryJobProperties summaryJobProperties;
-    private final TokenCounter tokenCounter;
-
-    @Value("${spring.ai.openai.chat.options.model}")
-    private String chatModel;
 
     public AiSummaryClientImpl(
             ChatClient chatClient,
             AiPromptAuditLogger auditLogger,
-            SummaryPromptAssembler promptAssembler,
-            OpenAiRateLimitGuard rateLimitGuard,
-            SummaryJobProperties summaryJobProperties,
-            TokenCounter tokenCounter
+            SummaryPromptAssembler promptAssembler
     ) {
         this.chatClient = chatClient;
         this.auditLogger = auditLogger;
         this.promptAssembler = promptAssembler;
-        this.rateLimitGuard = rateLimitGuard;
-        this.summaryJobProperties = summaryJobProperties;
-        this.tokenCounter = tokenCounter;
         this.summaryResponseFormat = ResponseFormat.builder()
                 .type(ResponseFormat.Type.JSON_SCHEMA)
                 .jsonSchema(ResponseFormat.JsonSchema.builder()
@@ -76,12 +58,9 @@ public class AiSummaryClientImpl implements AiSummaryClient {
         String chatHistory = promptAssembler.formatChatHistory(messages);
         log.debug("[Summary] 대화 이력 포맷 완료 - 메시지 수: {}", messages.size());
 
-        // 전역 게이트: 포화면 burst 429 로 던진다 — 워커의 handleRateLimited 가
-        // "브레이커 잠깐 차단(Retry-After 만큼) + 무벌점 반납" 으로 처리한다 (기존 경로 재사용).
-        int estimatedTokens = tokenCounter.count(promptAssembler.systemPrompt()) + tokenCounter.count(chatHistory)
-                + summaryJobProperties.estimatedOutputTokens();
-        rateLimitGuard.acquireOrThrow(OpenAiProject.SUMMARY, chatModel, estimatedTokens);
-
+        // 호출 전에 우리가 따로 걸러 내는 단계는 없다. 공급자가 실제로 429·결제 오류를 돌려주면
+        // 모델을 감싼 보호 계층이 그 기능을 차단하고, 워커는 "무벌점 반납" 으로 되돌린다(기존 경로 재사용).
+        // 요청 크기 상한은 그대로 남아 있다 — 워커가 호출 전에 summary-job.max-request-tokens 로 본다.
         AiPromptAuditEvent baseEvent = AiPromptAuditEvent.started(
                 conversationIdHash(messages),
                 PROMPT_TEMPLATE_ID,

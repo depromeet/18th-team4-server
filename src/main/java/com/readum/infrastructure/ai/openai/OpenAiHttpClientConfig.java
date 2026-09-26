@@ -1,10 +1,13 @@
 package com.readum.infrastructure.ai.openai;
 
 import lombok.extern.slf4j.Slf4j;
+import com.readum.infrastructure.ai.openai.availability.AiProviderCallGuard;
+import com.readum.infrastructure.ai.openai.availability.ProtectedModerationModel;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import org.springframework.ai.moderation.ModerationModel;
 import org.springframework.ai.openai.OpenAiModerationModel;
+import org.springframework.ai.openai.OpenAiModerationOptions;
 import org.springframework.ai.openai.api.OpenAiModerationApi;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -13,7 +16,6 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
-import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
 
 import java.net.http.HttpClient;
@@ -43,10 +45,10 @@ public class OpenAiHttpClientConfig {
      * moderation 호출 하나가 쓸 수 있는 최대 시간 — 연결 + 읽기. 선행 처리 여유가 이 값보다 커야 한다.
      * 두 값을 따로 더하는 곳이 생기지 않도록 여기 한 번만 더해 둔다.
      *
-     * <p>연결 2초 + 읽기 4초 = 6초다. 3 + 5 = 8초에서 내렸다 — 선행 처리 여유 10초에는 moderation 말고도
-     * 폭주 가드와 전역 게이트의 Redis 호출 둘(명령 기한 1초씩 최악 2초)과, 채팅이 버킷 자리를 기다려 주는
-     * 상한 1초({@code openai.gate.chat-max-wait-millis})가 들어가기 때문이다.
-     * moderation 6 + Redis 2 + 채팅 게이트 대기 1 = 9초라 DB(이력 조회·예약·USER 저장) 몫 1초가 남는다.
+     * <p>연결 2초 + 읽기 4초 = 6초다. 3 + 5 = 8초에서 내렸다 — 선행 처리 여유에는 moderation 말고도
+     * 선행 처리가 부르는 Redis 호출 셋(폭주 가드 · 공급자 가용 확인 · 입력 검토 허가, 명령 기한 1초씩
+     * 최악 3초)이 들어가기 때문이다. moderation 6 + Redis 3 = 9초라
+     * DB(이력 조회·예약·USER 저장) 몫 1초가 남는다.
      * OpenAI moderation 은 짧은 문자열 하나를 판정하는 단순 호출이라 정상 응답이 4초를 넘을 이유가 없다
      * (계산이며 실측 아님). 이 관계는 기동 시 {@code AiChatTimeBudgetValidator} 가 대조한다.
      */
@@ -64,8 +66,10 @@ public class OpenAiHttpClientConfig {
     @Bean
     @Primary
     public ModerationModel moderationModel(
-            ResponseErrorHandler openAiResponseErrorHandler,
+            OpenAiResponseErrorHandlerFactory errorHandlerFactory,
+            AiProviderCallGuard callGuard,
             OpenAiProjectProperties projectProperties,
+            OpenAiModelNames modelNames,
             @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl
     ) {
         HttpClient jdkHttpClient = HttpClient.newBuilder()
@@ -81,7 +85,7 @@ public class OpenAiHttpClientConfig {
                 .apiKey(projectProperties.apiKeyOf(OpenAiProject.MODERATION))
                 .baseUrl(baseUrl)
                 .restClientBuilder(restClientBuilder)
-                .responseErrorHandler(openAiResponseErrorHandler)
+                .responseErrorHandler(errorHandlerFactory.create(OpenAiProject.MODERATION))
                 .build();
         // 자체 재시도를 두지 않는다(maxRetries=0 = 단일 시도). 재시도는 과부하 때 실패를 되먹여
         // congestion collapse 를 키우는 증폭기였다(측정 확인). 근본(본문 굶음)을 고쳤으므로 재시도로 가릴 실패가 없고,
@@ -89,6 +93,14 @@ public class OpenAiHttpClientConfig {
         RetryPolicy noRetry = RetryPolicy.builder().maxRetries(0).build();
         log.info("[OpenAI HTTP] moderation model: 블로킹 JDK HttpClient (HTTP/1.1), 자체 재시도 없음, 연결 {}s + 읽기 {}s",
                 MODERATION_CONNECT_TIMEOUT.toSeconds(), MODERATION_READ_TIMEOUT.toSeconds());
-        return new OpenAiModerationModel(api, new RetryTemplate(noRetry));
+        // 공급자 상태 보호를 모델 경계에 둔다 — 입력 검토와 감상문 출력 검토가 같은 이 빈을 쓰므로
+        // 여기 한 번 감싸면 두 경로가 모두 보호된다.
+        // 모델 이름을 요청에 명시한다 — 주지 않으면 SDK 기본 모델로 나가, 게이트 계상·결제 쿨다운·오류 분류가
+        // 설정된 모델 키(OpenAiModelNames)에 쌓이는데 실제 호출은 다른 모델로 가는 어긋남이 생긴다.
+        OpenAiModerationModel moderationModel = new OpenAiModerationModel(api, new RetryTemplate(noRetry))
+                .withDefaultOptions(OpenAiModerationOptions.builder()
+                        .model(modelNames.of(OpenAiProject.MODERATION))
+                        .build());
+        return new ProtectedModerationModel(moderationModel, callGuard);
     }
 }

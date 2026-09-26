@@ -5,6 +5,9 @@ spring:
       chat:
         options:
           model: gpt-4o-mini
+      moderation:
+        options:
+          model: omni-moderation-latest
   flyway:
     enabled: false   # 테스트는 H2 + ddl-auto create-drop (MySQL 전용 V1 SQL 은 H2 에 적용 불가)
   datasource:
@@ -47,6 +50,8 @@ ai-chat:
   token-budget:
     daily-tokens: 120000
     estimated-output-tokens: 512
+  completed-turn:
+    retention-hours: 24
   streaming:
     # 기한 셋은 운영 값과 같게 둔다 — 기동 시 시간 예산 검증(AiChatTimeBudgetValidator)이 여기서도 돈다.
     generation-total-timeout-seconds: 20
@@ -85,35 +90,30 @@ openai:
   projects:
     chat:
       api-key: test-openai-key
-      models:
-        gpt-4o-mini:
-          requests-per-minute: 9000
-          tokens-per-minute: 180000
     moderation:
       api-key: test-openai-key
-      models: {}
     summary:
       api-key: test-openai-key
-      models:
-        gpt-4o-mini:
-          requests-per-minute: 9000
-          tokens-per-minute: 180000
     context-summary:
       api-key: test-openai-key
-      models:
-        gpt-4o-mini:
-          requests-per-minute: 9000
-          tokens-per-minute: 180000
     title:
       api-key: test-openai-key
-      models:
-        gpt-4o-mini:
-          requests-per-minute: 9000
-          tokens-per-minute: 180000
-  gate:
-    burst-seconds: 10
-    chat-max-wait-millis: 1000
-    quota-cooldown-seconds: 300
+  availability:
+    window-seconds: 60
+    minimum-number-of-calls: 10
+    failure-rate-percent: 50
+    transient-block-seconds: 30
+    rate-limit-block-seconds: 30
+    quota-block-seconds: 300
+    auth-block-seconds: 300
+    max-block-seconds: 600
+    probe-lease-seconds: 30
+    probe:
+      scan-interval-ms: 10000
+      connect-timeout-seconds: 2
+      read-timeout-seconds: 10
+      stream-total-timeout-seconds: 15
+      max-output-tokens: 8
 
 summary-job:
   pool-size: 3
@@ -124,6 +124,7 @@ summary-job:
   base-backoff-seconds: 60
   max-request-tokens: 120000
   estimated-output-tokens: 1024
+  max-total-wait-hours: 24
 
 context-summary-job:
   pool-size: 2
@@ -133,3 +134,4 @@ context-summary-job:
   max-attempts: 5
   base-backoff-seconds: 60
   max-request-tokens: 120000
+  max-total-wait-hours: 24

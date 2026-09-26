@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * 채팅 컨텍스트 누적 요약 생성 포트. 증분 방식: 이전 요약 + 경계 이후 델타 원문 → 완전한 새 누적 요약.
- * 구현체(infrastructure)가 전역 게이트·감사 로그·프롬프트 조립을 담당한다.
+ * 구현체(infrastructure)가 감사 로그·프롬프트 조립을 담당한다.
  */
 public interface AiContextSummaryClient {
 

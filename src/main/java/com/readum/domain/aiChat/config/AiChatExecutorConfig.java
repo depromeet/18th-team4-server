@@ -12,7 +12,7 @@ import java.util.concurrent.ThreadFactory;
  * AI 채팅의 비동기 실행 지점이 쓰는 가상 스레드 실행기들.
  * 가상 스레드는 희소 자원이 아니므로 격벽(전용 풀 분리)이 필요 없다 —
  * 제목 생성 전용 boundedElastic 격벽(구 AiChatSchedulerConfig)을 가상 스레드로 대체했다.
- * 그래도 실행기를 셋으로 나눈 이유는 동시성 상한이 아니라 <b>종료 책임과 스레드 이름</b>이다.
+ * 그래도 실행기를 나눈 이유는 동시성 상한이 아니라 <b>종료 책임과 스레드 이름</b>이다.
  * 종료 순서가 서로 다르고(아래), 스레드 이름이 다르면 덤프에서 무엇이 매달려 있는지 바로 구분된다.
  */
 @Configuration
@@ -56,7 +56,7 @@ public class AiChatExecutorConfig {
     }
 
     /**
-     * 위 두 실행기에 {@code destroyMethod = ""} 를 붙인 이유:
+     * 위 실행기들에 {@code destroyMethod = ""} 를 붙인 이유:
      * {@link ExecutorService} 는 {@link AutoCloseable} 이라 Spring 의 기본 소멸 메서드 추론이 {@code close()} 를 부르는데,
      * 그 기본 구현은 작업이 다 끝날 때까지(사실상 무기한) 막힌다. 빈 소멸은 SmartLifecycle 종료가 모두 끝난 뒤에
      * 일어나므로, 거기서 다시 무기한 기다리면 systemd 의 SIGKILL 유예(TimeoutStopSec=75초)를 넘긴다.

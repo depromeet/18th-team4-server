@@ -49,3 +49,6 @@ docs/superpowers/
 
 ### 부하 테스트 하네스 (throwaway, 커밋 제외) ###
 /loadtest/
+
+### 이력서·포트폴리오용 정리 문서 (개인 자료, 커밋 제외) ###
+/career/

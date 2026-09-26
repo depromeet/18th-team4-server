@@ -31,7 +31,7 @@ class SummaryRangeSelectorTest {
                 new AiChatProperties.TokenBudget(120000, 512),
                 new AiChatProperties.Streaming(120, 30, 150, 60, 60, 60, 256, 300));
         ContextSummaryJobProperties jobProperties = new ContextSummaryJobProperties(
-                2, 2000, 60000, 120, 5, 60, maxRequestTokens);
+                2, 2000, 60000, 120, 5, 60, maxRequestTokens, 24);
         return new SummaryRangeSelector(aiChatProperties, jobProperties, tokenCounter);
     }
 

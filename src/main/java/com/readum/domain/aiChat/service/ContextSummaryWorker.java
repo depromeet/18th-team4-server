@@ -5,11 +5,11 @@ import com.readum.domain.aiChat.config.ContextSummaryJobProperties;
 import com.readum.domain.aiChat.dto.ContextSummaryGenerationContext;
 import com.readum.domain.aiChat.dto.ContextSummaryResult;
 import com.readum.domain.aiChat.exception.AiChatErrorCode;
+import com.readum.domain.aiChat.exception.AiDependencyUnavailableException;
+import com.readum.domain.aiChat.out.AiAvailability;
 import com.readum.domain.aiChat.out.AiContextSummaryClient;
 import com.readum.domain.aiChat.out.TokenCounter;
-import com.readum.domain.exception.RateLimitInfo;
 import com.readum.domain.exception.TooManyRequestsException;
-import com.readum.domain.summary.out.AiQuotaCooldown;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,24 +17,22 @@ import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
  * 동기 컨텍스트 요약 워커. 트랜잭션 없이 각 트랜잭션 단계(ContextSummaryJobLifecycleService)를 순서대로 호출하고
- * 그 사이(트랜잭션 밖)에서 LLM 을 부른다. 버킷 자리·quota 쿨다운은 전역 게이트가 AiContextSummaryClientImpl 안에서 검사한다.
- * 워커는 쿨다운 중엔 job 을 선점하지 않아(헛선점·attempt 소진 방지), 계정 전역 백오프가 전 경로 공통이다.
- * 감상문 워커(SummaryGenerationWorker)와 같은 골격 — 공통 추상화로 묶지 않는다(두 큐의 생명주기가 다름).
+ * 그 사이(트랜잭션 밖)에서 LLM 을 부른다. 감상문 워커(SummaryGenerationWorker)와 같은 골격 —
+ * 공통 추상화로 묶지 않는다(두 큐의 생명주기가 다름).
  *
- * 실패 분류:
- * - 추정 토큰 > maxRequestTokens → 호출 전 즉시 실패 처리(FAILED). 채팅은 최근 원문 최대 토큰 안에서 원문으로 계속 동작.
- * - burst 429(버킷 자리 없음 — 게이트 포화) → 재시도 횟수를 올리지 않고 대기열로 되돌림 + 이번 드레인 사이클 중단
- * - quota 429(게이트 쿨다운) → 재시도 가능 실패로 기록 + 이번 드레인 사이클 중단. 쿨다운은 게이트가 관리
- * - 5xx → 재시도 / 4xx → 즉시 FAILED
+ * <p>공급자 사정(차단·한도·결제)과 작업 사정(입력 문제·알 수 없는 오류)을 나누는 규칙도 감상문 워커와 같다.
+ * 공급자 사정이면 시도 횟수를 올리지 않고 되돌리고 이번 드레인 사이클을 멈춘다.
  *
- * burst/quota 는 계정 전역 신호다 — 게이트는 HTTP 전에(버킷 확인만으로) 429 를 던지므로, 재시도 횟수를 올리지 않고 대기열로 되돌린 작업을
- * 같은 사이클에서 다시 선점하면 버킷이 보충될 때까지 claim→반납을 무한 반복하며 DB 를 두드린다. 그래서 quota 쿨다운
- * 조기 반환과 같은 취지로, 전역 게이트가 포화면 이번 드레인 사이클을 멈추고 다음 dispatch 주기에 다시 시도한다.
+ * <p>실패 구분:
+ * <ul>
+ *   <li>추정 토큰 &gt; maxRequestTokens → 호출 전 즉시 실패 처리(FAILED). 채팅은 최근 원문 최대 토큰 안에서 계속 동작한다.</li>
+ *   <li>공급자 차단·상태 불명 / 429 계열 → 무벌점 반납 + 이번 드레인 사이클 중단</li>
+ *   <li>5xx → 시도 횟수를 쓰는 재시도 / 429 외 4xx → 즉시 FAILED</li>
+ * </ul>
  */
 @Slf4j
 @Component
@@ -42,15 +40,16 @@ import java.util.UUID;
 public class ContextSummaryWorker {
 
     private static final String ERROR_SESSION_TOO_LARGE = "CONTEXT_SUMMARY_SESSION_TOO_LARGE";
+    private static final AiAvailability.Capability CAPABILITY = AiAvailability.Capability.CONTEXT_SUMMARY;
 
     private final ContextSummaryJobLifecycleService lifecycleService;
     private final AiContextSummaryClient aiContextSummaryClient;
-    private final AiQuotaCooldown quotaCooldown;
+    private final AiAvailability aiAvailability;
     private final TokenCounter tokenCounter;
     private final ContextSummaryJobProperties jobProperties;
     private final AiChatProperties aiChatProperties;
 
-    /** 처리할 작업이 없을 때까지(또는 전역 차단 전까지) 계속 선점·처리한다. */
+    /** 처리할 작업이 없을 때까지(또는 공급자가 막힐 때까지) 계속 선점·처리한다. */
     public void processUntilEmpty() {
         while (processOne()) {
             // 처리할 게 있는 동안 계속
@@ -59,20 +58,27 @@ public class ContextSummaryWorker {
 
     /** 작업 하나를 시도. 처리했으면 true, 없거나 차단 중이면 false. */
     public boolean processOne() {
-        if (quotaCooldown.isCoolingDown()) {
-            // 계정 quota 쿨다운 중 — job 을 선점하지 않는다(헛선점·attempt 소진 방지). 다음 dispatch 때 재확인.
+        if (!aiAvailability.canProcess(CAPABILITY)) {
             return false;
         }
         String owner = UUID.randomUUID().toString();
         Long jobId = lifecycleService.claimOne(owner);
         if (jobId == null) {
+            notifyDrainedIfEmpty();
             return false;
         }
         boolean continueDraining = runJob(jobId, owner);
         return continueDraining && !Thread.currentThread().isInterrupted();
     }
 
-    /** @return 이번 드레인 사이클을 계속할지 여부. 전역 게이트 포화(burst/quota)면 false 로 멈춘다(타이트 재선점 루프 방지). */
+    /** 선점이 빈손으로 돌아왔을 때만, 정말로 남은 작업이 없는지 확인하고 신규 접수 재개를 알린다(감상문 큐와 같은 이유). */
+    private void notifyDrainedIfEmpty() {
+        if (!lifecycleService.hasUnfinishedJob()) {
+            aiAvailability.onQueueDrained(CAPABILITY);
+        }
+    }
+
+    /** @return 이번 드레인 사이클을 계속할지 여부. 공급자가 막혔으면 false 로 멈춘다(타이트 재선점 루프 방지). */
     private boolean runJob(Long jobId, String owner) {
         ContextSummaryGenerationContext context = lifecycleService.prepareGeneration(jobId, owner);
         if (context == null) {
@@ -92,8 +98,10 @@ public class ContextSummaryWorker {
         ContextSummaryResult result;
         try {
             result = aiContextSummaryClient.generate(context.previousSummaryContent(), context.messagesToSummarize());
+        } catch (AiDependencyUnavailableException e) {
+            return releaseForProviderPause(jobId, owner, "공급자 차단");
         } catch (TooManyRequestsException e) {
-            return handleRateLimited(jobId, owner, e);
+            return releaseForProviderPause(jobId, owner, rateLimitReasonOf(e));
         } catch (NonTransientAiException e) {
             log.warn("컨텍스트 요약 회복 불가 오류 jobId={} sessionId={}", jobId, context.sessionId(), e);
             lifecycleService.recordFailure(jobId, owner, false,
@@ -121,23 +129,20 @@ public class ContextSummaryWorker {
         return total + aiChatProperties.context().summaryEstimatedOutputTokens();
     }
 
-    /** @return 항상 false — 전역 게이트 포화이므로 이번 드레인 사이클을 멈춘다(다음 dispatch 주기에 재시도). */
-    private boolean handleRateLimited(Long jobId, String owner, TooManyRequestsException e) {
-        if (e.getErrorCode() == AiChatErrorCode.AI_QUOTA_EXHAUSTED) {
-            // 계정 quota 소진 — 쿨다운은 게이트가 이미 열었다(전 경로 공통). 재시도 가능 실패로 기록.
-            lifecycleService.recordFailure(jobId, owner, true,
-                    e.getErrorCode().name(), e.getMessage(), retryAtFrom(e.getRateLimitInfo()));
-            return false;
-        }
-        // burst — 버킷 자리 없음(게이트 포화, backpressure). 재시도 횟수를 올리지 않고 대기열로 되돌린다(가짜 실패 방지).
+    /** 공급자 사정으로 호출을 못 보냈다 — 시도 횟수를 올리지 않고 되돌리고, 이번 드레인 사이클을 멈춘다. */
+    private boolean releaseForProviderPause(Long jobId, String owner, String reason) {
+        log.info("컨텍스트 요약 작업 무벌점 반납 jobId={} 사유={}", jobId, reason);
         lifecycleService.releaseWithoutPenalty(jobId, owner);
         return false;
     }
 
-    private LocalDateTime retryAtFrom(RateLimitInfo info) {
-        if (info != null && info.retryAfter() != null) {
-            return LocalDateTime.now().plus(info.retryAfter());
+    private String rateLimitReasonOf(TooManyRequestsException e) {
+        if (e.getErrorCode() == AiChatErrorCode.AI_QUOTA_EXHAUSTED) {
+            return "공급자 결제·잔액 소진";
         }
-        return null;
+        if (e.getErrorCode() == AiChatErrorCode.AI_PROVIDER_RATE_LIMITED) {
+            return "공급자 한도 초과 응답";
+        }
+        return "우리 쪽 제한";
     }
 }

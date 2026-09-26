@@ -99,9 +99,13 @@ public class AiChatMessagePersistService {
      */
     public record MessageLoadResult(String contextSummary, List<HistoryMessage> notSummarizedChatRaws, Long userBookId) {}
 
+    /**
+     * @param generatedAt 답변이 <b>생성된</b> 시각. 저장 시각이 아니다 — 되살려 늦게 저장하는 경우에도
+     *                    대화 순서가 뒤바뀌지 않도록 정상 경로와 같은 값을 쓴다.
+     */
     @Transactional
     public AiChatMessage saveAssistantSuccess(
-            Long sessionId, String accumulated, AiChatCompletion meta
+            Long sessionId, String accumulated, AiChatCompletion meta, LocalDateTime generatedAt
     ) {
         Integer inputTokens = meta == null ? null : meta.inputTokens();
         Integer outputTokens = meta == null ? null : meta.outputTokens();
@@ -110,7 +114,7 @@ public class AiChatMessagePersistService {
         Integer tokenCount = outputTokens != null ? outputTokens : tokenCounter.count(accumulated);
 
         AiChatMessage saved = aiChatMessageRepository.save(AiChatMessage.createAssistantSuccess(
-                sessionId, accumulated, inputTokens, outputTokens, totalTokens, tokenCount
+                sessionId, accumulated, inputTokens, outputTokens, totalTokens, tokenCount, generatedAt
         ));
         // ASSISTANT 응답이 COMPLETED 로 쌓였으니, 커밋 후 컨텍스트 요약이 필요한지(최근 원문 대화 토큰 합 > 임계값) 판정하도록 트리거한다.
         // 실제 임계값 검사·job 적재는 AFTER_COMMIT 리스너가 담당한다(사용자 응답 경로와 분리, LLM 요약은 워커가 비동기 처리).

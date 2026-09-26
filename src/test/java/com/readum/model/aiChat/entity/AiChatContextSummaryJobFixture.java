@@ -27,6 +27,15 @@ public final class AiChatContextSummaryJobFixture {
                 null, null, 0, nextAttemptAt, null, null, now, now);
     }
 
+    /** 접수 시각(createdAt)까지 지정한 PENDING 작업 — 선점 순서가 접수 순서인지 검증할 때 쓴다. */
+    public static AiChatContextSummaryJob persistedPendingCreatedAt(
+            Long id, Long sessionId, LocalDateTime nextAttemptAt, LocalDateTime createdAt
+    ) {
+        return new AiChatContextSummaryJob(
+                id, sessionId, sessionId, AiChatContextSummaryJob.Status.PENDING,
+                null, null, 0, nextAttemptAt, null, null, createdAt, createdAt);
+    }
+
     /** owner 가 점유(PROCESSING) 중인, lease 가 lockedUntil 까지 유효한 작업. */
     public static AiChatContextSummaryJob persistedProcessing(
             Long id, Long sessionId, String owner, LocalDateTime lockedUntil, int attemptCount

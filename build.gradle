@@ -42,6 +42,10 @@ dependencies {
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
 	implementation 'com.github.ben-manes.caffeine:caffeine'
 	implementation 'com.bucket4j:bucket4j-core:8.10.1'
+	// 공급자 장애 차단기 — 상태 기계와 실패율 집계를 라이브러리가 소유한다(우리 구현 없음).
+	// core 만 쓴다: 우리 보호 계층이 이미 명령형이라 애노테이션·스프링 연동·reactor 모듈이 필요 없다.
+	// 버전은 고정한다 — 차단 판정이 라이브러리 기본값 변경에 흔들리지 않게 한다.
+	implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.4.0'
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'

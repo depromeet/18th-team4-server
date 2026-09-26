@@ -1,7 +1,9 @@
 package com.readum.infrastructure.ai.openai.bench;
 
 import com.readum.domain.aiChat.out.InputModerationClient;
+import com.readum.infrastructure.ai.openai.OpenAiResponseErrorHandlerFactory;
 import com.readum.infrastructure.ai.openai.guardrail.GuardrailProperties;
+import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
 import com.readum.infrastructure.ai.openai.moderation.OpenAiInputModerationClientImpl;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -14,7 +16,6 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.client.ReactorClientHttpRequestFactory;
-import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
@@ -64,7 +65,7 @@ public class BenchBridgeModerationConfig {
 
     @Bean(defaultCandidate = false)
     public InputModerationClient benchBridgeInputModerationClient(
-            ResponseErrorHandler openAiResponseErrorHandler,
+            OpenAiResponseErrorHandlerFactory errorHandlerFactory,
             GuardrailProperties guardrailProperties,
             @Value("${bench.bridge.base-url:http://127.0.0.1:9099}") String baseUrl,
             @Value("${bench.bridge.api-key:bench-key}") String apiKey
@@ -82,7 +83,7 @@ public class BenchBridgeModerationConfig {
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
                 .restClientBuilder(restClientBuilder)
-                .responseErrorHandler(openAiResponseErrorHandler)
+                .responseErrorHandler(errorHandlerFactory.create(OpenAiProject.MODERATION))
                 .build();
 
         // 재시도 0(단일 시도) — 기존 moderation 빈과 동일 정책. 재시도가 실패를 증폭해 측정을 흐리지 않게 한다.

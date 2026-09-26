@@ -51,6 +51,9 @@ class AiChatTurnOutcomeWriterTest {
     private static final Duration ALREADY_OVERDUE_TIMEOUT = Duration.ofMinutes(-3);
     private static final long SESSION_ID = 7L;
     private static final int RESERVED_TOKENS = 300;
+    /** 답변이 생성된 시각. 저장 시각이 아니라 이 값이 작성 시각으로 남는다. */
+    private static final LocalDateTime GENERATED_AT = LocalDateTime.of(2026, 9, 12, 10, 0, 0);
+
     private static final int ESTIMATED_MESSAGE_INPUT_TOKENS = 40;
 
     @Autowired
@@ -105,7 +108,7 @@ class AiChatTurnOutcomeWriterTest {
         Long turnRequestId = reservedTurnRequest(userId, "request-success");
 
         AiChatTurnOutcomeWriter.TurnOutcomeResult result = aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, successfulGeneration("완성된 답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS);
+                turnRequestId, successfulGeneration("완성된 답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT);
 
         assertThat(result).isInstanceOf(AiChatTurnOutcomeWriter.TurnOutcomeResult.Succeeded.class);
         AiChatTurnOutcomeWriter.SavedAssistantMessage assistantMessage =
@@ -128,7 +131,7 @@ class AiChatTurnOutcomeWriterTest {
         Long turnRequestId = reservedTurnRequest(userId, "request-charge");
 
         aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS);
+                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT);
 
         // 공급자 실측 입력(1200, 이전 대화·시스템 메시지 포함)은 청구하지 않는다 — 기존 산식 그대로.
         long chargedTokens = ESTIMATED_MESSAGE_INPUT_TOKENS + 260;
@@ -143,7 +146,7 @@ class AiChatTurnOutcomeWriterTest {
                 .given(userTokenBudgetWriter).settle(anyLong(), anyInt(), anyLong(), anyInt(), anyInt());
 
         assertThatThrownBy(() -> aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, successfulGeneration("완성된 답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS))
+                turnRequestId, successfulGeneration("완성된 답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         assertThat(messagesOf(SESSION_ID)).isEmpty();
@@ -161,7 +164,7 @@ class AiChatTurnOutcomeWriterTest {
         Long turnRequestId = reservedTurnRequest(userId, "request-event");
 
         aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS);
+                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT);
 
         // 답변 저장이 더 큰 트랜잭션에 합류해도 AFTER_COMMIT 시점은 그대로다 — 다만 그 커밋이
         // 정산·요청 종료까지 포함하므로, 이벤트가 보는 요청은 이미 SUCCEEDED 다.
@@ -177,7 +180,7 @@ class AiChatTurnOutcomeWriterTest {
                 AiChatGenerationOutcome.Status.STREAM_ERROR, "받은 데까지의 조각", null, null, null, null);
 
         assertThatThrownBy(() -> aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, failed, ESTIMATED_MESSAGE_INPUT_TOKENS))
+                turnRequestId, failed, ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(messagesOf(SESSION_ID)).isEmpty();
@@ -289,7 +292,7 @@ class AiChatTurnOutcomeWriterTest {
         long userId = nextUserId();
         Long turnRequestId = overdueReservedTurnRequest(userId, "request-succeeded-then-overdue");
         aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS);
+                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT);
         long chargedTokens = ESTIMATED_MESSAGE_INPUT_TOKENS + 260;
 
         AiChatTurnOutcomeWriter.TurnOutcomeResult result = aiChatTurnOutcomeWriter.expireIfOverdue(
@@ -312,7 +315,7 @@ class AiChatTurnOutcomeWriterTest {
         // 기한이 지났다고 실행이 사라진 것은 아니다 — 살아남은 생성이 뒤늦게 성공을 들고 온다.
         AiChatTurnOutcomeWriter.TurnOutcomeResult lateSuccess = aiChatTurnOutcomeWriter.finishSuccessfully(
                 turnRequestId, successfulGeneration("늦게 도착한 답변", 1_200, 260),
-                ESTIMATED_MESSAGE_INPUT_TOKENS);
+                ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT);
 
         assertThat(lateSuccess).isEqualTo(new AiChatTurnOutcomeWriter.TurnOutcomeResult.AlreadyFinished(
                 AiChatTurnRequest.Status.EXPIRED, null));
@@ -363,7 +366,7 @@ class AiChatTurnOutcomeWriterTest {
                 turnRequestId, AiChatTurnRequest.Status.EXPIRED, "TURN_EXPIRED");
 
         AiChatTurnOutcomeWriter.TurnOutcomeResult result = aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, successfulGeneration("늦게 도착한 답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS);
+                turnRequestId, successfulGeneration("늦게 도착한 답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT);
 
         assertThat(result).isEqualTo(new AiChatTurnOutcomeWriter.TurnOutcomeResult.AlreadyFinished(
                 AiChatTurnRequest.Status.EXPIRED, null));
@@ -378,7 +381,7 @@ class AiChatTurnOutcomeWriterTest {
         long userId = nextUserId();
         Long turnRequestId = reservedTurnRequest(userId, "request-late-failure");
         aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS);
+                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT);
         long chargedTokens = ESTIMATED_MESSAGE_INPUT_TOKENS + 260;
 
         AiChatTurnOutcomeWriter.TurnOutcomeResult result = aiChatTurnOutcomeWriter.finishWithoutCharge(
@@ -402,7 +405,7 @@ class AiChatTurnOutcomeWriterTest {
                         AiChatTurnRequest.Status.RESERVED));
 
         AiChatTurnOutcomeWriter.TurnOutcomeResult succeeded = aiChatTurnOutcomeWriter.finishSuccessfully(
-                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS);
+                turnRequestId, successfulGeneration("답변", 1_200, 260), ESTIMATED_MESSAGE_INPUT_TOKENS, GENERATED_AT);
         Long assistantMessageId = ((AiChatTurnOutcomeWriter.TurnOutcomeResult.Succeeded) succeeded)
                 .assistantMessage().messageId();
 

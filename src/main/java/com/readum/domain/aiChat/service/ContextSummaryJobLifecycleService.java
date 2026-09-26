@@ -31,6 +31,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ContextSummaryJobLifecycleService {
 
+    /** 전체 대기 한도를 넘겨 끝낸 작업에 남기는 표식. */
+    private static final String ERROR_WAIT_EXPIRED = "CONTEXT_SUMMARY_WAIT_EXPIRED";
+
     private final AiChatContextSummaryJobRepository jobRepository;
     private final AiChatContextSummaryRepository summaryRepository;
     private final AiChatMessageRepository messageRepository;
@@ -137,6 +140,27 @@ public class ContextSummaryJobLifecycleService {
         List<AiChatContextSummaryJob> orphans = jobRepository.findOrphaned(now, PageRequest.of(0, batchSize));
         orphans.forEach(job -> job.releaseAfterOrphan(now));
         return orphans.size();
+    }
+
+    /**
+     * 접수한 지 전체 대기 한도를 넘긴 미완료 작업을 실패로 끝낸다. 감상문 큐와 같은 이유 —
+     * 공급자가 오래 막혀도 작업이 영원히 남지 않게 한다. 채팅은 그동안 최근 원문만으로 계속 동작한다.
+     * @return 끝낸 작업 수
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public int expireLongWaiting(int batchSize) {
+        LocalDateTime expiredBefore = LocalDateTime.now().minus(jobProperties.maxTotalWait());
+        List<AiChatContextSummaryJob> expired =
+                jobRepository.findExpired(expiredBefore, PageRequest.of(0, batchSize));
+        expired.forEach(job -> job.markFailed(
+                ERROR_WAIT_EXPIRED,
+                "접수 후 " + jobProperties.maxTotalWaitHours() + "시간 안에 요약하지 못했습니다."));
+        return expired.size();
+    }
+
+    /** 처리할 작업이 하나도 남지 않았는가 — 적체를 다 비웠는지 판정한다. */
+    public boolean hasUnfinishedJob() {
+        return jobRepository.existsUnfinishedJob();
     }
 
     /** 실패 기록 — 재시도 가능하고 상한 미만이면 백오프 재시도, 아니면 FAILED. */

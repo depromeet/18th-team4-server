@@ -2,9 +2,6 @@ package com.readum.infrastructure.redis;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.domain.aiChat.out.UserMessageRateLimiter;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProject;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.SocketOptions;
 import org.junit.jupiter.api.AfterEach;
@@ -37,12 +34,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * <b>매달린 Redis 앞에서 fail-open 이 몇 초 안에 발동하는지</b>를 실측한다.
  *
- * <p>폭주 가드({@link UserMessageRateLimiterRedisAdapter})와 전역 게이트({@link OpenAiRequestGate})는
- * Redis 장애를 만나면 검사 없이 통과시킨다. 그런데 그 통과는 <b>호출이 실패했다는 것을 안 뒤</b>에
- * 일어나므로, Redis 가 응답 없이 매달리면 통과까지 걸리는 시간이 곧 명령 기한이다. 기한을 두지 않으면
- * Lettuce 기본 60초가 걸려, 선행 처리의 Redis 호출 둘이 2분을 쓰고 한 턴의 시간 예산 40초를 넘긴다.
+ * <p>폭주 가드({@link UserMessageRateLimiterRedisAdapter})는 Redis 장애를 만나면 검사 없이 통과시키는데,
+ * 그 통과는 <b>호출이 실패했다는 것을 안 뒤</b>에 일어난다. Redis 가 응답 없이 매달리면 통과까지 걸리는 시간이
+ * 곧 명령 기한이고, 기한을 두지 않으면 Lettuce 기본 60초가 걸려 한 턴의 시간 예산을 넘긴다.
  * {@code spring.data.redis.timeout} / {@code connect-timeout} 을 1초로 못박은 것이 그 대비이고,
  * 이 테스트가 그 값이 실제로 걸리는지를 잰다.
+ *
+ * <p>공급자 장애 차단은 여기서 재지 않는다 — 그 상태는 이제 서버 안(Resilience4j)에 있어 Redis 를 부르지 않는다.
  *
  * <p>스프링 컨텍스트를 띄우지 않는다 — {@link LettuceConnectionFactory} 와 두 협력자를 직접 조립한다.
  * 기한 값은 여기 베끼지 않고 {@code application.yml} 에서 읽어, yml 만 바뀌면 이 테스트가 먼저 깨지게 한다.
@@ -82,21 +80,6 @@ class RedisFailOpenTimingTest {
     }
 
     @Test
-    void 연결은_받되_응답하지_않는_Redis_앞에서_전역_게이트는_약_1초_만에_계상_없이_통과시킨다() throws Exception {
-        SilentRedis silentRedis = startSilentRedis();
-        StringRedisTemplate template = templateFor(silentRedis.port());
-
-        Measured<OpenAiRequestGate.Decision> measured =
-                measure(() -> gate(template).tryAcquire(OpenAiProject.CHAT, "gpt-4o-mini", 512));
-
-        assertThat(measured.value()).isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
-        assertThat(measured.elapsed())
-                .as("매달린 Redis 앞에서 전역 게이트가 통과 판정을 내리기까지 걸린 시간 (실측 %dms)",
-                        measured.elapsed().toMillis())
-                .isBetween(FAIL_OPEN_LOWER_BOUND, FAIL_OPEN_UPPER_BOUND);
-    }
-
-    @Test
     void 연결_자체가_매달리는_Redis_앞에서도_두_호출_모두_기한_안에_통과시킨다() throws Exception {
         // accept 를 하지 않는 소켓의 대기열을 채워 두면 그 다음 연결은 SYN 이 버려져 매달린다.
         // 커널이 대기열을 넉넉히 잡아 연결이 맺어지더라도 응답이 없으므로, 이번엔 명령 기한이 같은 값으로 잡는다.
@@ -104,16 +87,10 @@ class RedisFailOpenTimingTest {
         StringRedisTemplate template = templateFor(unacceptedRedis.port());
 
         Measured<UserMessageRateLimiter.Result> rateLimit = measure(() -> rateLimiter(template).tryConsume(7L));
-        Measured<OpenAiRequestGate.Decision> gateDecision =
-                measure(() -> gate(template).tryAcquire(OpenAiProject.CHAT, "gpt-4o-mini", 512));
 
         assertThat(rateLimit.value()).isInstanceOf(UserMessageRateLimiter.Result.Bypassed.class);
-        assertThat(gateDecision.value()).isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
         assertThat(rateLimit.elapsed())
                 .as("연결이 매달릴 때 폭주 가드가 통과 판정을 내리기까지 (실측 %dms)", rateLimit.elapsed().toMillis())
-                .isBetween(FAIL_OPEN_LOWER_BOUND, FAIL_OPEN_UPPER_BOUND);
-        assertThat(gateDecision.elapsed())
-                .as("연결이 매달릴 때 전역 게이트가 통과 판정을 내리기까지 (실측 %dms)", gateDecision.elapsed().toMillis())
                 .isBetween(FAIL_OPEN_LOWER_BOUND, FAIL_OPEN_UPPER_BOUND);
     }
 
@@ -123,17 +100,11 @@ class RedisFailOpenTimingTest {
         StringRedisTemplate template = templateFor(deadPort);
 
         Measured<UserMessageRateLimiter.Result> rateLimit = measure(() -> rateLimiter(template).tryConsume(7L));
-        Measured<OpenAiRequestGate.Decision> gateDecision =
-                measure(() -> gate(template).tryAcquire(OpenAiProject.CHAT, "gpt-4o-mini", 512));
 
         // Redis 가 죽는 경우와 매달리는 경우의 차이가 여기서 드러난다 — 거부는 즉시 오므로 기한을 기다리지 않는다.
         assertThat(rateLimit.value()).isInstanceOf(UserMessageRateLimiter.Result.Bypassed.class);
-        assertThat(gateDecision.value()).isInstanceOf(OpenAiRequestGate.Decision.PermittedUncounted.class);
         assertThat(rateLimit.elapsed())
                 .as("연결 거부일 때 폭주 가드가 통과 판정을 내리기까지 (실측 %dms)", rateLimit.elapsed().toMillis())
-                .isLessThan(FAIL_OPEN_LOWER_BOUND);
-        assertThat(gateDecision.elapsed())
-                .as("연결 거부일 때 전역 게이트가 통과 판정을 내리기까지 (실측 %dms)", gateDecision.elapsed().toMillis())
                 .isLessThan(FAIL_OPEN_LOWER_BOUND);
     }
 
@@ -168,22 +139,6 @@ class RedisFailOpenTimingTest {
                 new AiChatProperties.Streaming(20, 10, 30, 60, 10, 10, 256, 240)
         );
         return new UserMessageRateLimiterRedisAdapter(template, properties);
-    }
-
-    private OpenAiRequestGate gate(StringRedisTemplate template) {
-        Map<String, OpenAiProjectProperties.ModelLimit> limits =
-                Map.of("gpt-4o-mini", new OpenAiProjectProperties.ModelLimit(9000, 180000L));
-        OpenAiProjectProperties properties = new OpenAiProjectProperties(
-                Map.of(
-                        OpenAiProject.CHAT, new OpenAiProjectProperties.Project("chat-key", limits),
-                        OpenAiProject.MODERATION, new OpenAiProjectProperties.Project("moderation-key", Map.of()),
-                        OpenAiProject.SUMMARY, new OpenAiProjectProperties.Project("summary-key", limits),
-                        OpenAiProject.CONTEXT_SUMMARY, new OpenAiProjectProperties.Project("context-summary-key", limits),
-                        OpenAiProject.TITLE, new OpenAiProjectProperties.Project("title-key", limits)
-                ),
-                new OpenAiProjectProperties.Gate(10, 1000, 300)
-        );
-        return new OpenAiRequestGate(template, properties);
     }
 
     /** 운영이 실제로 쓰는 기한({@code application.yml})을 그대로 걸어 조립한다. */

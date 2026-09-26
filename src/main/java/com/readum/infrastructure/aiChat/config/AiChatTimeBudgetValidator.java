@@ -2,7 +2,6 @@ package com.readum.infrastructure.aiChat.config;
 
 import com.readum.domain.aiChat.config.AiChatProperties;
 import com.readum.infrastructure.ai.openai.OpenAiHttpClientConfig;
-import com.readum.infrastructure.ai.openai.ratelimit.OpenAiProjectProperties;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -20,13 +19,12 @@ import java.time.Duration;
  * 안에 끝나거나 어느 구간에서든 명시적으로 실패해야 한다. 그런데 구간별 상한은 서로 다른 곳에 흩어져 있다 —
  * 채팅 기한은 {@code ai-chat.streaming}, moderation 의 HTTP 상한은 {@link OpenAiHttpClientConfig},
  * DB 연결을 빌리는 상한은 {@code spring.datasource.hikari.connection-timeout},
- * Redis 명령 기한은 {@code spring.data.redis.timeout},
- * 채팅이 전역 게이트 버킷 자리를 기다려 주는 상한은 {@code openai.gate.chat-max-wait-millis} 이다.
+ * Redis 명령 기한은 {@code spring.data.redis.timeout} 이다.
  * 한 곳만 바꾸면 "정상으로 끝날 수 있는 최장 시간 > 만료" 가 <b>조용히</b> 생겨, 정상 처리 중인 요청을
  * 미정산 예약 반환이 가로채 환불한다. 그 어긋남을 첫 기동에서 드러내는 것이 이 빈의 일이다.
  *
- * <p>이 빈이 <b>infrastructure</b> 에 있는 이유: 대조할 값 다섯 중 넷(moderation HTTP 상한 · Hikari 연결 획득
- * 상한 · Redis 명령 기한 · 채팅 게이트 대기 상한)이 인프라 쪽 설정이라, 도메인이 인프라를 거꾸로 참조하지
+ * <p>이 빈이 <b>infrastructure</b> 에 있는 이유: 대조할 값 넷 중 셋(moderation HTTP 상한 · Hikari 연결 획득
+ * 상한 · Redis 명령 기한)이 인프라 쪽 설정이라, 도메인이 인프라를 거꾸로 참조하지
  * 않게 하려면 대조가 이쪽에 있어야 한다.
  */
 @Slf4j
@@ -34,48 +32,42 @@ import java.time.Duration;
 public class AiChatTimeBudgetValidator {
 
     /**
-     * 선행 처리가 Redis 를 부르는 횟수 — 폭주 가드 1회 + 전역 게이트 1회. 매달린 Redis 앞에서 각각 명령 기한만큼 쓴다.
+     * 선행 처리가 Redis 를 부르는 횟수. 매달린 Redis 앞에서 각각 명령 기한만큼 쓴다.
      *
-     * <p>채팅이 버킷 자리를 기다렸다 게이트를 다시 두드리면 Redis 호출이 더 늘 수 있지만, 그 호출들의 Redis 시간은
-     * 대기 상한에서 차감된다(가드가 벽시계 마감으로 잰다). 마감 직전에 시작한 마지막 호출 1회만 명령 기한만큼
-     * 넘칠 수 있어, 여기서 세는 횟수는 ×2 로 충분하다.
+     * <p>한 턴의 선행 처리에서 실제로 오가는 왕복을 하나씩 센 값이다. 지금은 <b>사용자 폭주 가드 1회</b>뿐이다 —
+     * 공급자 가용 확인과 입력 검토 허가는 서버 안 차단기(Resilience4j)가 메모리에서 답하므로 Redis 를 부르지 않는다.
+     * 생성 기록(저널)은 선행 처리가 아니라 생성 단계에서 오가고, 그 쓰기도 전달 스레드가 맡아 이 여유와 무관하다.
      */
-    static final int PREPARE_REDIS_CALL_COUNT = 2;
+    static final int PREPARE_REDIS_CALL_COUNT = 1;
 
     private final AiChatProperties.Streaming streaming;
     private final Duration moderationHttpCeiling;
     private final Duration connectionAcquireTimeout;
     private final Duration redisCommandTimeout;
 
-    /** 채팅이 전역 게이트 버킷 자리를 기다려 주는 상한 — 선행 처리 안에서 쓰는 시간이라 선행 처리 여유와 대조한다. */
-    private final Duration chatGateMaxWait;
-
     public AiChatTimeBudgetValidator(
             AiChatProperties aiChatProperties,
             DataSource dataSource,
-            DataRedisProperties dataRedisProperties,
-            OpenAiProjectProperties openAiProjectProperties
+            DataRedisProperties dataRedisProperties
     ) {
         this.streaming = aiChatProperties.streaming();
         this.moderationHttpCeiling = OpenAiHttpClientConfig.moderationHttpCeiling();
         this.connectionAcquireTimeout = connectionAcquireTimeout(dataSource);
         this.redisCommandTimeout = dataRedisProperties.getTimeout();
-        this.chatGateMaxWait = openAiProjectProperties.gate().chatMaxWait();
     }
 
     @PostConstruct
     void validateTimeBudget() {
-        verify(streaming, moderationHttpCeiling, connectionAcquireTimeout, redisCommandTimeout, chatGateMaxWait);
+        verify(streaming, moderationHttpCeiling, connectionAcquireTimeout, redisCommandTimeout);
         log.info("[AI 채팅] 한 턴의 시간 예산 {}초 = 선행 여유 {} + 생성 전체 기한 {} + 후처리 여유 {} "
-                        + "(moderation HTTP 상한 {}초, DB 연결 획득 상한 {}, Redis 명령 기한 {}, 채팅 게이트 대기 상한 {}ms)",
+                        + "(moderation HTTP 상한 {}초, DB 연결 획득 상한 {}, Redis 명령 기한 {})",
                 streaming.turnRequestExpiryTimeout().toSeconds(),
                 streaming.prepareAllowanceSeconds(),
                 streaming.generationTotalTimeoutSeconds(),
                 streaming.postProcessingAllowanceSeconds(),
                 moderationHttpCeiling.toSeconds(),
                 connectionAcquireTimeout == null ? "읽지 못함" : connectionAcquireTimeout.toMillis() + "ms",
-                redisCommandTimeout == null ? "읽지 못함" : redisCommandTimeout.toMillis() + "ms",
-                chatGateMaxWait.toMillis());
+                redisCommandTimeout == null ? "읽지 못함" : redisCommandTimeout.toMillis() + "ms");
     }
 
     /**
@@ -83,15 +75,12 @@ public class AiChatTimeBudgetValidator {
      *
      * @param connectionAcquireTimeout Hikari 연결 획득 상한. 읽지 못했으면 {@code null} — 그 조건만 건너뛴다
      * @param redisCommandTimeout      Redis 명령 기한. 설정하지 않았으면 {@code null} — 그 조건만 건너뛴다
-     * @param chatGateMaxWait          채팅이 전역 게이트 버킷 자리를 기다려 주는 상한
-     *                                 ({@code openai.gate.chat-max-wait-millis})
      */
     static void verify(
             AiChatProperties.Streaming streaming,
             Duration moderationHttpCeiling,
             Duration connectionAcquireTimeout,
-            Duration redisCommandTimeout,
-            Duration chatGateMaxWait
+            Duration redisCommandTimeout
     ) {
         // 1) 무응답 기한이 생성 전체 기한보다 길면 영영 발동하지 않는다 — 상한 구실을 못 한다.
         if (streaming.generationIdleTimeoutSeconds() > streaming.generationTotalTimeoutSeconds()) {
@@ -117,9 +106,9 @@ public class AiChatTimeBudgetValidator {
                             .formatted(moderationCeilingSeconds, streaming.prepareAllowanceSeconds()));
         }
 
-        // 4) 선행 처리가 쓰는 최악 시간 — moderation 상한에 Redis 호출 둘의 명령 기한과 채팅 게이트 대기 상한이 더 붙는다.
-        //    매달린 Redis 앞에서 검사 없이 통과(fail-open)는 예외를 받은 뒤에야 일어나므로, 명령 기한이 곧 통과까지 걸리는 시간이다.
-        //    채팅은 버킷 자리가 없으면 그 상한만큼 기다렸다 진행하므로 그 시간도 선행 처리 안에서 쓰인다.
+        // 4) 선행 처리가 쓰는 최악 시간 — moderation 상한에 Redis 호출의 명령 기한이 더 붙는다.
+        //    매달린 Redis 앞에서 검사 없이 통과(fail-open)하는 것은 예외를 받은 뒤에야 일어나므로,
+        //    명령 기한이 곧 통과까지 걸리는 시간이다.
         //    이 합이 선행 처리 여유를 다 쓰면 정상 처리 중인 요청을 미정산 예약 반환이 가로챈다.
         if (redisCommandTimeout == null) {
             log.warn("[AI 채팅] Redis 명령 기한을 읽지 못해 선행 처리 여유와 대조하지 못했습니다 — "
@@ -128,16 +117,14 @@ public class AiChatTimeBudgetValidator {
         } else {
             long prepareRedisMillis = redisCommandTimeout.toMillis() * PREPARE_REDIS_CALL_COUNT;
             long prepareAllowanceMillis = streaming.prepareAllowanceSeconds() * 1_000L;
-            long prepareWorstCaseMillis =
-                    prepareRedisMillis + moderationHttpCeiling.toMillis() + chatGateMaxWait.toMillis();
+            long prepareWorstCaseMillis = prepareRedisMillis + moderationHttpCeiling.toMillis();
             if (prepareWorstCaseMillis >= prepareAllowanceMillis) {
                 throw new IllegalStateException(
-                        ("선행 처리의 Redis 몫과 moderation 상한과 채팅 게이트 대기 상한이 선행 처리 여유 안에 들지 않습니다: "
+                        ("선행 처리의 Redis 몫과 moderation 상한이 선행 처리 여유 안에 들지 않습니다: "
                                 + "spring.data.redis.timeout(%dms) × Redis 호출 %d회 + moderation 연결+읽기(%dms) "
-                                + "+ chat-max-wait-millis(%dms) = %dms "
-                                + "< prepare-allowance-seconds(%d) × 1000 = %dms 여야 합니다.")
+                                + "= %dms < prepare-allowance-seconds(%d) × 1000 = %dms 여야 합니다.")
                                 .formatted(redisCommandTimeout.toMillis(), PREPARE_REDIS_CALL_COUNT,
-                                        moderationHttpCeiling.toMillis(), chatGateMaxWait.toMillis(),
+                                        moderationHttpCeiling.toMillis(),
                                         prepareWorstCaseMillis,
                                         streaming.prepareAllowanceSeconds(), prepareAllowanceMillis));
             }

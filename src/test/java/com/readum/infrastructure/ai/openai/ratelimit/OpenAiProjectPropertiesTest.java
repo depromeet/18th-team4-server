@@ -1,6 +1,7 @@
 package com.readum.infrastructure.ai.openai.ratelimit;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -15,20 +16,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class OpenAiProjectPropertiesTest {
 
-    private static final String MODEL = "gpt-4o-mini";
-
-    private static final Map<String, OpenAiProjectProperties.ModelLimit> LIMITS =
-            Map.of(MODEL, new OpenAiProjectProperties.ModelLimit(9000, 180000L));
-
-    private static final OpenAiProjectProperties.Gate GATE =
-            new OpenAiProjectProperties.Gate(10, 1000, 300);
-
     @Test
     void 설정되지_않은_프로젝트가_있으면_기동을_막는다() {
         Map<OpenAiProject, OpenAiProjectProperties.Project> onlyChat =
-                Map.of(OpenAiProject.CHAT, project(LIMITS));
+                Map.of(OpenAiProject.CHAT, new OpenAiProjectProperties.Project("test-key"));
 
-        assertThatThrownBy(() -> new OpenAiProjectProperties(onlyChat, GATE))
+        assertThatThrownBy(() -> new OpenAiProjectProperties(onlyChat))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("설정되지 않은 프로젝트")
                 .hasMessageContaining("MODERATION")
@@ -38,39 +31,44 @@ class OpenAiProjectPropertiesTest {
     }
 
     @Test
-    void 게이트를_거치는_프로젝트에_모델_한도가_없으면_기동을_막는다() {
-        // 한도가 비면 그 프로젝트의 호출은 게이트를 검사 없이 통과한다 — 조용히 새지 않게 기동에서 막는다.
-        Map<OpenAiProject, OpenAiProjectProperties.Project> projects = allProjects();
-        projects.put(OpenAiProject.TITLE, project(null));
+    void 다섯_프로젝트의_키가_모두_있으면_생성된다() {
+        assertThatCode(() -> new OpenAiProjectProperties(allProjects())).doesNotThrowAnyException();
 
-        assertThatThrownBy(() -> new OpenAiProjectProperties(projects, GATE))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("모델 한도(models)")
-                .hasMessageContaining("TITLE");
+        OpenAiProjectProperties properties = new OpenAiProjectProperties(allProjects());
+        assertThat(properties.apiKeyOf(OpenAiProject.MODERATION)).isEqualTo("test-key");
     }
 
     @Test
-    void moderation_은_모델_한도_없이_키만_있어도_생성된다() {
-        Map<OpenAiProject, OpenAiProjectProperties.Project> projects = allProjects();
-        projects.put(OpenAiProject.MODERATION, project(null));
-
-        assertThatCode(() -> new OpenAiProjectProperties(projects, GATE)).doesNotThrowAnyException();
-
-        OpenAiProjectProperties properties = new OpenAiProjectProperties(projects, GATE);
-        assertThat(properties.limitOf(OpenAiProject.MODERATION, "x")).isNull();
+    void 기능마다_프로젝트와_보호_단위가_1대1_로_맞는다() {
+        // 어긋나면 호출은 A 프로젝트로 나가고 장애 상태는 B 기능에 쌓인다.
+        for (OpenAiProject project : OpenAiProject.values()) {
+            assertThat(OpenAiProject.of(project.capability())).isEqualTo(project);
+        }
     }
 
-    /** 다섯 프로젝트 모두 한도를 갖춘 정상 설정 — 각 테스트가 한 항목만 어긋나게 바꿔 쓴다. */
+    @Test
+    void 우리가_추정으로_미리_거르던_전역_게이트는_남아_있지_않다() {
+        // 추정 한도로 미리 거르는 방식은 걷어냈다. 되살아나면 "실제 오류로 판단한다" 는 지금 설계와 두 겹이 되고,
+        // 어느 쪽이 막았는지 알 수 없는 상태가 다시 생긴다. 흔적이 남지 않았는지 여기서 못 박는다.
+        assertThat(new ClassPathResource("redis/openai-token-bucket.lua").exists())
+                .as("토큰 버킷 스크립트")
+                .isFalse();
+        assertThatThrownBy(() -> Class.forName(
+                "com.readum.infrastructure.ai.openai.ratelimit.OpenAiRequestGate"))
+                .isInstanceOf(ClassNotFoundException.class);
+        assertThatThrownBy(() -> Class.forName(
+                "com.readum.infrastructure.ai.openai.ratelimit.OpenAiRateLimitGuard"))
+                .isInstanceOf(ClassNotFoundException.class);
+        assertThatThrownBy(() -> Class.forName("com.readum.domain.summary.out.AiQuotaCooldown"))
+                .as("게이트 쿨다운을 도메인에 노출하던 포트")
+                .isInstanceOf(ClassNotFoundException.class);
+    }
+
     private static Map<OpenAiProject, OpenAiProjectProperties.Project> allProjects() {
         Map<OpenAiProject, OpenAiProjectProperties.Project> projects = new HashMap<>();
         for (OpenAiProject project : OpenAiProject.values()) {
-            projects.put(project, project(LIMITS));
+            projects.put(project, new OpenAiProjectProperties.Project("test-key"));
         }
         return projects;
-    }
-
-    private static OpenAiProjectProperties.Project project(
-            Map<String, OpenAiProjectProperties.ModelLimit> models) {
-        return new OpenAiProjectProperties.Project("test-key", models);
     }
 }

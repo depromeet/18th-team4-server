@@ -180,6 +180,31 @@ class OpenAiInputModerationClientImplTest {
         impl.validateAndLogConfig();   // 예외 없이 통과해야 한다
     }
 
+    @Test
+    void 걸렸다고_하는데_카테고리_정보가_없으면_통과시키지_않는다() {
+        // 통과시키면 "걸린 입력" 이 그대로 지나간다 — 매핑되지 않은 카테고리와 같은 취지로 차단 쪽으로 보낸다.
+        ModerationModel model = mock(ModerationModel.class);
+        given(model.call(any())).willReturn(flagged(null));
+
+        InputModerationResult result = adapter(model).check("본문", BOOK_CONTEXT);
+
+        assertThat(result.status()).isEqualTo(InputModerationResult.Status.BLOCKED);
+    }
+
+    @Test
+    void 판정이_실리지_않은_응답은_통과가_아니라_장애로_본다() {
+        ModerationModel model = mock(ModerationModel.class);
+        given(model.call(any())).willReturn(new ModerationResponse(
+                new org.springframework.ai.moderation.Generation(Moderation.builder()
+                        .id("modr-test").model("omni-moderation-latest").results(List.of()).build())));
+
+        InputModerationResult result = adapter(model).check("본문", BOOK_CONTEXT);
+
+        assertThat(result.status())
+                .as("응답 모양이 깨진 것은 통과가 아니라 검사 불가다")
+                .isEqualTo(InputModerationResult.Status.UNAVAILABLE);
+    }
+
     private static ModerationResponse flagged(Categories categories) {
         ModerationResult result = ModerationResult.builder()
                 .flagged(true)

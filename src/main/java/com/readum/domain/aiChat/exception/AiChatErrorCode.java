@@ -17,8 +17,10 @@ public enum AiChatErrorCode implements ErrorCode {
     USER_TOKEN_BUDGET_EXCEEDED("대화 사용량이 많아 지금은 이용할 수 없습니다. 잠시 후 다시 시도해 주세요."),
     GUARDRAIL_BLOCKED_INPUT("요청을 처리할 수 없습니다. 독서와 관련된 질문으로 다시 요청해 주세요."),
     GUARDRAIL_MODERATION_UNAVAILABLE("일시적으로 메시지를 처리할 수 없습니다. 잠시 후 다시 시도해 주세요."),
-    AI_RATE_LIMIT_BURST("AI 호출이 일시적으로 한도에 도달했습니다. 잠시 후 다시 시도해 주세요."),
     AI_QUOTA_EXHAUSTED("AI 사용 한도가 소진되었습니다. 운영자에게 문의해 주세요."),
+    AI_PROVIDER_RATE_LIMITED("AI 공급자가 호출 한도 초과로 응답을 거절했습니다. 잠시 후 다시 시도해 주세요."),
+    AI_PROVIDER_AUTH_ERROR("AI 공급자 인증 설정에 문제가 있어 요청을 처리할 수 없습니다."),
+    AI_PROVIDER_UNAVAILABLE("AI 기능이 일시적으로 중단되어 요청을 받지 않습니다. 잠시 후 다시 시도해 주세요."),
     AI_PROVIDER_ERROR("AI 응답 처리에 실패했습니다."),
     AI_PROVIDER_TRANSIENT("일시적인 AI 응답 오류입니다. 잠시 후 다시 시도해 주세요."),
     AI_STREAM_INTERRUPTED("AI 응답이 중단되었습니다."),
@@ -26,6 +28,7 @@ public enum AiChatErrorCode implements ErrorCode {
     AI_CHAT_CAPACITY_EXCEEDED("지금은 대화 요청이 많아 처리할 수 없습니다. 잠시 후 다시 시도해 주세요."),
     SUMMARY_NOT_FOUND("아직 생성된 감상문이 없습니다."),
     SUMMARY_IN_PROGRESS("감상문을 생성 중입니다. 잠시 후 다시 시도해 주세요."),
+    SUMMARY_WAIT_EXPIRED("감상문 생성이 허용 대기 시간을 넘겨 종료되었습니다. 다시 요청해 주세요."),
     SESSION_ALREADY_SUMMARIZED("이미 감상문이 생성되어 종료된 세션입니다.");
 
     private final String message;
