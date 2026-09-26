@@ -9,6 +9,7 @@ import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.domain.summary.config.SummaryJobProperties;
 import com.readum.domain.summary.dto.SummaryGenerationContext;
 import com.readum.domain.summary.exception.SummaryErrorCode;
+import com.readum.domain.summary.out.ShutdownSignal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -47,6 +48,7 @@ public class SummaryGenerationWorker {
     private final SummaryJobLifecycleService lifecycleService;
     private final AiSummaryClient aiSummaryClient;
     private final AiAvailability aiAvailability;
+    private final ShutdownSignal shutdownSignal;
     private final SummaryTokenEstimator tokenEstimator;
     private final SummaryJobProperties properties;
 
@@ -59,6 +61,10 @@ public class SummaryGenerationWorker {
 
     /** 작업 하나를 시도. 처리했으면 true, 없거나 차단 중이면 false. */
     public boolean processOne() {
+        if (shutdownSignal.isShuttingDown()) {
+            // 종료 중에는 새 작업을 선점하지 않는다. 이미 진행 중인 작업은 끝까지 마친다.
+            return false;
+        }
         if (!aiAvailability.canProcess(CAPABILITY)) {
             // 공급자가 막혀 있거나 상태를 확인할 수 없다 — 선점하지 않는다(헛선점·시도 횟수 소진 방지).
             return false;

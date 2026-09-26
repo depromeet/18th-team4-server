@@ -11,6 +11,7 @@ import com.readum.domain.aiChat.out.AiContextSummaryClient;
 import com.readum.domain.aiChat.out.TokenCounter;
 import com.readum.domain.exception.TooManyRequestsException;
 import com.readum.model.aiChat.entity.AiChatMessage;
+import com.readum.domain.summary.out.ShutdownSignal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.retry.NonTransientAiException;
@@ -45,6 +46,7 @@ public class ContextSummaryWorker {
     private final ContextSummaryJobLifecycleService lifecycleService;
     private final AiContextSummaryClient aiContextSummaryClient;
     private final AiAvailability aiAvailability;
+    private final ShutdownSignal shutdownSignal;
     private final TokenCounter tokenCounter;
     private final ContextSummaryJobProperties jobProperties;
     private final AiChatProperties aiChatProperties;
@@ -58,6 +60,10 @@ public class ContextSummaryWorker {
 
     /** 작업 하나를 시도. 처리했으면 true, 없거나 차단 중이면 false. */
     public boolean processOne() {
+        if (shutdownSignal.isShuttingDown()) {
+            // 종료 중에는 새 작업을 선점하지 않는다. 이미 진행 중인 작업은 끝까지 마친다.
+            return false;
+        }
         if (!aiAvailability.canProcess(CAPABILITY)) {
             return false;
         }

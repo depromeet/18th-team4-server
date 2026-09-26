@@ -12,6 +12,7 @@ import com.readum.domain.aiChat.exception.AiDependencyUnavailableException;
 import com.readum.domain.aiChat.out.AiAvailability;
 import com.readum.model.aiChat.entity.AiChatMessage;
 import com.readum.model.aiChat.entity.AiChatMessageFixture;
+import com.readum.domain.summary.out.ShutdownSignal;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -42,6 +43,8 @@ class ContextSummaryWorkerTest {
     private AiContextSummaryClient aiContextSummaryClient;
     @Mock
     private AiAvailability aiAvailability;
+    @Mock
+    private ShutdownSignal shutdownSignal;
 
     // 결정적 test double: 토큰 = 글자 수(null 은 0).
     private final TokenCounter tokenCounter = text -> text == null ? 0 : text.length();
@@ -57,7 +60,7 @@ class ContextSummaryWorkerTest {
 
     private ContextSummaryWorker worker() {
         return new ContextSummaryWorker(
-                lifecycleService, aiContextSummaryClient, aiAvailability,
+                lifecycleService, aiContextSummaryClient, aiAvailability, shutdownSignal,
                 tokenCounter, jobProperties, aiChatProperties);
     }
 
@@ -128,5 +131,32 @@ class ContextSummaryWorkerTest {
         verify(lifecycleService, times(1)).recordSuccess(eq(JOB_ID), anyString(), any(), any());
         verify(lifecycleService, times(2)).claimOne(anyString());
         verify(lifecycleService, times(1)).hasUnfinishedJob();
+    }
+
+    @Test
+    void 종료_중이면_선점하지_않고_종료한다() {
+        given(shutdownSignal.isShuttingDown()).willReturn(true);
+
+        boolean processed = worker().processOne();
+
+        org.assertj.core.api.Assertions.assertThat(processed).isFalse();
+        verify(lifecycleService, times(0)).claimOne(anyString());
+    }
+
+    @Test
+    void 처리_도중_종료_신호가_오면_손에_든_작업은_마치고_새로_선점하지_않는다() {
+        // 첫 선점 직전엔 종료 중이 아니고, 그 작업을 처리하는 사이에 종료 신호가 도착한 상황.
+        // 이미 집은 작업은 끝까지 마치고(recordSuccess 1회), 다음 작업은 집지 않아야 한다(claimOne 1회).
+        given(shutdownSignal.isShuttingDown()).willReturn(false, true);
+        given(aiAvailability.canProcess(AiAvailability.Capability.CONTEXT_SUMMARY)).willReturn(true);
+        given(lifecycleService.claimOne(anyString())).willReturn(JOB_ID);
+        given(lifecycleService.prepareGeneration(eq(JOB_ID), anyString())).willReturn(generationContext());
+        given(aiContextSummaryClient.generate(any(), any()))
+                .willReturn(new ContextSummaryResult("[누적 요약]"));
+
+        worker().processUntilEmpty();
+
+        verify(lifecycleService, times(1)).claimOne(anyString());
+        verify(lifecycleService, times(1)).recordSuccess(eq(JOB_ID), anyString(), any(), any());
     }
 }
